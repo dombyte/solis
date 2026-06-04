@@ -285,7 +285,7 @@ Both mount `./data` for persistence and `./config.yaml` for configuration.
 ---
 services:
   app:
-    image: ghcr.io/dombyte/solis-monitor:latest
+    image: ghcr.io/dombyte/solis:latest
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
