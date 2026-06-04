@@ -2,6 +2,15 @@
 
 Monitoring solution for Solis inverters using Modbus TCP/RTU. Polls register data, stores it in SQLite, and exposes it via a web API, frontend dashboard and Prometheus metrics.
 
+
+
+<img width="1262" height="1054" alt="solism3" src="https://github.com/user-attachments/assets/a74a16b3-c779-455b-b743-2af0bc05bb2a" />
+<img width="1270" height="1125" alt="solism1" src="https://github.com/user-attachments/assets/185dc03d-5e54-4578-a575-4dc484b25429" />
+<img width="1259" height="1065" alt="solism2" src="https://github.com/user-attachments/assets/e9b195fd-97c1-4443-9fc1-1d6cb3ea2331" />
+
+
+
+
 ## Configuration
 
 Copy `config.yaml` and adjust settings. All options can be overridden via environment variables using the `SOLIS_` prefix (e.g., `SOLIS_MODBUS_HOST=192.168.1.200`).
