@@ -1,6 +1,6 @@
 version: 2
 
-project_name: solis-monitor
+project_name: solis
 before:
   hooks:
     - go mod tidy
