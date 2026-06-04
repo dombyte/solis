@@ -1,7 +1,7 @@
 ---
 services:
   app:
-    image: ghcr.io/dombyte/solis:v0.7.0
+    image: ghcr.io/dombyte/solis:latest
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
