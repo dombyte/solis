@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": [
+    "gomod",
+    "dockerfile",
+    "docker-compose",
+    "github-actions"
+  ],
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":enableVulnerabilityAlertsWithLabel('security')",
+    ":preserveSemverRanges",
+    ":rebaseStalePrs",
+    "group:recommended"
+  ],
+  "labels": ["renovate"],
+  "ignoreUnstable": true,
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "Go dependencies"
+    },
+    {
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["indirect"],
+      "enabled": true
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "groupName": "Docker images"
+    },
+    {
+      "matchManagers": ["docker-compose"],
+      "groupName": "Docker Compose"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["security"]
+  },
+  "separateMinorPatch": true,
+  "stopUpdatingLabel": "renovate/stop_updating"
+}

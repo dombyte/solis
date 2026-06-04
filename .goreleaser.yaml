@@ -1,0 +1,105 @@
+version: 2
+
+project_name: solis-monitor
+before:
+  hooks:
+    - go mod tidy
+    - go fmt ./...
+
+builds:
+  - id: solis-multi-arch
+    main: ./cmd/main.go
+    binary: solis
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    goamd64:
+      - v3
+    goarm:
+      - 7
+    goarm64:
+      - v8.0
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - "-s -w"
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: ["tar.gz"]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+changelog:
+  sort: asc
+  use: github
+  format: |
+    {{ .Message -}}
+        {{- if .Logins }} by {{ .Logins | englishJoin }}{{- end -}}
+        {{- if .SHA }}
+          {{- $sha := split .SHA "" -}}
+          {{- if .Logins }} in {{ else }}in{{ end }}[#{{ index $sha 0 }}{{ index $sha 1 }}{{ index $sha 2 }}{{ index $sha 3 }}{{ index $sha 4 }}{{ index $sha 5 }}{{ index $sha 6 }}]({{ .GitURL }}/commit/{{ .SHA }})
+        {{- end }}
+  filters:
+    exclude:
+      - "^test:"
+      - "^chore:"
+      - "Merge branch"
+      - "Merge pull request"
+      - "^test:"
+      - "^rebase:"
+
+release:
+  name_template: "v{{.Version}}"
+  prerelease: auto
+  header: |
+    {{- if .Prerelease }}
+    > [!WARNING]
+    > **This is a pre-release version. Use with caution and report any issues you encounter.**
+    {{ else }}
+    {{.ProjectName}} v{{.Version}} is available!
+    {{- end }}
+
+  footer: |
+    {{- if and .PreviousTag .Tag -}}
+    **Full Changelog**: [{{ .PreviousTag }}...{{ .Tag }}]({{ .GitURL }}/compare/{{ .PreviousTag }}...{{ .Tag }})
+    {{- end -}}
+
+    {{if .Env.GITHUB_REPOSITORY}}
+    ## Docker Images
+      - `ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:v{{ .Version }}`
+      {{if not .Prerelease}}
+      - `ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest`
+      {{- end -}}
+    {{- end -}}
+
+dockers_v2:
+  - id: multi-arch
+    ids:
+      - solis-multi-arch
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}"
+    tags:
+      - "v{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+    dockerfile: Dockerfile.goreleaser
+    extra_files:
+      - frontend/
+    labels:
+      "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.name": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    annotations:
+      "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
+
+checksum:
+  name_template: "checksums.txt"

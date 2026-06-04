@@ -1,0 +1,61 @@
+# Solis-Monitor Configuration
+# Environment variables can override any setting using SOLIS_ prefix
+# Example: SOLIS_MODBUS_HOST=192.168.1.200
+
+app:
+  debug: WARN
+  port: 8080
+  timeout: 30s
+
+poller:
+  # Base interval between poll cycles
+  interval: 5s
+  # Retry attempts per block if read fails
+  block_attempts: 3
+  # Delay between retry attempts for same block
+  block_retry_delay: 1s
+  # Delay between successive block reads (0 = immediate)
+  block_interval: 0s
+  # Maximum duration for full poll cycle before aborting
+  poll_timeout: 15s
+
+modbus:
+  # Connection type: tcp, rtu, or rtu_over_tcp
+  type: tcp
+  host: 192.168.2.151
+  port: 502
+  timeout: 5s
+  unit_id: 1
+  # RTU-specific settings (only used if type = rtu or rtu_over_tcp)
+  serial_port: /dev/ttyUSB0
+  baud_rate: 9600
+  data_bits: 8
+  stop_bits: 1
+  parity: none
+
+storage:
+  path: ./data/solis.db
+  # Retention period for daily energy values
+  daily_retention: 87600h # 10 year
+  monthly_retention: 87600h # 10 year
+  yearly_retention: 87600h # 10 year
+  # Retention period for error/fault data
+  error_retention: 720h # 30 days
+  wal_mode: true
+  synchronous: NORMAL
+  temp_store: MEMORY
+
+metrics:
+  # Enable Prometheus metrics endpoint
+  enabled: true
+
+registers:
+  # Disable specific registers by key (optional)
+  # Disabled registers will not be polled, stored, cached, or returned by the API
+  disabled_keys:
+    # - meter_total_active_power
+  # Example: disable unknown registers
+  # disabled_keys:
+  #   - unknown_33020
+  #   - unknown_33021
+  #   - battery_fault_status_03_bms

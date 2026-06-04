@@ -1,0 +1,455 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "contact": {}
+    },
+    "paths": {
+        "/api/data/{key}": {
+            "get": {
+                "description": "Returns the current value for a specific register key. Historical queries with start/end parameters are no longer supported and will return 501 Not Implemented.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "data"
+                ],
+                "summary": "Get register data",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Register key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/history/daily/{key}": {
+            "get": {
+                "description": "Returns daily energy values for specific registers.",
+                "tags": [
+                    "daily"
+                ],
+                "summary": "Get daily values",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Register key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (YYYY-MM-DD format)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (YYYY-MM-DD format)",
+                        "name": "end",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/storage.DailyDataPoint"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/history/monthly/{key}": {
+            "get": {
+                "description": "Returns monthly energy values for specific registers.",
+                "tags": [
+                    "monthly"
+                ],
+                "summary": "Get monthly values",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Register key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start month (YYYY-MM format)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End month (YYYY-MM format)",
+                        "name": "end",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/storage.MonthlyDataPoint"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/history/total/{key}": {
+            "get": {
+                "description": "Returns total (lifetime) energy values for specific registers.",
+                "tags": [
+                    "total"
+                ],
+                "summary": "Get total values",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Register key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/storage.TotalDataPoint"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/history/yearly/{key}": {
+            "get": {
+                "description": "Returns yearly energy values for specific registers.",
+                "tags": [
+                    "yearly"
+                ],
+                "summary": "Get yearly values",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Register key",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start year (YYYY format)",
+                        "name": "start",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End year (YYYY format)",
+                        "name": "end",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/storage.YearlyDataPoint"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/keys": {
+            "get": {
+                "description": "Returns a list of all available register keys with their descriptions, units, and metadata. Includes daily, monthly, yearly, and total energy registers. Does not include actual values.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "keys"
+                ],
+                "summary": "Get all register keys",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handlers.RegisterInfo"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "description": "Returns the health status of the API service",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Get health status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/metrics": {
+            "get": {
+                "description": "Returns Prometheus metrics for all register values. Only available when metrics are enabled in configuration.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "metrics"
+                ],
+                "summary": "Get Prometheus metrics",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Metrics not enabled",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "handlers.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "description": "Code is the HTTP status code",
+                    "type": "integer"
+                },
+                "error": {
+                    "description": "Error is the HTTP status text",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "Message is the detailed error message",
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.RegisterInfo": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "description": "Address is the Modbus register address",
+                    "type": "integer"
+                },
+                "data_type": {
+                    "description": "DataType is the type of value stored in this register",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description combines name and unit for display",
+                    "type": "string"
+                },
+                "key": {
+                    "description": "Key is the unique identifier for this register",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name is the human-readable name of the register",
+                    "type": "string"
+                },
+                "stability": {
+                    "description": "Stability indicates how often this value changes",
+                    "type": "string"
+                },
+                "unit": {
+                    "description": "Unit is the unit of measurement",
+                    "type": "string"
+                }
+            }
+        },
+        "storage.DailyDataPoint": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "description": "YYYY-MM-DD format",
+                    "type": "string"
+                },
+                "raw_value": {
+                    "description": "Raw value before scaling",
+                    "type": "number"
+                },
+                "value": {
+                    "description": "Decoded value (scaled)",
+                    "type": "number"
+                }
+            }
+        },
+        "storage.MonthlyDataPoint": {
+            "type": "object",
+            "properties": {
+                "month": {
+                    "description": "YYYY-MM format",
+                    "type": "string"
+                },
+                "raw_value": {
+                    "description": "Raw value before scaling",
+                    "type": "number"
+                },
+                "value": {
+                    "description": "Decoded value (scaled)",
+                    "type": "number"
+                }
+            }
+        },
+        "storage.TotalDataPoint": {
+            "type": "object",
+            "properties": {
+                "raw_value": {
+                    "description": "Raw value before scaling",
+                    "type": "number"
+                },
+                "timestamp": {
+                    "description": "When it was last updated (RFC3339 format)",
+                    "type": "string"
+                },
+                "value": {
+                    "description": "Decoded value (scaled)",
+                    "type": "number"
+                }
+            }
+        },
+        "storage.YearlyDataPoint": {
+            "type": "object",
+            "properties": {
+                "raw_value": {
+                    "description": "Raw value before scaling",
+                    "type": "number"
+                },
+                "value": {
+                    "description": "Decoded value (scaled)",
+                    "type": "number"
+                },
+                "year": {
+                    "description": "YYYY format",
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

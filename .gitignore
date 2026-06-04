@@ -1,0 +1,39 @@
+data/
+coverage.out
+coverage_modbus.out
+coverage_storage.out
+coverage.html
+server
+solis
+# Dependencies
+frontend/node_modules/
+
+# Build output
+frontend/dist/
+frontend/build/
+
+# IDE
+frontend/.idea/
+frontend/.vscode/
+frontend/*.swp
+frontend/*.swo
+frontend/*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+frontend/*.log
+frontend/npm-debug.log*
+
+# Environment
+frontend/.env
+frontend/.env.local
+frontend/.env.*.local
+
+# Test coverage
+frontend/coverage/
+
+# Cache
+frontend/.cache/

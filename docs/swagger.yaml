@@ -1,0 +1,310 @@
+definitions:
+  handlers.ErrorResponse:
+    properties:
+      code:
+        description: Code is the HTTP status code
+        type: integer
+      error:
+        description: Error is the HTTP status text
+        type: string
+      message:
+        description: Message is the detailed error message
+        type: string
+    type: object
+  handlers.RegisterInfo:
+    properties:
+      address:
+        description: Address is the Modbus register address
+        type: integer
+      data_type:
+        description: DataType is the type of value stored in this register
+        type: string
+      description:
+        description: Description combines name and unit for display
+        type: string
+      key:
+        description: Key is the unique identifier for this register
+        type: string
+      name:
+        description: Name is the human-readable name of the register
+        type: string
+      stability:
+        description: Stability indicates how often this value changes
+        type: string
+      unit:
+        description: Unit is the unit of measurement
+        type: string
+    type: object
+  storage.DailyDataPoint:
+    properties:
+      date:
+        description: YYYY-MM-DD format
+        type: string
+      raw_value:
+        description: Raw value before scaling
+        type: number
+      value:
+        description: Decoded value (scaled)
+        type: number
+    type: object
+  storage.MonthlyDataPoint:
+    properties:
+      month:
+        description: YYYY-MM format
+        type: string
+      raw_value:
+        description: Raw value before scaling
+        type: number
+      value:
+        description: Decoded value (scaled)
+        type: number
+    type: object
+  storage.TotalDataPoint:
+    properties:
+      raw_value:
+        description: Raw value before scaling
+        type: number
+      timestamp:
+        description: When it was last updated (RFC3339 format)
+        type: string
+      value:
+        description: Decoded value (scaled)
+        type: number
+    type: object
+  storage.YearlyDataPoint:
+    properties:
+      raw_value:
+        description: Raw value before scaling
+        type: number
+      value:
+        description: Decoded value (scaled)
+        type: number
+      year:
+        description: YYYY format
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/data/{key}:
+    get:
+      consumes:
+      - application/json
+      description: Returns the current value for a specific register key. Historical
+        queries with start/end parameters are no longer supported and will return
+        501 Not Implemented.
+      parameters:
+      - description: Register key
+        in: path
+        name: key
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get register data
+      tags:
+      - data
+  /api/history/daily/{key}:
+    get:
+      description: Returns daily energy values for specific registers.
+      parameters:
+      - description: Register key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Start date (YYYY-MM-DD format)
+        in: query
+        name: start
+        type: string
+      - description: End date (YYYY-MM-DD format)
+        in: query
+        name: end
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              items:
+                $ref: '#/definitions/storage.DailyDataPoint'
+              type: array
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get daily values
+      tags:
+      - daily
+  /api/history/monthly/{key}:
+    get:
+      description: Returns monthly energy values for specific registers.
+      parameters:
+      - description: Register key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Start month (YYYY-MM format)
+        in: query
+        name: start
+        type: string
+      - description: End month (YYYY-MM format)
+        in: query
+        name: end
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              items:
+                $ref: '#/definitions/storage.MonthlyDataPoint'
+              type: array
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get monthly values
+      tags:
+      - monthly
+  /api/history/total/{key}:
+    get:
+      description: Returns total (lifetime) energy values for specific registers.
+      parameters:
+      - description: Register key
+        in: path
+        name: key
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/storage.TotalDataPoint'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get total values
+      tags:
+      - total
+  /api/history/yearly/{key}:
+    get:
+      description: Returns yearly energy values for specific registers.
+      parameters:
+      - description: Register key
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: Start year (YYYY format)
+        in: query
+        name: start
+        type: string
+      - description: End year (YYYY format)
+        in: query
+        name: end
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              items:
+                $ref: '#/definitions/storage.YearlyDataPoint'
+              type: array
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get yearly values
+      tags:
+      - yearly
+  /api/keys:
+    get:
+      consumes:
+      - application/json
+      description: Returns a list of all available register keys with their descriptions,
+        units, and metadata. Includes daily, monthly, yearly, and total energy registers.
+        Does not include actual values.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.RegisterInfo'
+            type: array
+      summary: Get all register keys
+      tags:
+      - keys
+  /health:
+    get:
+      consumes:
+      - application/json
+      description: Returns the health status of the API service
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get health status
+      tags:
+      - health
+  /metrics:
+    get:
+      description: Returns Prometheus metrics for all register values. Only available
+        when metrics are enabled in configuration.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "503":
+          description: Metrics not enabled
+          schema:
+            type: string
+      summary: Get Prometheus metrics
+      tags:
+      - metrics
+swagger: "2.0"

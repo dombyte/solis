@@ -1,0 +1,21 @@
+FROM node:26-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm install
+COPY frontend/ .
+RUN npm run build
+
+FROM alpine:latest AS builder
+RUN apk --update add ca-certificates tzdata
+
+FROM scratch
+WORKDIR /app
+ARG TARGETPLATFORM
+COPY --from=ghcr.io/tarampampam/microcheck:1 /bin/httpcheck /bin/httpcheck
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY $TARGETPLATFORM/solis /app
+COPY --from=frontend /frontend/dist /app/frontend/dist
+
+EXPOSE 8080
+ENTRYPOINT ["/app/solis"]

@@ -1,0 +1,19 @@
+---
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Europe/Berlin
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "httpcheck", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
