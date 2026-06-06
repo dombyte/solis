@@ -23,8 +23,8 @@
     },
     {
       "matchManagers": ["gomod"],
-      "matchDepTypes": ["indirect"],
-      "enabled": true
+      "matchDepTypes": ["golang"],
+      "postUpdateOptions": ["gomodTidy"]
     },
     {
       "matchManagers": ["dockerfile"],
