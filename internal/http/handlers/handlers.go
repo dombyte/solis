@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/dombyte/solis/internal/logging"
@@ -32,6 +33,7 @@ type ReadServiceInterface interface {
 	GetKeys() []string
 	GetValues(keys []string) (map[string]*solis.Value, error)
 	GetRegister(key string) (*solis.Value, error)
+	GetErrorHistory(key string, start, end time.Time) ([]*storage.ErrorDataPoint, error)
 	GetHistoricalData(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error)
 	GetDailyHistory(key string, start, end time.Time) ([]*storage.DailyDataPoint, error)
 	GetMonthlyHistory(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error)
@@ -53,6 +55,19 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 	// Code is the HTTP status code
 	Code int `json:"code"`
+}
+
+// StatusHistoryEntry represents a single decoded status entry in the history.
+type StatusHistoryEntry struct {
+	Timestamp    string      `json:"timestamp"`
+	StatusDecoded interface{} `json:"status_decoded"`
+}
+
+// StatusResponse represents the response for status register requests.
+type StatusResponse struct {
+	Key     string              `json:"key"`
+	Name    string              `json:"name"`
+	History []StatusHistoryEntry `json:"history"`
 }
 
 // WriteJSON writes a JSON response.
@@ -181,8 +196,8 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 			return
 		}
 
-		// Get the register metadata (we check if it exists but don't need it for the rest of the handler)
-		_, ok := solis.RegisterMapByKey[key]
+		// Get the register metadata to check if it's a status register
+		reg, ok := solis.RegisterMapByKey[key]
 		if !ok {
 			// This should not happen if IsRegisterEnabled is working correctly
 			WriteError(w, fmt.Sprintf("unknown register key: %s", key), http.StatusNotFound)
@@ -209,6 +224,59 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 			return
 		}
 
+		// For status registers, return history response
+		if reg.Status {
+			// Get all error history for this status register (no time filter = all data)
+			// Use min and max time to get all records
+			startTime := time.Unix(0, 0) // Unix epoch start
+			endTime := time.Unix(1<<63-1, 0) // Far future
+			errorHistory, err := deps.Service.GetErrorHistory(key, startTime, endTime)
+			
+			// Pre-allocate entries with capacity for database entries + current value
+			entries := make([]StatusHistoryEntry, 0, len(errorHistory)+1)
+			
+			// Add stored history from database
+			if err != nil {
+				logger.Warn().Msgf("Failed to get error history for %s: %v", key, err)
+			} else {
+				for _, dp := range errorHistory {
+					// Convert raw_value (float64) to uint16 for status decoding
+					rawUint16 := uint16(dp.RawValue)
+					// Use reg directly (already have it from line 200) instead of looking it up again
+					rawBytes := []byte{byte(rawUint16 >> 8), byte(rawUint16 & 0xFF)}
+					decodedValue := solis.DecodeRegister(reg, rawBytes)
+					
+					if decodedValue.StatusDecoded != nil {
+						entries = append(entries, StatusHistoryEntry{
+							Timestamp:     dp.Timestamp,
+							StatusDecoded: decodedValue.StatusDecoded,
+						})
+					}
+				}
+			}
+			
+			// Include current cached value if we have status_decoded
+			if value.StatusDecoded != nil {
+				entries = append(entries, StatusHistoryEntry{
+					Timestamp:     value.Timestamp.Format(time.RFC3339),
+					StatusDecoded: value.StatusDecoded,
+				})
+			}
+			
+			// Sort entries by timestamp (latest first)
+			sort.Slice(entries, func(i, j int) bool {
+				return entries[i].Timestamp > entries[j].Timestamp
+			})
+			
+			WriteJSON(w, StatusResponse{
+				Key:     key,
+				Name:    value.Name,
+				History: entries,
+			}, http.StatusOK)
+			return
+		}
+
+		// For non-status registers, return the standard response
 		result := map[string]any{
 			"key":       key,
 			"name":      value.Name,
@@ -219,6 +287,9 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 		}
 		if value.StringValue != "" {
 			result["string_value"] = value.StringValue
+		}
+		if value.StatusDecoded != nil {
+			result["status_decoded"] = value.StatusDecoded
 		}
 
 		WriteJSON(w, result, http.StatusOK)
