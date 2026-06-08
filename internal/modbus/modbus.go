@@ -38,10 +38,25 @@ type Client struct {
 	maxReconnectAttempts int
 	// timeout is the connection/read timeout.
 	timeout time.Duration
+	// allowDisconnected indicates if the client can be created without initial connection.
+	allowDisconnected bool
+	// reconnectInProgress tracks if a reconnection is currently in progress.
+	reconnectInProgress bool
+	// reconnectCtxCancel is used to cancel the background reconnection loop.
+	reconnectCtxCancel context.CancelFunc
 }
 
 // ClientOption is a function that configures a Client.
 type ClientOption func(*Client)
+
+// WithAllowDisconnected allows the client to be created without an initial connection.
+// When set to true, client creation will succeed even if the initial connection fails,
+// and a background reconnection loop will be started.
+func WithAllowDisconnected(allow bool) ClientOption {
+	return func(c *Client) {
+		c.allowDisconnected = allow
+	}
+}
 
 // Connect establishes a connection to the Modbus device.
 func (c *Client) Connect(ctx context.Context) error {
@@ -71,6 +86,12 @@ func (c *Client) Disconnect() error {
 	if !c.isConnected {
 		logger.Debug().Msg("Already disconnected")
 		return nil
+	}
+
+	// Stop any background reconnection attempts
+	if c.reconnectCtxCancel != nil {
+		c.reconnectCtxCancel()
+		c.reconnectCtxCancel = nil
 	}
 
 	if err := c.handler.Close(); err != nil {
@@ -242,6 +263,80 @@ func (c *Client) reconnect(ctx context.Context) error {
 	c.isConnected = true
 	logger.Info().Msg("Reconnection successful")
 	return nil
+}
+
+// StartReconnectionLoop starts a background goroutine that continuously attempts
+// to reconnect to the Modbus device. It uses exponential backoff and stops when
+// the connection is established or the context is cancelled.
+func (c *Client) StartReconnectionLoop(ctx context.Context) {
+	c.mu.Lock()
+	if c.isConnected {
+		c.mu.Unlock()
+		logger.Debug().Msg("Already connected, not starting reconnection loop")
+		return
+	}
+	if c.reconnectCtxCancel != nil {
+		c.reconnectCtxCancel()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	c.reconnectCtxCancel = cancel
+	c.mu.Unlock()
+
+	go func() {
+		backoff := 1 * time.Second
+		maxBackoff := 30 * time.Second
+
+		for {
+			select {
+			case <-ctx.Done():
+				logger.Info().Msg("Reconnection loop stopped: context cancelled")
+				return
+			default:
+				c.mu.Lock()
+				if c.isConnected {
+					c.mu.Unlock()
+					logger.Info().Msg("Reconnection loop stopped: already connected")
+					return
+				}
+				c.mu.Unlock()
+
+				logger.Info().Msgf("Attempting to reconnect (backoff: %s)...", backoff)
+
+				connCtx, connCancel := context.WithTimeout(context.Background(), c.timeout)
+				if err := c.Connect(connCtx); err != nil {
+					connCancel()
+					logger.Warn().Msgf("Reconnection failed: %v", err)
+					// Wait before next attempt
+					timer := time.NewTimer(backoff)
+					select {
+					case <-ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
+					// Exponential backoff with cap
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
+				} else {
+					connCancel()
+					logger.Info().Msg("Reconnection successful!")
+					return
+				}
+			}
+		}
+	}()
+}
+
+// StopReconnectionLoop stops the background reconnection loop.
+func (c *Client) StopReconnectionLoop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reconnectCtxCancel != nil {
+		c.reconnectCtxCancel()
+		c.reconnectCtxCancel = nil
+	}
 }
 
 // NewClient creates a new Modbus client based on the connection type in config.

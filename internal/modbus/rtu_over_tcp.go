@@ -44,6 +44,10 @@ func NewRTUOverTCPClient(cfg *config.ModbusSettings, opts ...ClientOption) (*Cli
 	defer cancel()
 	if err := c.Connect(connCtx); err != nil {
 		logger.Error().Msgf("Initial connection failed: %v", err)
+		if c.allowDisconnected {
+			logger.Warn().Msg("AllowDisconnected is true, continuing with disconnected client")
+			return c, nil
+		}
 		return nil, fmt.Errorf("initial connection failed: %w", err)
 	}
 
