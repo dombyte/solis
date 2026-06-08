@@ -220,6 +220,9 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 		if value.StringValue != "" {
 			result["string_value"] = value.StringValue
 		}
+		if value.StatusDecoded != nil {
+			result["status_decoded"] = value.StatusDecoded
+		}
 
 		WriteJSON(w, result, http.StatusOK)
 	}
