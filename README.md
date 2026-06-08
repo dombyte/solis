@@ -9,7 +9,15 @@ Monitoring solution for Solis inverters using Modbus TCP/RTU. Polls register dat
 <img width="1259" height="1065" alt="solism2" src="https://github.com/user-attachments/assets/e9b195fd-97c1-4443-9fc1-1d6cb3ea2331" />
 
 
+## API
 
+After starting, the API Docs are available at `/docs`.
+
+## Health Check
+A health check endpoint is available at `/health`.
+
+## Metrics
+If enabled, Prometheus metrics are exposed at `/metrics`.
 
 ## Configuration
 
@@ -340,9 +348,3 @@ cd frontend
 npm install
 npm run dev
 ```
-
-
-## API
-
-After starting, the API Docs are available at `http://localhost:8080/docs`.
-Health check: `GET /health`
