@@ -116,6 +116,11 @@ func (c *Client) IsConnected() bool {
 	return c.isConnected
 }
 
+// Config returns the Modbus configuration.
+func (c *Client) Config() *config.ModbusSettings {
+	return c.config
+}
+
 // ReadRegisters reads a range of input registers from the device.
 // It handles reconnection automatically if the connection fails.
 // The address is the starting register address (0-based in grid-x/modbus).
@@ -198,6 +203,11 @@ func (c *Client) shouldReconnect(err error) bool {
 		return netErr.Timeout() || netErr.Temporary()
 	}
 
+	// For RTU, CRC errors are common and worth retrying (device might be busy)
+	if c.config.Type == "rtu" && isCRCEor(err) {
+		return true
+	}
+
 	// Check for specific error strings
 	switch {
 	case strings.Contains(errStr, "connection reset"),
@@ -212,6 +222,15 @@ func (c *Client) shouldReconnect(err error) bool {
 	}
 
 	return false
+}
+
+// isCRCEor checks if the error is a Modbus CRC error (common with RTU).
+func isCRCEor(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "crc") || strings.Contains(errStr, "CRC")
 }
 
 // reconnect attempts to reconnect to the Modbus device.
@@ -250,6 +269,10 @@ func (c *Client) reconnect(ctx context.Context) error {
 		handler.DataBits = c.config.DataBits
 		handler.StopBits = c.config.StopBits
 		handler.Parity = parity
+		// RTU-specific serial port timeouts
+		handler.LinkRecoveryTimeout = 10 * time.Second
+		handler.IdleTimeout = 120 * time.Second
+		handler.ConnectDelay = 100 * time.Millisecond
 		c.handler = handler
 		c.client = modbus.NewClient(handler)
 	case "rtu_over_tcp":
@@ -358,15 +381,15 @@ func NewClient(cfg *config.ModbusSettings, opts ...ClientOption) (*Client, error
 	}
 }
 
-// convertParity converts parity from config format (none, even, odd) to
+// convertParity converts parity from config format (none, even, odd, N, E, O) to
 // grid-x/serial library format (N, E, O).
 func convertParity(parity string) string {
-	switch strings.ToLower(parity) {
-	case "none", "":
+	switch strings.ToUpper(parity) {
+	case "N", "NONE", "":
 		return "N"
-	case "even":
+	case "E", "EVEN":
 		return "E"
-	case "odd":
+	case "O", "ODD":
 		return "O"
 	default:
 		logger.Warn().Msgf("Unknown parity '%s', defaulting to 'N' (none)", parity)

@@ -235,6 +235,14 @@ func (p *Poller) run() {
 
 			logger.Info().Msgf("Poll %d completed in %s: read %d registers, stored %d values",
 				count, pollDuration, registersRead, len(values))
+			// For RTU, close connection after poll to allow other devices to use the serial port
+			if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.modbusClient.IsConnected() {
+				if err := p.modbusClient.Disconnect(); err != nil {
+					logger.Debug().Msgf("RTU disconnect after poll: %v", err)
+				} else {
+					logger.Debug().Msg("RTU connection closed after poll")
+				}
+			}
 		}
 	}
 }
@@ -311,6 +319,10 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 		// Wait between blocks if configured
 		if p.config.BlockInterval > 0 && i < len(solis.ReadRanges)-1 {
 			time.Sleep(p.config.BlockInterval)
+		}
+		// For RTU, add delay between ranges to prevent serial port overload
+		if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && i < len(solis.ReadRanges)-1 {
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
