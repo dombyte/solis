@@ -26,10 +26,16 @@ func NewRTUClient(cfg *config.ModbusSettings, opts ...ClientOption) (*Client, er
 	}
 
 	// Create RTU handler
-	address := fmt.Sprintf("%s?baudrate=%d&databits=%d&stopbits=%d&parity=%s",
-		cfg.SerialPort, cfg.BaudRate, cfg.DataBits, cfg.StopBits, cfg.Parity)
-	handler := modbus.NewRTUClientHandler(address)
+	handler := modbus.NewRTUClientHandler(cfg.SerialPort)
 	handler.SetSlave(cfg.UnitID)
+
+	// Set serial configuration directly on the handler
+	// The grid-x/serial library expects parity as single char: N, E, O
+	parity := convertParity(cfg.Parity)
+	handler.BaudRate = cfg.BaudRate
+	handler.DataBits = cfg.DataBits
+	handler.StopBits = cfg.StopBits
+	handler.Parity = parity
 
 	// Create client
 	client := modbus.NewClient(handler)

@@ -242,11 +242,16 @@ func (c *Client) reconnect(ctx context.Context) error {
 		c.handler.SetSlave(c.config.UnitID)
 		c.client = modbus.NewClient(c.handler)
 	case "rtu":
-		address := fmt.Sprintf("%s?baudrate=%d&databits=%d&stopbits=%d&parity=%s",
-			c.config.SerialPort, c.config.BaudRate, c.config.DataBits, c.config.StopBits, c.config.Parity)
-		c.handler = modbus.NewRTUClientHandler(address)
-		c.handler.SetSlave(c.config.UnitID)
-		c.client = modbus.NewClient(c.handler)
+		handler := modbus.NewRTUClientHandler(c.config.SerialPort)
+		handler.SetSlave(c.config.UnitID)
+		// Set serial configuration directly on the handler
+		parity := convertParity(c.config.Parity)
+		handler.BaudRate = c.config.BaudRate
+		handler.DataBits = c.config.DataBits
+		handler.StopBits = c.config.StopBits
+		handler.Parity = parity
+		c.handler = handler
+		c.client = modbus.NewClient(handler)
 	case "rtu_over_tcp":
 		address := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
 		c.handler = modbus.NewRTUOverTCPClientHandler(address)
@@ -350,5 +355,21 @@ func NewClient(cfg *config.ModbusSettings, opts ...ClientOption) (*Client, error
 		return NewRTUOverTCPClient(cfg, opts...)
 	default:
 		return nil, fmt.Errorf("unsupported modbus type: %s", cfg.Type)
+	}
+}
+
+// convertParity converts parity from config format (none, even, odd) to
+// grid-x/serial library format (N, E, O).
+func convertParity(parity string) string {
+	switch strings.ToLower(parity) {
+	case "none", "":
+		return "N"
+	case "even":
+		return "E"
+	case "odd":
+		return "O"
+	default:
+		logger.Warn().Msgf("Unknown parity '%s', defaulting to 'N' (none)", parity)
+		return "N"
 	}
 }
