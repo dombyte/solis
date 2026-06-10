@@ -53,6 +53,10 @@ type PollerSettings struct {
 	BlockInterval time.Duration `mapstructure:"block_interval"`
 	// PollTimeout is the maximum duration for a full poll cycle before aborting.
 	PollTimeout time.Duration `mapstructure:"poll_timeout"`
+	// JitterMax is the maximum random delay added before each poll for RTU connections.
+	// This helps avoid collisions with other devices on the same RTU bus.
+	// Example: "500ms" for 0-500ms random delay.
+	JitterMax time.Duration `mapstructure:"jitter_max"`
 }
 
 // ModbusSettings contains Modbus connection configuration.
@@ -127,6 +131,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("poller.block_retry_delay", "1s")
 	v.SetDefault("poller.block_interval", "0s")
 	v.SetDefault("poller.poll_timeout", "30s")
+	v.SetDefault("poller.jitter_max", "500ms")
 
 	// Modbus defaults
 	v.SetDefault("modbus.type", "tcp")

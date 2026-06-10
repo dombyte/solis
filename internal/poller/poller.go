@@ -5,6 +5,7 @@ package poller
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
@@ -18,6 +19,11 @@ import (
 
 // logger is the package-level logger for poller operations.
 var logger = logging.NewComponentLogger("poller")
+
+func init() {
+	// Seed random number generator for jitter
+	rand.Seed(time.Now().UnixNano())
+}
 
 // LastPollInfo contains information about the last completed poll cycle.
 type LastPollInfo struct {
@@ -180,6 +186,17 @@ func (p *Poller) run() {
 				}
 			}
 
+			// For RTU, add random jitter to avoid collision with other devices on the bus
+			if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.config.JitterMax > 0 {
+				jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax)))
+				logger.Debug().Msgf("Adding %s jitter before poll to avoid RTU bus collision", jitter)
+				select {
+				case <-p.ctx.Done():
+					return
+				case <-time.After(jitter):
+				}
+			}
+
 			// Perform poll
 			pollStart := time.Now()
 			values, registersRead, err := p.pollOnce(pollStart)
@@ -251,6 +268,14 @@ func (p *Poller) run() {
 // Returns the decoded values, total registers read, and any error.
 func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, error) {
 	logger.Debug().Msgf("Starting poll cycle at %s", startTime)
+
+	// For RTU, ensure connection is open before polling
+	if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && !p.modbusClient.IsConnected() {
+		if err := p.modbusClient.Connect(context.Background()); err != nil {
+			return nil, 0, fmt.Errorf("failed to connect before poll: %w", err)
+		}
+		logger.Debug().Msg("RTU reconnected for poll")
+	}
 
 	// Track total registers read
 	totalRegisters := 0

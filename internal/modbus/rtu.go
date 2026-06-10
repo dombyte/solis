@@ -38,12 +38,11 @@ func NewRTUClient(cfg *config.ModbusSettings, opts ...ClientOption) (*Client, er
 	handler.Parity = parity
 
 	// RTU-specific serial port timeouts for better reliability
-	// LinkRecoveryTimeout: time to wait for connection recovery before giving up
-	handler.LinkRecoveryTimeout = 10 * time.Second
+	// Timeout: time to wait for a response from the slave device
+	// This is critical for RTU to prevent hanging when bus is busy
+	handler.Timeout = cfg.Timeout
 	// IdleTimeout: close connection after this period of inactivity (0 = never)
 	handler.IdleTimeout = 120 * time.Second
-	// ConnectDelay: silent period after successful connection (gives device time to initialize)
-	handler.ConnectDelay = 100 * time.Millisecond
 
 	// Create client
 	client := modbus.NewClient(handler)
