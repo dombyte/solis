@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Europe/Berlin
+    devices:
+      - /dev/ttyAMA0:/dev/ttyAMA0
     healthcheck:
       test: ["CMD", "httpcheck", "http://localhost:8080/health"]
       interval: 30s
