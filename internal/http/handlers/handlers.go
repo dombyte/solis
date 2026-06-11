@@ -79,6 +79,24 @@ func WriteJSON(w http.ResponseWriter, data any, statusCode int) {
 	}
 }
 
+// PanicRecoveryMiddleware recovers from panics in HTTP handlers.
+// This ensures the server never crashes due to a panic in a handler.
+func PanicRecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error().Msgf("PANIC in HTTP handler: %v", r)
+				WriteJSON(w, ErrorResponse{
+					Error:   "Internal Server Error",
+					Message: fmt.Sprintf("Panic recovered: %v", r),
+					Code:    http.StatusInternalServerError,
+				}, http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
 // WriteError writes an error response as JSON.
 func WriteError(w http.ResponseWriter, message string, statusCode int) {
 	response := map[string]any{

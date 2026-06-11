@@ -34,6 +34,8 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 	r.Use(middleware.Logger)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
+	// Add panic recovery middleware (redundant with Recoverer but more specific logging)
+	r.Use(handlers.PanicRecoveryMiddleware)
 
 	// Add CORS middleware
 	r.Use(func(next http.Handler) http.Handler {

@@ -169,97 +169,106 @@ func (p *Poller) run() {
 				return
 			}
 
-			// Calculate time until next poll
-			now := time.Now()
-			if !p.lastPollTime.IsZero() {
-				// Non-overlapping: next poll starts at max(interval, previous_poll_duration)
-				elapsed := now.Sub(p.lastPollTime)
-				if elapsed < p.config.Interval {
-					sleepTime := p.config.Interval - elapsed
-					logger.Debug().Msgf("Sleeping for %s until next poll", sleepTime)
+			// Recover from panics to keep poller running
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Error().Msgf("Poller recovered from panic: %v", r)
+					}
+				}()
+
+				// Calculate time until next poll
+				now := time.Now()
+				if !p.lastPollTime.IsZero() {
+					// Non-overlapping: next poll starts at max(interval, previous_poll_duration)
+					elapsed := now.Sub(p.lastPollTime)
+					if elapsed < p.config.Interval {
+						sleepTime := p.config.Interval - elapsed
+						logger.Debug().Msgf("Sleeping for %s until next poll", sleepTime)
+						select {
+						case <-p.ctx.Done():
+							return
+						case <-time.After(sleepTime):
+						}
+						return
+					}
+				}
+
+				// For RTU, add random jitter to avoid collision with other devices on the bus
+				if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.config.JitterMax > 0 {
+					jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax)))
+					logger.Debug().Msgf("Adding %s jitter before poll to avoid RTU bus collision", jitter)
 					select {
 					case <-p.ctx.Done():
 						return
-					case <-time.After(sleepTime):
+					case <-time.After(jitter):
 					}
-					continue
 				}
-			}
 
-			// For RTU, add random jitter to avoid collision with other devices on the bus
-			if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.config.JitterMax > 0 {
-				jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax)))
-				logger.Debug().Msgf("Adding %s jitter before poll to avoid RTU bus collision", jitter)
-				select {
-				case <-p.ctx.Done():
+				// Perform poll
+				pollStart := time.Now()
+				values, registersRead, err := p.pollOnce(pollStart)
+				pollDuration := time.Since(pollStart)
+
+				if err != nil {
+					logger.Error().Msgf("Poll failed: %v", err)
+					// Still update last poll time to prevent rapid retries
+					p.mu.Lock()
+					p.lastPollTime = time.Now()
+					p.mu.Unlock()
 					return
-				case <-time.After(jitter):
 				}
-			}
 
-			// Perform poll
-			pollStart := time.Now()
-			values, registersRead, err := p.pollOnce(pollStart)
-			pollDuration := time.Since(pollStart)
+				// Store values
+				if p.storage != nil {
+					if err := p.storage.StoreAllRegisters(values, pollStart); err != nil {
+						logger.Error().Msgf("Failed to store values: %v", err)
+					} else {
+						// Cleanup old daily data
+						if err := p.storage.CleanupDailyData(); err != nil {
+							logger.Error().Msgf("Failed to cleanup daily data: %v", err)
+						}
 
-			if err != nil {
-				logger.Error().Msgf("Poll failed: %v", err)
-				// Still update last poll time to prevent rapid retries
+						// Cleanup old error data
+						if err := p.storage.CleanupErrorData(); err != nil {
+							logger.Error().Msgf("Failed to cleanup error data: %v", err)
+						}
+
+						// Store poll info in memory (replaces last_poll DB table)
+						p.mu.Lock()
+						p.lastPollInfo = &LastPollInfo{
+							Timestamp:     time.Now(),
+							DurationMs:    pollDuration.Milliseconds(),
+							RegistersRead: registersRead,
+							ValuesStored:  len(values),
+						}
+						p.mu.Unlock()
+					}
+				}
+
+				// Update cache with latest values (non-blocking for reads) - always update cache
+				if p.cache != nil {
+					p.cache.Set(values)
+				}
+
+				// Update poll statistics
 				p.mu.Lock()
 				p.lastPollTime = time.Now()
+				p.pollCount++
+				count := p.pollCount
 				p.mu.Unlock()
-				continue
-			}
 
-			// Store values
-			if p.storage != nil {
-				if err := p.storage.StoreAllRegisters(values, pollStart); err != nil {
-					logger.Error().Msgf("Failed to store values: %v", err)
-				} else {
-					// Cleanup old daily data
-					if err := p.storage.CleanupDailyData(); err != nil {
-						logger.Error().Msgf("Failed to cleanup daily data: %v", err)
+				logger.Info().Msgf("Poll %d completed in %s: read %d registers, stored %d values",
+					count, pollDuration, registersRead, len(values))
+				// For RTU, close connection after poll to allow other devices to use the serial port
+				if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.modbusClient.IsConnected() {
+					if err := p.modbusClient.Disconnect(); err != nil {
+						logger.Debug().Msgf("RTU disconnect after poll: %v", err)
+					} else {
+						logger.Debug().Msg("RTU connection closed after poll")
 					}
-
-					// Cleanup old error data
-					if err := p.storage.CleanupErrorData(); err != nil {
-						logger.Error().Msgf("Failed to cleanup error data: %v", err)
-					}
-
-					// Store poll info in memory (replaces last_poll DB table)
-					p.mu.Lock()
-					p.lastPollInfo = &LastPollInfo{
-						Timestamp:     time.Now(),
-						DurationMs:    pollDuration.Milliseconds(),
-						RegistersRead: registersRead,
-						ValuesStored:  len(values),
-					}
-					p.mu.Unlock()
 				}
-			}
-
-			// Update cache with latest values (non-blocking for reads) - always update cache
-			if p.cache != nil {
-				p.cache.Set(values)
-			}
-
-			// Update poll statistics
-			p.mu.Lock()
-			p.lastPollTime = time.Now()
-			p.pollCount++
-			count := p.pollCount
-			p.mu.Unlock()
-
-			logger.Info().Msgf("Poll %d completed in %s: read %d registers, stored %d values",
-				count, pollDuration, registersRead, len(values))
-			// For RTU, close connection after poll to allow other devices to use the serial port
-			if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.modbusClient.IsConnected() {
-				if err := p.modbusClient.Disconnect(); err != nil {
-					logger.Debug().Msgf("RTU disconnect after poll: %v", err)
-				} else {
-					logger.Debug().Msg("RTU connection closed after poll")
-				}
-			}
+			}()
 		}
 	}
 }

@@ -5,7 +5,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,11 +28,14 @@ import (
 // logger is the application logger.
 var logger = logging.NewComponentLogger("main")
 
-func main() {
+// runApp contains the main application logic and can be restarted on panic.
+// Returns an error if initialization fails (non-recoverable).
+// Returns nil if shutdown was requested via signal.
+func runApp() error {
 	// Load configuration
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	// Initialize logging based on config
@@ -41,15 +44,13 @@ func main() {
 
 	// Create data directory if it doesn't exist
 	if err := os.MkdirAll("./data", 0755); err != nil && !os.IsExist(err) {
-		logger.Error().Msgf("Failed to create data directory: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 
 	// Initialize storage (always enabled)
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
-		logger.Error().Msgf("Failed to initialize storage: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to initialize storage: %v", err)
 	}
 	defer st.Close()
 	logger.Info().Msg("Storage initialized")
@@ -72,8 +73,7 @@ func main() {
 	if len(cfg.Registers.DisabledKeys) > 0 {
 		for _, key := range cfg.Registers.DisabledKeys {
 			if _, ok := solis.RegisterMapByKey[key]; !ok {
-				logger.Error().Msgf("Unknown register key in disabled_keys: %s. Available keys: %v", key, solis.AllRegisters)
-				os.Exit(1)
+				return fmt.Errorf("unknown register key in disabled_keys: %s. Available keys: %v", key, solis.AllRegisters)
 			}
 		}
 		logger.Info().Msgf("Disabled %d registers: %v", len(cfg.Registers.DisabledKeys), cfg.Registers.DisabledKeys)
@@ -84,8 +84,7 @@ func main() {
 	// Use AllowDisconnected to allow app to start even if modbus is unavailable
 	modbusClient, err := modbus.NewClient(&cfg.Modbus, modbus.WithAllowDisconnected(true))
 	if err != nil {
-		logger.Error().Msgf("Failed to create Modbus client: %v", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to create Modbus client: %v", err)
 	}
 	defer modbusClient.Close()
 
@@ -134,9 +133,10 @@ func main() {
 	go func() {
 		if err := httpServer.Start(); err != nil {
 			logger.Error().Msgf("HTTP server failed: %v", err)
-			os.Exit(1)
+			// Don't exit, just log - the panic recovery in main will handle it
 		}
 	}()
+
 	// Initialize Prometheus metrics
 	if cfg.Metrics.Enabled {
 		metrics.Init(readService)
@@ -180,4 +180,34 @@ func main() {
 	}
 
 	logger.Info().Msg("Solis Monitor stopped")
+	return nil
+}
+
+func main() {
+	// Run app in a loop with panic recovery - app never exits unless signal received
+	for {
+		// Recover from panics in runApp itself
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Re-initialize logging in case it failed
+					logging.Init(false, os.Stderr, true, "ERROR")
+					logger.Error().Msgf("PANIC in runApp: %v - restarting in 5 seconds...", r)
+					time.Sleep(5 * time.Second)
+				}
+			}()
+
+			if err := runApp(); err != nil {
+				logger.Error().Msgf("App failed: %v - restarting in 5 seconds...", err)
+				// Re-initialize logging in case it failed
+				logging.Init(false, os.Stderr, true, "ERROR")
+				logger.Error().Msg("Waiting 5 seconds before restart...")
+				time.Sleep(5 * time.Second)
+				return
+			}
+			// If runApp returns nil, it means shutdown signal was received
+			logger.Info().Msg("Clean shutdown")
+			os.Exit(0)
+		}()
+	}
 }
