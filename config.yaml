@@ -9,29 +9,29 @@ app:
 
 poller:
   # Base interval between poll cycles
-  interval: 5s
+  interval: 15s
   # Retry attempts per block if read fails
-  block_attempts: 3
+  block_attempts: 2
   # Delay between retry attempts for same block
   block_retry_delay: 1s
   # Delay between successive block reads (0 = immediate)
   block_interval: 0s
   # Maximum duration for full poll cycle before aborting
   poll_timeout: 15s
-
+  jitter_max: 100ms
 modbus:
   # Connection type: tcp, rtu, or rtu_over_tcp
   type: tcp
   host: 192.168.2.151
   port: 502
-  timeout: 5s
+  timeout: 15s
   unit_id: 1
   # RTU-specific settings (only used if type = rtu or rtu_over_tcp)
-  serial_port: /dev/ttyUSB0
+  serial_port: /dev/ttyAMA0
   baud_rate: 9600
   data_bits: 8
   stop_bits: 1
-  parity: none
+  parity: N
 
 storage:
   path: ./data/solis.db
