@@ -6,6 +6,7 @@ package modbus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -126,6 +127,13 @@ func (c *Client) Config() *config.ModbusSettings {
 // The address is the starting register address (0-based in grid-x/modbus).
 // Note: Solis inverter uses 1-based addressing, so we may need to adjust.
 func (c *Client) ReadRegisters(ctx context.Context, address uint16, count uint16) ([]byte, error) {
+	// Check if context is already done (canceled or timed out)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	c.mu.RLock()
 	client := c.client
 	isConnected := c.isConnected
@@ -192,6 +200,11 @@ func (c *Client) ReadRegisters(ctx context.Context, address uint16, count uint16
 // shouldReconnect determines if an error indicates the connection should be reconnected.
 func (c *Client) shouldReconnect(err error) bool {
 	if err == nil {
+		return false
+	}
+
+	// Don't retry on context errors - the context is already done
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 
