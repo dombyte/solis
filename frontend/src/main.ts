@@ -195,7 +195,9 @@ async function loadHistoryData() {
     
     // Fetch data for all selected registers
     const datasets: any[] = []
-    const allLabels: Set<string> = new Set()
+    const allTimestamps: Set<string> = new Set()
+    const timestampToLabel: Map<string, string> = new Map()
+    const datasetDataMap: Map<string, Map<string, number>> = new Map()
     
     for (const key of selectedKeys) {
       let data: any[] = []
@@ -217,22 +219,21 @@ async function loadHistoryData() {
         const name = registerConfig?.name || key
         const unit = registerConfig?.unit || ''
         
-        // Extract labels and values
-        const labels = data.map((d: any) => {
-          if (historyPeriod === 'daily') {
-            return new Date(d.date).toLocaleDateString()
-          } else if (historyPeriod === 'monthly') {
-            return new Date(d.month).toLocaleString('default', { month: 'short', year: 'numeric' })
-          } else {
-            return d.year
-          }
-        })
+        datasetDataMap.set(key, new Map())
         
-        const values = data.map((d: any) => d.value)
+        for (const d of data) {
+          const timestamp = d.date || d.month || d.year
+          const displayLabel = historyPeriod === 'daily' ? new Date(timestamp).toLocaleDateString()
+                       : historyPeriod === 'monthly' ? new Date(timestamp).toLocaleString('default', { month: 'short', year: 'numeric' })
+                       : timestamp
+          
+          allTimestamps.add(timestamp)
+          timestampToLabel.set(timestamp, displayLabel)
+          datasetDataMap.get(key)!.set(timestamp, d.value)
+        }
         
         datasets.push({
           label: name,
-          data: values,
           key: key,
           borderColor: getColorForKey(key),
           backgroundColor: getColorForKey(key, 0.1),
@@ -241,16 +242,21 @@ async function loadHistoryData() {
           tension: 0.4,
           unit: unit
         })
-        
-        // Collect all labels
-        labels.forEach(l => allLabels.add(l))
       }
     }
     
     if (datasets.length > 0) {
-      // Sort labels chronologically
-      const sortedLabels = Array.from(allLabels).sort()
-      createHistoryChart(sortedLabels, datasets)
+      // Sort timestamps chronologically (oldest first)
+      const sortedTimestamps = Array.from(allTimestamps).sort()
+      const sortedLabels = sortedTimestamps.map(ts => timestampToLabel.get(ts)!)
+      
+      // Reorder each dataset's values to match sorted timestamps
+      const sortedDatasets = datasets.map(ds => ({
+        ...ds,
+        data: sortedTimestamps.map(ts => datasetDataMap.get(ds.key)?.get(ts) ?? null)
+      }))
+      
+      createHistoryChart(sortedLabels, sortedDatasets)
     } else {
       // Destroy any existing chart if no data
       if (historyChart) {
