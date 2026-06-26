@@ -399,6 +399,35 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 		}
 	}
 
+	// Compute net grid energy values
+	// total_grid_energy = total_energy_fed_into_grid - total_energy_imported_from_grid
+	if fedTotal, fedExists := values["total_energy_fed_into_grid"]; fedExists {
+		if importTotal, importExists := values["total_energy_imported_from_grid"]; importExists {
+			netTotalValue := *fedTotal
+			netTotalValue.RawValue = fedTotal.RawValue - importTotal.RawValue
+			netTotalValue.DecodedValue = fedTotal.DecodedValue - importTotal.DecodedValue
+			netTotalValue.Key = "total_grid_energy"
+			netTotalValue.Name = "Total Grid Energy (Net)"
+			netTotalValue.Unit = "kWh"
+			values["total_grid_energy"] = &netTotalValue
+			logger.Debug().Msgf("Computed total_grid_energy: %.1f kWh", netTotalValue.DecodedValue)
+		}
+	}
+
+	// today_grid_energy = today_energy_fed_into_grid - today_energy_imported_from_grid
+	if fedToday, fedExists := values["today_energy_fed_into_grid"]; fedExists {
+		if importToday, importExists := values["today_energy_imported_from_grid"]; importExists {
+			netTodayValue := *fedToday
+			netTodayValue.RawValue = fedToday.RawValue - importToday.RawValue
+			netTodayValue.DecodedValue = fedToday.DecodedValue - importToday.DecodedValue
+			netTodayValue.Key = "today_grid_energy"
+			netTodayValue.Name = "Today Grid Energy (Net)"
+			netTodayValue.Unit = "kWh"
+			values["today_grid_energy"] = &netTodayValue
+			logger.Debug().Msgf("Computed today_grid_energy: %.1f kWh", netTodayValue.DecodedValue)
+		}
+	}
+
 	logger.Debug().Msgf("Poll cycle completed: read %d total registers, decoded %d values",
 		totalRegisters, len(values))
 

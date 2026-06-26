@@ -246,7 +246,64 @@ func (s *ReadService) GetDailyHistory(key string, start, end time.Time) ([]*stor
 		return nil, err
 	}
 
+	// Handle computed net grid energy register
+	if key == "today_grid_energy" {
+		return s.getComputedDailyGridEnergy(start, end)
+	}
+
 	return s.storage.GetDailyHistory(key, start, end)
+}
+
+// getComputedDailyGridEnergy computes the net daily grid energy from source registers.
+// Returns today_energy_fed_into_grid - today_energy_imported_from_grid for each day
+func (s *ReadService) getComputedDailyGridEnergy(start, end time.Time) ([]*storage.DailyDataPoint, error) {
+	// Get daily fed into grid
+	fedDaily, err := s.storage.GetDailyHistory("today_energy_fed_into_grid", start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get today_energy_fed_into_grid: %w", err)
+	}
+
+	// Get daily imported from grid
+	importDaily, err := s.storage.GetDailyHistory("today_energy_imported_from_grid", start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get today_energy_imported_from_grid: %w", err)
+	}
+
+	// Create a map of date -> value for both
+	fedMap := make(map[string]*storage.DailyDataPoint)
+	for _, dp := range fedDaily {
+		fedMap[dp.Date] = dp
+	}
+
+	importMap := make(map[string]*storage.DailyDataPoint)
+	for _, dp := range importDaily {
+		importMap[dp.Date] = dp
+	}
+
+	// Compute net for each date
+	var result []*storage.DailyDataPoint
+	// Use dates from fedDaily as primary
+	for _, dp := range fedDaily {
+		importDp, exists := importMap[dp.Date]
+		var netValue, netRawValue float64
+		
+		if exists {
+			netValue = dp.Value - importDp.Value
+			netRawValue = dp.RawValue - importDp.RawValue
+		} else {
+			// If no import data, net = fed value
+			netValue = dp.Value
+			netRawValue = dp.RawValue
+		}
+		
+		result = append(result, &storage.DailyDataPoint{
+			Date:     dp.Date,
+			Value:    netValue,
+			RawValue: netRawValue,
+		})
+	}
+
+	return result, nil
 }
 
 // GetDeviceInfo returns all stable register values (device information).
@@ -343,5 +400,42 @@ func (s *ReadService) GetTotalHistory(key string) (*storage.TotalDataPoint, erro
 		return nil, err
 	}
 
+	// Handle computed net grid energy register
+	if key == "total_grid_energy" {
+		return s.getComputedTotalGridEnergy()
+	}
+
 	return s.storage.GetTotalHistory(key)
+}
+
+// getComputedTotalGridEnergy computes the net total grid energy from source registers.
+// Returns total_energy_fed_into_grid - total_energy_imported_from_grid
+func (s *ReadService) getComputedTotalGridEnergy() (*storage.TotalDataPoint, error) {
+	// Get total fed into grid
+	fedTotal, err := s.storage.GetTotalHistory("total_energy_fed_into_grid")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total_energy_fed_into_grid: %w", err)
+	}
+	if fedTotal == nil {
+		return nil, fmt.Errorf("no data found for total_energy_fed_into_grid")
+	}
+
+	// Get total imported from grid
+	importTotal, err := s.storage.GetTotalHistory("total_energy_imported_from_grid")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total_energy_imported_from_grid: %w", err)
+	}
+	if importTotal == nil {
+		return nil, fmt.Errorf("no data found for total_energy_imported_from_grid")
+	}
+
+	// Compute net: positive = export, negative = import
+	netValue := fedTotal.Value - importTotal.Value
+	netRawValue := fedTotal.RawValue - importTotal.RawValue
+
+	return &storage.TotalDataPoint{
+		Value:     netValue,
+		RawValue:  netRawValue,
+		Timestamp: fedTotal.Timestamp, // Use same timestamp as fed value
+	}, nil
 }

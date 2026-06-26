@@ -126,6 +126,13 @@ export const registerConfigs: RegisterConfig[] = [
     description: "Total excess energy fed back into the electrical grid today",
   },
   {
+    key: "today_grid_energy",
+    name: "Grid Energy (Net)",
+    endpoint: "daily",
+    unit: "kWh",
+    description: "Net grid energy (export - import): positive = net export to grid, negative = net import from grid",
+  },
+  {
     key: "today_battery_discharge_energy",
     name: "Battery Discharge Energy Today",
     endpoint: "daily",
@@ -227,6 +234,14 @@ export const registerConfigs: RegisterConfig[] = [
     unit: "kWh",
     description:
       "Total excess energy fed back into the electrical grid since installation",
+  },
+  {
+    key: "total_grid_energy",
+    name: "Total Grid Energy (Net)",
+    endpoint: "total",
+    unit: "kWh",
+    description:
+      "Net grid energy (export - import): positive = net export to grid, negative = net import from grid",
   },
   // Status Registers
   {
@@ -424,6 +439,12 @@ export const cards: CardConfig[] = [
         endpoint: "daily",
         unit: "kWh",
       },
+      {
+        key: "today_grid_energy",
+        name: "Grid Energy (Net)",
+        endpoint: "daily",
+        unit: "kWh",
+      },
     ],
   },
   {
@@ -502,6 +523,12 @@ export const cards: CardConfig[] = [
       {
         key: "total_energy_fed_into_grid",
         name: "Total Energy Fed into Grid",
+        endpoint: "total",
+        unit: "kWh",
+      },
+      {
+        key: "total_grid_energy",
+        name: "Total Grid Energy (Net)",
         endpoint: "total",
         unit: "kWh",
       },

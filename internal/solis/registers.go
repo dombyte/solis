@@ -134,6 +134,7 @@ var dailyRegisterSet = map[string]bool{
 	"today_energy_imported_from_grid": true,
 	"today_battery_discharge_energy":  true,
 	"today_battery_charge_energy":     true,
+	"today_grid_energy":               true,
 	"pv_today_energy":                 true,
 	"backup_load_today_energy":        true,
 }
@@ -204,6 +205,7 @@ var totalRegisterSet = map[string]bool{
 	"total_energy_imported_from_grid": true,
 	"total_energy_fed_into_grid":      true,
 	"total_energy_consumption":        true,
+	"total_grid_energy":               true,
 	"household_load_total_energy":     true,
 	"backup_load_total_energy":        true,
 }
@@ -887,6 +889,28 @@ func allRegisters() []Register {
 			Address:   33177,
 			Count:     2,
 			DataType:  Uint32,
+			Scale:     1,
+			Unit:      "kWh",
+			Stability: Dynamic,
+		},
+
+		// Computed net grid energy registers (virtual - no Modbus address)
+		{
+			Key:       "total_grid_energy",
+			Name:      "Total Grid Energy (Net)",
+			Address:   0,
+			Count:     0,
+			DataType:  Uint32,
+			Scale:     1,
+			Unit:      "kWh",
+			Stability: Dynamic,
+		},
+		{
+			Key:       "today_grid_energy",
+			Name:      "Today Grid Energy (Net)",
+			Address:   0,
+			Count:     0,
+			DataType:  Uint16,
 			Scale:     1,
 			Unit:      "kWh",
 			Stability: Dynamic,

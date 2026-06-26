@@ -35,6 +35,7 @@ const periodRegisters: Record<'daily' | 'monthly' | 'yearly', string[]> = {
     'today_energy_consumption',
     'today_energy_fed_into_grid',
     'today_energy_imported_from_grid',
+    'today_grid_energy',
     'today_battery_discharge_energy',
     'today_battery_charge_energy',
     'pv_today_energy',
