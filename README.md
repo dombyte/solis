@@ -283,6 +283,27 @@ All registers are polled by default. Disable specific ones via `registers.disabl
 | meter_active_power_c | Solis Meter Active Power C | 33261 | Int32 | 0.1 | W | dynamic |
 | meter_total_active_power | Solis Meter Total Active Power | 33263 | Int32 | 1.0 | W | dynamic |
 
+### Computed Registers
+
+**Note:** These registers are **computed/virtual** (Address = 0) and do not exist in the inverter's Modbus interface. They are calculated from other registers and stored in the database. Values may be inaccurate if source registers are incorrect or if the calculation logic has changed.
+
+| Key | Name | Source | Scale | Unit | Stability |
+|-----|------|--------|-------|------|-----------|
+| today_grid_energy | Today Grid Energy (Net) | total_energy_fed_into_grid - total_energy_imported_from_grid | 1 | kWh | dynamic |
+| total_grid_energy | Total Grid Energy (Net) | total_energy_fed_into_grid - total_energy_imported_from_grid | 1 | kWh | dynamic |
+| energy_consumption_month_energy | Energy Consumption Month Energy (Computed) | Sum of today_energy_consumption daily values | 1 | kWh | dynamic |
+| energy_fed_into_grid_month_energy | Energy Fed Into Grid Month Energy (Computed) | Sum of today_energy_fed_into_grid daily values | 1 | kWh | dynamic |
+| energy_imported_from_grid_month_energy | Energy Imported From Grid Month Energy (Computed) | Sum of today_energy_imported_from_grid daily values | 1 | kWh | dynamic |
+| battery_discharge_month_energy | Battery Discharge Month Energy (Computed) | Sum of today_battery_discharge_energy daily values | 1 | kWh | dynamic |
+| battery_charge_month_energy | Battery Charge Month Energy (Computed) | Sum of today_battery_charge_energy daily values | 1 | kWh | dynamic |
+| month_grid_energy | Month Grid Energy (Net, Computed) | energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy | 1 | kWh | dynamic |
+| energy_consumption_year_energy | Energy Consumption Year Energy (Computed) | Sum of today_energy_consumption daily values | 1 | kWh | dynamic |
+| energy_fed_into_grid_year_energy | Energy Fed Into Grid Year Energy (Computed) | Sum of today_energy_fed_into_grid daily values | 1 | kWh | dynamic |
+| energy_imported_from_grid_year_energy | Energy Imported From Grid Year Energy (Computed) | Sum of today_energy_imported_from_grid daily values | 1 | kWh | dynamic |
+| battery_discharge_year_energy | Battery Discharge Year Energy (Computed) | Sum of today_battery_discharge_energy daily values | 1 | kWh | dynamic |
+| battery_charge_year_energy | Battery Charge Year Energy (Computed) | Sum of today_battery_charge_energy daily values | 1 | kWh | dynamic |
+| year_grid_energy | Year Grid Energy (Net, Computed) | energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy | 1 | kWh | dynamic |
+
 ## Running
 
 ### Docker (recommended)

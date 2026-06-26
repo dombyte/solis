@@ -44,12 +44,26 @@ const periodRegisters: Record<'daily' | 'monthly' | 'yearly', string[]> = {
   monthly: [
     'pv_month_energy',
     'household_load_month_energy',
-    'backup_load_month_energy'
+    'backup_load_month_energy',
+    // Computed monthly registers
+    'energy_consumption_month_energy',
+    'energy_fed_into_grid_month_energy',
+    'energy_imported_from_grid_month_energy',
+    'battery_discharge_month_energy',
+    'battery_charge_month_energy',
+    'month_grid_energy'
   ],
   yearly: [
     'pv_year_energy',
     'household_load_year_energy',
-    'backup_load_year_energy'
+    'backup_load_year_energy',
+    // Computed yearly registers
+    'energy_consumption_year_energy',
+    'energy_fed_into_grid_year_energy',
+    'energy_imported_from_grid_year_energy',
+    'battery_discharge_year_energy',
+    'battery_charge_year_energy',
+    'year_grid_energy'
   ]
 }
 
