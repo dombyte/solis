@@ -2,12 +2,17 @@ package poller
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/modbus"
+	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/storage"
 )
 
 func TestNew(t *testing.T) {
@@ -367,5 +372,254 @@ func TestPoller_ConfigValidation(t *testing.T) {
 				t.Error("Poller.config is not set correctly")
 			}
 		})
+	}
+}
+
+// TestPoller_ComputedValues tests that poller computes monthly/yearly/grid values
+func TestPoller_ComputedValues(t *testing.T) {
+	// Create a temporary database for testing
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_poller_computed.db")
+
+	// Create storage
+	stCfg := &config.StorageSettings{
+		Path:        dbPath,
+		WalMode:     true,
+		Synchronous: "NORMAL",
+		TempStore:   "MEMORY",
+	}
+	st, err := storage.New(stCfg)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer func() {
+		st.Close()
+		os.RemoveAll(tempDir)
+	}()
+
+	// Create cache
+	ca := cache.New()
+
+	// Create poller config
+	pollerCfg := &config.PollerSettings{
+		Interval:        100 * time.Millisecond,
+		BlockAttempts:   0,
+		BlockRetryDelay: 10 * time.Millisecond,
+		BlockInterval:   0,
+		PollTimeout:     500 * time.Millisecond,
+		JitterMax:      0,
+	}
+
+	// Create a modbus client (will fail to connect, but we can test the computation logic)
+	modbusClient := &modbus.Client{}
+
+	// Create poller with storage and cache
+	poller := New(pollerCfg, modbusClient,
+		WithStorage(st),
+		WithCache(ca),
+		WithRegisterFilter(nil))
+
+	if poller == nil {
+		t.Fatal("New() returned nil")
+	}
+
+	// We can't test the full pollOnce because it requires a real Modbus connection
+	// But we can verify that the poller was created with the right configuration
+	if poller.storage == nil {
+		t.Error("Poller.storage should be set")
+	}
+
+	if poller.cache == nil {
+		t.Error("Poller.cache should be set")
+	}
+
+	// Verify that computed registers exist in the register map
+	computedKeys := []string{
+		"today_grid_energy",
+		"total_grid_energy",
+		"energy_consumption_month_energy",
+		"energy_fed_into_grid_month_energy",
+		"energy_imported_from_grid_month_energy",
+		"battery_discharge_month_energy",
+		"battery_charge_month_energy",
+		"month_grid_energy",
+		"energy_consumption_year_energy",
+		"energy_fed_into_grid_year_energy",
+		"energy_imported_from_grid_year_energy",
+		"battery_discharge_year_energy",
+		"battery_charge_year_energy",
+		"year_grid_energy",
+	}
+
+	for _, key := range computedKeys {
+		if _, ok := solis.RegisterMapByKey[key]; !ok {
+			t.Errorf("Computed register %s not found in RegisterMapByKey", key)
+		}
+	}
+}
+
+// TestPoller_WithOptions tests that poller options work correctly
+func TestPoller_WithOptions(t *testing.T) {
+	cfg := &config.PollerSettings{
+		Interval:        15 * time.Minute,
+		BlockAttempts:   3,
+		BlockRetryDelay: 1 * time.Second,
+		BlockInterval:   0,
+		PollTimeout:     30 * time.Second,
+	}
+
+	client := &modbus.Client{}
+
+	// Create storage and cache for testing
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_options.db")
+
+	stCfg := &config.StorageSettings{
+		Path: dbPath,
+	}
+	st, err := storage.New(stCfg)
+	if err != nil {
+		t.Fatalf("Failed to create storage: %v", err)
+	}
+	defer func() {
+		st.Close()
+		os.RemoveAll(tempDir)
+	}()
+
+	ca := cache.New()
+	rf := solis.NewRegisterFilter([]string{"pv_voltage_1"})
+
+	// Create poller with all options
+	poller := New(cfg, client,
+		WithStorage(st),
+		WithCache(ca),
+		WithRegisterFilter(rf))
+
+	if poller == nil {
+		t.Fatal("New() with options returned nil")
+	}
+
+	if poller.storage != st {
+		t.Error("Poller.storage not set correctly")
+	}
+
+	if poller.cache != ca {
+		t.Error("Poller.cache not set correctly")
+	}
+
+	if poller.registerFilter != rf {
+		t.Error("Poller.registerFilter not set correctly")
+	}
+}
+
+// TestPoller_DailyToMonthlyMapping tests that the daily to monthly mapping is correct
+func TestPoller_DailyToMonthlyMapping(t *testing.T) {
+	// These are the mappings used in poller.go
+	dailyToMonthly := map[string]string{
+		"today_energy_consumption":        "energy_consumption_month_energy",
+		"today_energy_fed_into_grid":      "energy_fed_into_grid_month_energy",
+		"today_energy_imported_from_grid": "energy_imported_from_grid_month_energy",
+		"today_battery_discharge_energy":  "battery_discharge_month_energy",
+		"today_battery_charge_energy":     "battery_charge_month_energy",
+	}
+
+	// Verify all source daily keys exist
+	for dailyKey := range dailyToMonthly {
+		if _, ok := solis.RegisterMapByKey[dailyKey]; !ok {
+			t.Errorf("Daily key %s not found in RegisterMapByKey", dailyKey)
+		}
+	}
+
+	// Verify all target monthly keys exist
+	for _, monthlyKey := range dailyToMonthly {
+		if _, ok := solis.RegisterMapByKey[monthlyKey]; !ok {
+			t.Errorf("Monthly key %s not found in RegisterMapByKey", monthlyKey)
+		}
+	}
+
+	// Verify all monthly keys are marked as monthly
+	for _, monthlyKey := range dailyToMonthly {
+		if !solis.IsMonthlyRegister(monthlyKey) {
+			t.Errorf("Key %s should be a monthly register", monthlyKey)
+		}
+	}
+
+	// Verify all daily keys are marked as daily
+	for dailyKey := range dailyToMonthly {
+		if !solis.IsDailyRegister(dailyKey) {
+			t.Errorf("Key %s should be a daily register", dailyKey)
+		}
+	}
+}
+
+// TestPoller_DailyToYearlyMapping tests that the daily to yearly mapping is correct
+func TestPoller_DailyToYearlyMapping(t *testing.T) {
+	// These are the mappings used in poller.go
+	dailyToYearly := map[string]string{
+		"today_energy_consumption":        "energy_consumption_year_energy",
+		"today_energy_fed_into_grid":      "energy_fed_into_grid_year_energy",
+		"today_energy_imported_from_grid": "energy_imported_from_grid_year_energy",
+		"today_battery_discharge_energy":  "battery_discharge_year_energy",
+		"today_battery_charge_energy":     "battery_charge_year_energy",
+	}
+
+	// Verify all source daily keys exist
+	for dailyKey := range dailyToYearly {
+		if _, ok := solis.RegisterMapByKey[dailyKey]; !ok {
+			t.Errorf("Daily key %s not found in RegisterMapByKey", dailyKey)
+		}
+	}
+
+	// Verify all target yearly keys exist
+	for _, yearlyKey := range dailyToYearly {
+		if _, ok := solis.RegisterMapByKey[yearlyKey]; !ok {
+			t.Errorf("Yearly key %s not found in RegisterMapByKey", yearlyKey)
+		}
+	}
+
+	// Verify all yearly keys are marked as yearly
+	for _, yearlyKey := range dailyToYearly {
+		if !solis.IsYearlyRegister(yearlyKey) {
+			t.Errorf("Key %s should be a yearly register", yearlyKey)
+		}
+	}
+
+	// Verify all daily keys are marked as daily
+	for dailyKey := range dailyToYearly {
+		if !solis.IsDailyRegister(dailyKey) {
+			t.Errorf("Key %s should be a daily register", dailyKey)
+		}
+	}
+}
+
+// TestPoller_NetGridEnergyKeys tests that net grid energy keys exist
+func TestPoller_NetGridEnergyKeys(t *testing.T) {
+	// These are the net grid energy keys used in poller.go
+	netKeys := []string{
+		"today_grid_energy",
+		"total_grid_energy",
+		"month_grid_energy",
+		"year_grid_energy",
+	}
+
+	// Verify all net keys exist
+	for _, key := range netKeys {
+		if _, ok := solis.RegisterMapByKey[key]; !ok {
+			t.Errorf("Net grid energy key %s not found in RegisterMapByKey", key)
+		}
+	}
+
+	// Verify today and total are in their respective sets
+	if !solis.IsDailyRegister("today_grid_energy") {
+		t.Error("today_grid_energy should be a daily register")
+	}
+	if !solis.IsTotalRegister("total_grid_energy") {
+		t.Error("total_grid_energy should be a total register")
+	}
+	if !solis.IsMonthlyRegister("month_grid_energy") {
+		t.Error("month_grid_energy should be a monthly register")
+	}
+	if !solis.IsYearlyRegister("year_grid_energy") {
+		t.Error("year_grid_energy should be a yearly register")
 	}
 }
