@@ -44,6 +44,16 @@ storage:
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
+  
+  # Database maintenance settings
+  # Enable automatic schema migrations on startup
+  enable_migrations: true
+  # Enable database backup functionality
+  enable_backup: true
+  # Maximum number of backup files to keep (0 = unlimited)
+  max_backups: 3
+  # Interval for periodic online backups (e.g., "24h", "12h", "30m")
+  backup_interval: 24h
 
 metrics:
   # Enable Prometheus metrics endpoint

@@ -17,11 +17,11 @@ import (
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/metrics"
+	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/websocket"
 )
 
@@ -47,13 +47,38 @@ func runApp() error {
 		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 
-	// Initialize storage (always enabled)
-	st, err := storage.New(&cfg.Storage)
+	// Initialize database manager for migrations, backups, and cleanup
+	dbManager := database.NewDatabaseManager(
+		&cfg.Storage,
+		&database.BackupConfig{
+			Enabled:        cfg.Storage.EnableBackup,
+			MaxBackups:     cfg.Storage.MaxBackups,
+			BackupInterval: cfg.Storage.BackupInterval,
+		},
+	)
+
+	// Initialize storage with migration support
+	st, err := dbManager.Initialize()
 	if err != nil {
-		return fmt.Errorf("failed to initialize storage: %v", err)
+		return fmt.Errorf("failed to initialize database: %v", err)
 	}
-	defer st.Close()
-	logger.Info().Msg("Storage initialized")
+	defer func() {
+		if err := dbManager.Close(); err != nil {
+			logger.Error().Msgf("Error closing database manager: %v", err)
+		}
+	}()
+	logger.Info().Msg("Database initialized with migrations and backup support")
+
+	// Start periodic online backups in background
+	if cfg.Storage.EnableBackup && cfg.Storage.BackupInterval > 0 {
+		ctx := context.Background()
+		go func() {
+			if err := dbManager.StartPeriodicBackups(ctx); err != nil {
+				logger.Error().Msgf("Failed to start periodic backups: %v", err)
+			}
+		}()
+		logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
+	}
 
 	// Initialize cache for latest register values
 	ca := cache.New()
