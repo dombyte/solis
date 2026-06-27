@@ -428,6 +428,139 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 		}
 	}
 
+	// Compute monthly and yearly energy registers from daily storage
+	// Only compute if storage is available
+	if p.storage != nil {
+		// Get current date for month/year calculation
+		currentMonth := startTime.Format("2006-01")
+		currentYear := startTime.Format("2006")
+
+		// Define mappings from daily to monthly/yearly register keys
+		dailyToMonthly := map[string]string{
+			"today_energy_consumption":        "energy_consumption_month_energy",
+			"today_energy_fed_into_grid":      "energy_fed_into_grid_month_energy",
+			"today_energy_imported_from_grid": "energy_imported_from_grid_month_energy",
+			"today_battery_discharge_energy":  "battery_discharge_month_energy",
+			"today_battery_charge_energy":     "battery_charge_month_energy",
+		}
+
+		dailyToYearly := map[string]string{
+			"today_energy_consumption":        "energy_consumption_year_energy",
+			"today_energy_fed_into_grid":      "energy_fed_into_grid_year_energy",
+			"today_energy_imported_from_grid": "energy_imported_from_grid_year_energy",
+			"today_battery_discharge_energy":  "battery_discharge_year_energy",
+			"today_battery_charge_energy":     "battery_charge_year_energy",
+		}
+
+		// Compute monthly values from daily storage
+		for dailyKey, monthlyKey := range dailyToMonthly {
+			value, _, err := p.storage.GetMonthlySum(dailyKey, currentMonth)
+			if err != nil {
+				logger.Warn().Msgf("Failed to compute %s from daily storage: %v", monthlyKey, err)
+				continue
+			}
+
+			// Look up the register definition
+			reg, ok := solis.RegisterMapByKey[monthlyKey]
+			if !ok {
+				logger.Warn().Msgf("Register %s not found in RegisterMapByKey", monthlyKey)
+				continue
+			}
+
+			// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
+			// Since reg.Scale is 1 for these computed registers, RawValue should equal value
+			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
+			computedValue := &solis.Value{
+				Key:          monthlyKey,
+				Name:        reg.Name,
+				RawValue:    value,  // Store the already-scaled value as RawValue
+				DecodedValue: value,
+				Unit:        reg.Unit,
+				Timestamp:   startTime,
+			}
+			values[monthlyKey] = computedValue
+			logger.Debug().Msgf("Computed %s: %.1f kWh", monthlyKey, value)
+		}
+
+		// Compute yearly values from daily storage
+		for dailyKey, yearlyKey := range dailyToYearly {
+			value, _, err := p.storage.GetYearlySum(dailyKey, currentYear)
+			if err != nil {
+				logger.Warn().Msgf("Failed to compute %s from daily storage: %v", yearlyKey, err)
+				continue
+			}
+
+			// Look up the register definition
+			reg, ok := solis.RegisterMapByKey[yearlyKey]
+			if !ok {
+				logger.Warn().Msgf("Register %s not found in RegisterMapByKey", yearlyKey)
+				continue
+			}
+
+			// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
+			// Since reg.Scale is 1 for these computed registers, RawValue should equal value
+			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
+			computedValue := &solis.Value{
+				Key:          yearlyKey,
+				Name:        reg.Name,
+				RawValue:    value,  // Store the already-scaled value as RawValue
+				DecodedValue: value,
+				Unit:        reg.Unit,
+				Timestamp:   startTime,
+			}
+			values[yearlyKey] = computedValue
+			logger.Debug().Msgf("Computed %s: %.1f kWh", yearlyKey, value)
+		}
+
+		// Compute net grid energy for monthly: month_grid_energy = energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy
+		if fedMonth, fedExists := values["energy_fed_into_grid_month_energy"]; fedExists {
+			if importMonth, importExists := values["energy_imported_from_grid_month_energy"]; importExists {
+				// Both values are already scaled (in kWh), so we can subtract directly
+				// For the net register with Scale=1, RawValue should equal DecodedValue
+				netValue := fedMonth.DecodedValue - importMonth.DecodedValue
+				reg, ok := solis.RegisterMapByKey["month_grid_energy"]
+				if !ok {
+					logger.Warn().Msg("Register month_grid_energy not found in RegisterMapByKey")
+				} else {
+					netMonthValue := &solis.Value{
+						Key:          "month_grid_energy",
+						Name:        reg.Name,
+						RawValue:    netValue,  // Store already-scaled value as RawValue
+						DecodedValue: netValue,
+						Unit:        reg.Unit,
+						Timestamp:   startTime,
+					}
+					values["month_grid_energy"] = netMonthValue
+					logger.Debug().Msgf("Computed month_grid_energy: %.1f kWh", netMonthValue.DecodedValue)
+				}
+			}
+		}
+
+		// Compute net grid energy for yearly: year_grid_energy = energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy
+		if fedYear, fedExists := values["energy_fed_into_grid_year_energy"]; fedExists {
+			if importYear, importExists := values["energy_imported_from_grid_year_energy"]; importExists {
+				// Both values are already scaled (in kWh), so we can subtract directly
+				// For the net register with Scale=1, RawValue should equal DecodedValue
+				netValue := fedYear.DecodedValue - importYear.DecodedValue
+				reg, ok := solis.RegisterMapByKey["year_grid_energy"]
+				if !ok {
+					logger.Warn().Msg("Register year_grid_energy not found in RegisterMapByKey")
+				} else {
+					netYearValue := &solis.Value{
+						Key:          "year_grid_energy",
+						Name:        reg.Name,
+						RawValue:    netValue,  // Store already-scaled value as RawValue
+						DecodedValue: netValue,
+						Unit:        reg.Unit,
+						Timestamp:   startTime,
+					}
+					values["year_grid_energy"] = netYearValue
+					logger.Debug().Msgf("Computed year_grid_energy: %.1f kWh", netYearValue.DecodedValue)
+				}
+			}
+		}
+	}
+
 	logger.Debug().Msgf("Poll cycle completed: read %d total registers, decoded %d values",
 		totalRegisters, len(values))
 

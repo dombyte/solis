@@ -130,7 +130,7 @@ export const registerConfigs: RegisterConfig[] = [
     name: "Grid Energy (Net)",
     endpoint: "daily",
     unit: "kWh",
-    description: "Net grid energy (export - import): positive = net export to grid, negative = net import from grid",
+    description: "Net grid energy (export - import): positive = net export to grid, negative = net import from grid. NOTE: This is a computed value and may be inaccurate.",
   },
   {
     key: "today_battery_discharge_energy",
@@ -197,6 +197,92 @@ export const registerConfigs: RegisterConfig[] = [
     unit: "kWh",
     description: "Total energy consumed by backup loads this year",
   },
+  // Computed Monthly Energy Registers
+  {
+    key: "energy_consumption_month_energy",
+    name: "Energy Consumption This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Total energy consumed by all loads this month (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "energy_fed_into_grid_month_energy",
+    name: "Energy Fed into Grid This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Total energy fed back into the grid this month (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "energy_imported_from_grid_month_energy",
+    name: "Energy Imported from Grid This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Total energy imported from the grid this month (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "battery_discharge_month_energy",
+    name: "Battery Discharge Energy This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Total energy discharged from battery this month (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "battery_charge_month_energy",
+    name: "Battery Charge Energy This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Total energy used to charge battery this month (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "month_grid_energy",
+    name: "Grid Energy (Net) This Month",
+    endpoint: "monthly",
+    unit: "kWh",
+    description: "Net grid energy this month (export - import, computed). NOTE: This is a computed value and may be inaccurate.",
+  },
+  // Computed Yearly Energy Registers
+  {
+    key: "energy_consumption_year_energy",
+    name: "Energy Consumption This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Total energy consumed by all loads this year (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "energy_fed_into_grid_year_energy",
+    name: "Energy Fed into Grid This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Total energy fed back into the grid this year (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "energy_imported_from_grid_year_energy",
+    name: "Energy Imported from Grid This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Total energy imported from the grid this year (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "battery_discharge_year_energy",
+    name: "Battery Discharge Energy This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Total energy discharged from battery this year (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "battery_charge_year_energy",
+    name: "Battery Charge Energy This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Total energy used to charge battery this year (computed from daily values). NOTE: This is a computed value and may be inaccurate.",
+  },
+  {
+    key: "year_grid_energy",
+    name: "Grid Energy (Net) This Year",
+    endpoint: "yearly",
+    unit: "kWh",
+    description: "Net grid energy this year (export - import, computed). NOTE: This is a computed value and may be inaccurate.",
+  },
   // Total Energy Registers
   {
     key: "pv_total_energy",
@@ -241,7 +327,7 @@ export const registerConfigs: RegisterConfig[] = [
     endpoint: "total",
     unit: "kWh",
     description:
-      "Net grid energy (export - import): positive = net export to grid, negative = net import from grid",
+      "Net grid energy (export - import): positive = net export to grid, negative = net import from grid. NOTE: This is a computed value and may be inaccurate.",
   },
   // Status Registers
   {

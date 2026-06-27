@@ -868,6 +868,112 @@ func (s *Storage) GetYearlyHistory(key string, startYear, endYear time.Time) ([]
 	return result, nil
 }
 
+// StoreMonthlyDataPoint stores a computed monthly data point in the monthly_values table.
+// This is used for backfilling historical computed values.
+func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Get register definition to apply scaling
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
+		return fmt.Errorf("register %s not found", key)
+	}
+
+	// Calculate decoded value using the register's scale
+	decodedValue := dp.RawValue * reg.Scale
+
+	// Get existing value for this month
+	var existingValue float64
+	err = tx.QueryRow(`
+		SELECT value FROM monthly_values 
+		WHERE register_key = ? AND month = ?
+	`, key, dp.Month).Scan(&existingValue)
+
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed to query existing monthly value: %w", err)
+	}
+
+	if err == sql.ErrNoRows {
+		// New month, insert new record
+		_, err = tx.Exec(`
+			INSERT INTO monthly_values (month, register_key, value, raw_value)
+			VALUES (?, ?, ?, ?)
+		`, dp.Month, key, decodedValue, dp.RawValue)
+	} else {
+		// Update existing record if new value is higher
+		if decodedValue > existingValue {
+			_, err = tx.Exec(`
+				UPDATE monthly_values 
+				SET value = ?, raw_value = ?
+				WHERE register_key = ? AND month = ?
+			`, decodedValue, dp.RawValue, key, dp.Month)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to store monthly data point: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// StoreYearlyDataPoint stores a computed yearly data point in the yearly_values table.
+// This is used for backfilling historical computed values.
+func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Get register definition to apply scaling
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
+		return fmt.Errorf("register %s not found", key)
+	}
+
+	// Calculate decoded value using the register's scale
+	decodedValue := dp.RawValue * reg.Scale
+
+	// Get existing value for this year
+	var existingValue float64
+	err = tx.QueryRow(`
+		SELECT value FROM yearly_values 
+		WHERE register_key = ? AND year = ?
+	`, key, dp.Year).Scan(&existingValue)
+
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed to query existing yearly value: %w", err)
+	}
+
+	if err == sql.ErrNoRows {
+		// New year, insert new record
+		_, err = tx.Exec(`
+			INSERT INTO yearly_values (year, register_key, value, raw_value)
+			VALUES (?, ?, ?, ?)
+		`, dp.Year, key, decodedValue, dp.RawValue)
+	} else {
+		// Update existing record if new value is higher
+		if decodedValue > existingValue {
+			_, err = tx.Exec(`
+				UPDATE yearly_values 
+				SET value = ?, raw_value = ?
+				WHERE register_key = ? AND year = ?
+			`, decodedValue, dp.RawValue, key, dp.Year)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to store yearly data point: %w", err)
+	}
+
+	return tx.Commit()
+}
+
 // GetTotalHistory retrieves the total (lifetime) value for a specific register key.
 // Returns the latest stored value.
 func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {
@@ -888,4 +994,62 @@ func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {
 	}
 
 	return &dp, nil
+}
+
+// GetMonthlySum returns the sum of daily values for a given register key and month.
+// This is used for computing monthly energy values from daily accumulations.
+func (s *Storage) GetMonthlySum(key string, month string) (float64, float64, error) {
+	// Query to sum all daily values for this register and month
+	// month format is "2006-01", so LIKE "2006-01%" matches all dates in that month
+	monthPattern := month + "%"
+	query := `
+		SELECT SUM(value), SUM(raw_value)
+		FROM daily_values
+		WHERE register_key = ? AND date LIKE ?
+	`
+
+	var sumValue, sumRawValue sql.NullFloat64
+	err := s.db.QueryRow(query, key, monthPattern).Scan(&sumValue, &sumRawValue)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get monthly sum: %w", err)
+	}
+
+	// If no rows, return 0
+	if !sumValue.Valid {
+		return 0, 0, nil
+	}
+	if !sumRawValue.Valid {
+		return 0, 0, nil
+	}
+
+	return sumValue.Float64, sumRawValue.Float64, nil
+}
+
+// GetYearlySum returns the sum of daily values for a given register key and year.
+// This is used for computing yearly energy values from daily accumulations.
+func (s *Storage) GetYearlySum(key string, year string) (float64, float64, error) {
+	// Query to sum all daily values for this register and year
+	// year format is "2006", so LIKE "2006%" matches all dates in that year
+	yearPattern := year + "%"
+	query := `
+		SELECT SUM(value), SUM(raw_value)
+		FROM daily_values
+		WHERE register_key = ? AND date LIKE ?
+	`
+
+	var sumValue, sumRawValue sql.NullFloat64
+	err := s.db.QueryRow(query, key, yearPattern).Scan(&sumValue, &sumRawValue)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to get yearly sum: %w", err)
+	}
+
+	// If no rows, return 0
+	if !sumValue.Valid {
+		return 0, 0, nil
+	}
+	if !sumRawValue.Valid {
+		return 0, 0, nil
+	}
+
+	return sumValue.Float64, sumRawValue.Float64, nil
 }
