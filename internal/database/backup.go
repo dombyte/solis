@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/dombyte/solis/internal/logging"
+	sqlite "modernc.org/sqlite"
 )
 
 // backupLogger is the package-level logger for backup operations.
@@ -88,7 +91,152 @@ func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 	return nil, fmt.Errorf("could not parse timestamp in backup filename: %s", filename)
 }
 
+// backuper interface for accessing SQLite backup functionality.
+// This matches the interface provided by modernc.org/sqlite driver connections.
+type backuper interface {
+	NewBackup(string) (*sqlite.Backup, error)
+	NewRestore(string) (*sqlite.Backup, error)
+}
+
+// createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API.
+// This provides better consistency and reliability compared to simple file copying.
+func createSQLiteBackup(sourcePath, destPath string) error {
+	// Open source database connection
+	srcDB, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open source database for backup: %w", err)
+	}
+	defer srcDB.Close()
+
+	// Verify source database is accessible
+	if err := srcDB.Ping(); err != nil {
+		return fmt.Errorf("failed to ping source database: %w", err)
+	}
+
+	// Ensure parent directory exists for destination
+	destDir := filepath.Dir(destPath)
+	if destDir != "" && destDir != "." {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return fmt.Errorf("failed to create destination directory: %w", err)
+		}
+	}
+
+	// Get a connection from the source database
+	conn, err := srcDB.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+	defer conn.Close()
+
+	// Use the raw connection to access SQLite backup functionality
+	err = conn.Raw(func(driverConn any) error {
+		// Type assert to get the backuper interface
+		bkp, err := driverConn.(backuper).NewBackup(destPath)
+		if err != nil {
+			return fmt.Errorf("failed to create backup object: %w", err)
+		}
+
+		// Copy all pages in one step (n = -1 means copy all remaining pages)
+		for more := true; more; {
+			more, err = bkp.Step(-1)
+			if err != nil {
+				return fmt.Errorf("failed during backup step: %w", err)
+			}
+		}
+
+		// Finish the backup operation
+		if err := bkp.Finish(); err != nil {
+			return fmt.Errorf("failed to finish backup: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("SQLite backup failed: %w", err)
+	}
+
+	// Verify the backup file was created and has content
+	backupInfo, err := os.Stat(destPath)
+	if err != nil {
+		return fmt.Errorf("backup file not found after creation: %w", err)
+	}
+
+	if backupInfo.Size() == 0 {
+		return fmt.Errorf("backup file is empty")
+	}
+
+	return nil
+}
+
+// restoreSQLiteBackup restores a SQLite database from a backup file using the native SQLite restore API.
+// This provides better consistency and reliability compared to simple file copying.
+func restoreSQLiteBackup(sourcePath, destPath string) error {
+	// Ensure parent directory exists for destination
+	destDir := filepath.Dir(destPath)
+	if destDir != "" && destDir != "." {
+		if err := os.MkdirAll(destDir, 0755); err != nil {
+			return fmt.Errorf("failed to create destination directory: %w", err)
+		}
+	}
+
+	// Open destination database connection (this will create the file if it doesn't exist)
+	destDB, err := sql.Open("sqlite", destPath)
+	if err != nil {
+		return fmt.Errorf("failed to open destination database for restore: %w", err)
+	}
+	defer destDB.Close()
+
+	// Get a connection from the destination database
+	conn, err := destDB.Conn(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to get database connection: %w", err)
+	}
+	defer conn.Close()
+
+	// Use the raw connection to access SQLite restore functionality
+	err = conn.Raw(func(driverConn any) error {
+		// Type assert to get the backuper interface
+		rst, err := driverConn.(backuper).NewRestore(sourcePath)
+		if err != nil {
+			return fmt.Errorf("failed to create restore object: %w", err)
+		}
+
+		// Copy all pages in one step (n = -1 means copy all remaining pages)
+		for more := true; more; {
+			more, err = rst.Step(-1)
+			if err != nil {
+				return fmt.Errorf("failed during restore step: %w", err)
+			}
+		}
+
+		// Finish the restore operation
+		if err := rst.Finish(); err != nil {
+			return fmt.Errorf("failed to finish restore: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("SQLite restore failed: %w", err)
+	}
+
+	// Verify the restored file exists and has content
+	destInfo, err := os.Stat(destPath)
+	if err != nil {
+		return fmt.Errorf("restored file not found: %w", err)
+	}
+
+	if destInfo.Size() == 0 {
+		return fmt.Errorf("restored file is empty")
+	}
+
+	return nil
+}
+
 // copyFile copies a file from src to dst using simple file copy.
+// This is kept as a fallback method if SQLite native backup fails.
 func copyFile(src, dst string) error {
 	source, err := os.Open(src)
 	if err != nil {
@@ -146,9 +294,13 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 
 	backupLogger.Info().Msgf("Creating backup (source: %s, destination: %s)", dbPath, backupPath)
 
-	// Create the backup
-	if err := copyFile(dbPath, backupPath); err != nil {
-		return "", fmt.Errorf("failed to create backup: %w", err)
+	// Create the backup using SQLite native backup API
+	if err := createSQLiteBackup(dbPath, backupPath); err != nil {
+		backupLogger.Warn().Msgf("SQLite native backup failed, falling back to file copy: %v", err)
+		// Fallback to file copy if SQLite backup fails
+		if err := copyFile(dbPath, backupPath); err != nil {
+			return "", fmt.Errorf("failed to create backup: %w", err)
+		}
 	}
 
 	// Verify backup file
@@ -181,9 +333,13 @@ func RestoreBackup(backupPath string, targetPath string) error {
 
 	backupLogger.Info().Msgf("Restoring backup (source: %s, target: %s)", backupPath, targetPath)
 
-	// Create the restore
-	if err := copyFile(backupPath, targetPath); err != nil {
-		return fmt.Errorf("failed to restore backup: %w", err)
+	// Create the restore using SQLite native restore API
+	if err := restoreSQLiteBackup(backupPath, targetPath); err != nil {
+		backupLogger.Warn().Msgf("SQLite native restore failed, falling back to file copy: %v", err)
+		// Fallback to file copy if SQLite restore fails
+		if err := copyFile(backupPath, targetPath); err != nil {
+			return fmt.Errorf("failed to restore backup: %w", err)
+		}
 	}
 
 	// Verify restored file

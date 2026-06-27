@@ -1,11 +1,14 @@
 package database
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestGenerateBackupFilename(t *testing.T) {
@@ -300,5 +303,74 @@ func TestDefaultBackupConfig(t *testing.T) {
 	}
 	if config.BackupInterval != 24*time.Hour {
 		t.Errorf("Expected backup interval to be 24h by default, got: %v", config.BackupInterval)
+	}
+}
+
+func TestSQLiteNativeBackup(t *testing.T) {
+	// Create temporary directory for test
+	tmpDir, err := os.MkdirTemp("", "sqlite_backup_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create source SQLite database with some content
+	sourcePath := filepath.Join(tmpDir, "source.db")
+	srcDB, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		t.Fatalf("Failed to open source database: %v", err)
+	}
+	defer srcDB.Close()
+
+	// Create a table and insert some data
+	if _, err := srcDB.Exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)"); err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+	if _, err := srcDB.Exec("INSERT INTO test (name) VALUES (?)", "test data"); err != nil {
+		t.Fatalf("Failed to insert data: %v", err)
+	}
+
+	// Test SQLite native backup
+	config := DefaultBackupConfig()
+	config.Enabled = true
+
+	backupResult, err := CreateBackup(sourcePath, config)
+	if err != nil {
+		t.Fatalf("Failed to create SQLite backup: %v", err)
+	}
+	if backupResult == "" {
+		t.Fatal("Expected backup path to be returned")
+	}
+
+	// Verify backup file exists
+	if _, err := os.Stat(backupResult); os.IsNotExist(err) {
+		t.Fatalf("Backup file does not exist: %s", backupResult)
+	}
+
+	// Test SQLite native restore
+	targetPath := filepath.Join(tmpDir, "restored.db")
+	if err := RestoreBackup(backupResult, targetPath); err != nil {
+		t.Fatalf("Failed to restore SQLite backup: %v", err)
+	}
+
+	// Verify restored file exists
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		t.Fatal("Restored file does not exist")
+	}
+
+	// Open the restored database and verify the data
+	restoredDB, err := sql.Open("sqlite", targetPath)
+	if err != nil {
+		t.Fatalf("Failed to open restored database: %v", err)
+	}
+	defer restoredDB.Close()
+
+	// Check that the table exists and has the correct data
+	var count int
+	if err := restoredDB.QueryRow("SELECT COUNT(*) FROM test WHERE name = ?", "test data").Scan(&count); err != nil {
+		t.Fatalf("Failed to query restored database: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 row with 'test data', got: %d", count)
 	}
 }
