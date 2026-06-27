@@ -103,6 +103,16 @@ type StorageSettings struct {
 	// TempStore controls where temporary files are stored.
 	// "DEFAULT", "FILE", "MEMORY"
 	TempStore string `mapstructure:"temp_store"`
+	
+	// Database maintenance settings
+	// EnableMigrations enables automatic schema migrations on startup.
+	EnableMigrations bool `mapstructure:"enable_migrations"`
+	// EnableBackup enables database backup functionality.
+	EnableBackup bool `mapstructure:"enable_backup"`
+	// MaxBackups is the maximum number of backup files to keep (0 = unlimited).
+	MaxBackups int `mapstructure:"max_backups"`
+	// BackupInterval is the interval for periodic online backups (e.g., "24h").
+	BackupInterval time.Duration `mapstructure:"backup_interval"`
 }
 
 // MetricsSettings contains Prometheus metrics configuration.
@@ -149,6 +159,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.wal_mode", true)
 	v.SetDefault("storage.synchronous", "NORMAL")
 	v.SetDefault("storage.temp_store", "MEMORY")
+	
+	// Database maintenance defaults
+	v.SetDefault("storage.enable_migrations", true)
+	v.SetDefault("storage.enable_backup", true)
+	v.SetDefault("storage.max_backups", 3)
+	v.SetDefault("storage.backup_interval", "24h")
 
 	// Metrics and registers defaults
 	v.SetDefault("metrics.enabled", false)
@@ -263,5 +279,15 @@ func validateConfig(cfg *AppConfig) error {
 	if !validTempStores[cfg.Storage.TempStore] {
 		return fmt.Errorf("invalid temp_store: %s (must be DEFAULT, FILE, or MEMORY)", cfg.Storage.TempStore)
 	}
+
+	// Validate database maintenance settings
+	if cfg.Storage.MaxBackups < 0 {
+		return fmt.Errorf("max_backups must be >= 0")
+	}
+	
+	if cfg.Storage.BackupInterval < 0 {
+		return fmt.Errorf("backup_interval must be >= 0")
+	}
+	
 	return nil
 }

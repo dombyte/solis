@@ -118,6 +118,104 @@ registers:
 | `wal_mode` | bool | true | Enable Write-Ahead Logging |
 | `synchronous` | string | NORMAL | Sync mode: OFF, NORMAL, FULL, EXTRA |
 | `temp_store` | string | MEMORY | Temp storage: DEFAULT, FILE, MEMORY |
+| `enable_migrations` | bool | true | Enable automatic schema migrations on startup |
+| `enable_backup` | bool | true | Enable database backup functionality |
+| `max_backups` | int | 3 | Maximum number of backup files to keep (0 = unlimited) |
+| `backup_interval` | duration | 24h | Interval for periodic backups |
+
+### Database Maintenance
+
+The application includes a comprehensive database lifecycle management system that automatically handles migrations, backups, and cleanup on startup.
+
+#### Schema Migrations
+
+- **Automatic Version Detection**: The application tracks the current database schema version in a `schema_version` table
+- **Forward-Only Migrations**: Each version increment adds new schema changes while preserving existing data
+- **Legacy Database Support**: Pre-migration databases are automatically detected and marked as version 1
+- **Migration Safety**: Database is backed up before any migration is applied
+
+#### Backup System
+
+**Automatic Backups**: All backups use the same simplified format:
+- Filename format: `{database}.{timestamp}.backup`
+- Example: `solis.db.20260627_143022.backup`
+- Created at startup if database file exists (before any migration)
+- Created periodically at the interval specified by `backup_interval`
+- Runs in background without affecting application performance
+
+**Backup Management**:
+- Automatic cleanup keeps only the most recent `max_backups` files
+- Old backups are removed oldest first
+- Set `max_backups: 0` to disable automatic cleanup (keep all backups)
+- Backup files are stored in a `backups` subdirectory of the database directory
+
+**Backup Verification**:
+- Each backup is verified to have the same size as the source database
+- Empty backups are rejected and deleted
+- All backup operations are logged with timestamps and file sizes
+
+#### Configuration Examples
+
+**Daily backups with 7-day retention**:
+```yaml
+storage:
+  enable_backup: true
+  max_backups: 7
+  backup_interval: 24h
+```
+
+**Frequent backups with unlimited retention**:
+```yaml
+storage:
+  enable_backup: true
+  max_backups: 0  # Keep all backups
+  backup_interval: 6h
+```
+
+**Disable backup functionality**:
+```yaml
+storage:
+  enable_backup: false
+```
+
+**Disable migrations (not recommended)**:
+```yaml
+storage:
+  enable_migrations: false
+```
+
+#### Manual Backup Management
+
+Backup files can be manually managed:
+- **Copy**: Backup files can be copied to other locations for offsite storage
+- **Restore**: Copy a backup file over the database file and restart the application
+- **Delete**: Old backups can be safely deleted (application will recreate as needed)
+
+#### Migration Process
+
+1. **Startup**: Application checks database schema version
+2. **Backup**: If database file exists, a backup is created (regardless of migration need)
+3. **Migration**: If needed, pending migrations are applied in order
+4. **Verification**: Schema version is updated and verified
+5. **Cleanup**: Old backups beyond `max_backups` are removed
+6. **Initialization**: Storage is initialized with the updated schema
+
+#### Troubleshooting
+
+**Application fails to start with migration error**:
+- Check logs for specific error message
+- Restore from the latest backup file: `cp backups/solis.db.20260627_143022.backup solis.db`
+- Ensure database file has proper permissions
+
+**Backup files accumulating**:
+- Increase `max_backups` to keep more backups
+- Set `max_backups: 0` to keep all backups
+- Manually delete old backups if needed
+
+**Migrations taking too long**:
+- Migration only runs when necessary (schema version mismatch)
+- Complex migrations may take time; this is normal for large databases
+- Check logs for migration progress
 
 ### Metrics Settings
 
