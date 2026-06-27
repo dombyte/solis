@@ -4,6 +4,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/utils"
 	_ "modernc.org/sqlite"
 )
 
@@ -727,6 +729,112 @@ type TotalDataPoint struct {
 	Value     float64 `json:"value"`     // Decoded value (scaled)
 	RawValue  float64 `json:"raw_value"` // Raw value before scaling
 	Timestamp string  `json:"timestamp"` // When it was last updated (RFC3339 format)
+}
+
+// MarshalJSON implements json.Marshaler for HistoryDataPoint to ensure float64 values are rounded.
+func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias HistoryDataPoint
+	aux := struct {
+		Value float64 `json:"value"`
+		Min   *float64 `json:"min,omitempty"`
+		Max   *float64 `json:"max,omitempty"`
+		*Alias
+	}{
+		Alias: (*Alias)(&h),
+	}
+	if h.Value != 0 {
+		rounded := utils.RoundTo2DecimalPlaces(h.Value)
+		aux.Value = rounded
+	}
+	if h.Min != nil {
+		rounded := utils.RoundTo2DecimalPlaces(*h.Min)
+		aux.Min = &rounded
+	}
+	if h.Max != nil {
+		rounded := utils.RoundTo2DecimalPlaces(*h.Max)
+		aux.Max = &rounded
+	}
+	return json.Marshal(aux)
+}
+
+// MarshalJSON implements json.Marshaler for DailyDataPoint to ensure float64 values are rounded.
+func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias DailyDataPoint
+	return json.Marshal(struct {
+		Date     string  `json:"date"`
+		Value    float64 `json:"value"`
+		RawValue float64 `json:"raw_value"`
+		*Alias
+	}{
+		Alias:    (*Alias)(&d),
+		Date:     d.Date,
+		Value:    utils.RoundTo2DecimalPlaces(d.Value),
+		RawValue: utils.RoundTo2DecimalPlaces(d.RawValue),
+	})
+}
+
+// MarshalJSON implements json.Marshaler for MonthlyDataPoint to ensure float64 values are rounded.
+func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias MonthlyDataPoint
+	return json.Marshal(struct {
+		Month    string  `json:"month"`
+		Value    float64 `json:"value"`
+		RawValue float64 `json:"raw_value"`
+		*Alias
+	}{
+		Alias:    (*Alias)(&m),
+		Month:    m.Month,
+		Value:    utils.RoundTo2DecimalPlaces(m.Value),
+		RawValue: utils.RoundTo2DecimalPlaces(m.RawValue),
+	})
+}
+
+// MarshalJSON implements json.Marshaler for YearlyDataPoint to ensure float64 values are rounded.
+func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias YearlyDataPoint
+	return json.Marshal(struct {
+		Year     string  `json:"year"`
+		Value    float64 `json:"value"`
+		RawValue float64 `json:"raw_value"`
+		*Alias
+	}{
+		Alias:    (*Alias)(&y),
+		Year:     y.Year,
+		Value:    utils.RoundTo2DecimalPlaces(y.Value),
+		RawValue: utils.RoundTo2DecimalPlaces(y.RawValue),
+	})
+}
+
+// MarshalJSON implements json.Marshaler for TotalDataPoint to ensure float64 values are rounded.
+func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias TotalDataPoint
+	return json.Marshal(struct {
+		Value     float64 `json:"value"`
+		RawValue  float64 `json:"raw_value"`
+		Timestamp string  `json:"timestamp"`
+		*Alias
+	}{
+		Alias:     (*Alias)(&t),
+		Value:     utils.RoundTo2DecimalPlaces(t.Value),
+		RawValue:  utils.RoundTo2DecimalPlaces(t.RawValue),
+		Timestamp: t.Timestamp,
+	})
+}
+
+// MarshalJSON implements json.Marshaler for ErrorDataPoint to ensure float64 values are rounded.
+func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
+	type Alias ErrorDataPoint
+	return json.Marshal(struct {
+		Timestamp   string  `json:"timestamp"`
+		RawValue    float64 `json:"raw_value"`
+		StringValue string  `json:"string_value,omitempty"`
+		*Alias
+	}{
+		Alias:      (*Alias)(&e),
+		Timestamp:  e.Timestamp,
+		RawValue:   utils.RoundTo2DecimalPlaces(e.RawValue),
+		StringValue: e.StringValue,
+	})
 }
 
 // internalDataPoint is used internally for aggregation with time.Time timestamp.
