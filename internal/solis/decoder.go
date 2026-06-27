@@ -46,11 +46,11 @@ func (v Value) MarshalJSON() ([]byte, error) {
 	// Create a copy with rounded DecodedValue
 	type Alias Value
 	aux := struct {
-		DecodedValue float64 `json:"value"`
+		DecodedValue utils.Float64With2Decimals `json:"value"`
 		*Alias
 	}{
 		Alias:       (*Alias)(&v),
-		DecodedValue: utils.RoundTo2DecimalPlaces(v.DecodedValue),
+		DecodedValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v.DecodedValue)),
 	}
 	return json.Marshal(aux)
 }

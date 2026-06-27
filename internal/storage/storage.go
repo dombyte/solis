@@ -735,23 +735,22 @@ type TotalDataPoint struct {
 func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias HistoryDataPoint
 	aux := struct {
-		Value float64 `json:"value"`
-		Min   *float64 `json:"min,omitempty"`
-		Max   *float64 `json:"max,omitempty"`
+		Value utils.Float64With2Decimals `json:"value"`
+		Min   *utils.Float64With2Decimals `json:"min,omitempty"`
+		Max   *utils.Float64With2Decimals `json:"max,omitempty"`
 		*Alias
 	}{
 		Alias: (*Alias)(&h),
 	}
 	if h.Value != 0 {
-		rounded := utils.RoundTo2DecimalPlaces(h.Value)
-		aux.Value = rounded
+		aux.Value = utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(h.Value))
 	}
 	if h.Min != nil {
-		rounded := utils.RoundTo2DecimalPlaces(*h.Min)
+		rounded := utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(*h.Min))
 		aux.Min = &rounded
 	}
 	if h.Max != nil {
-		rounded := utils.RoundTo2DecimalPlaces(*h.Max)
+		rounded := utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(*h.Max))
 		aux.Max = &rounded
 	}
 	return json.Marshal(aux)
@@ -761,15 +760,15 @@ func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias DailyDataPoint
 	return json.Marshal(struct {
-		Date     string  `json:"date"`
-		Value    float64 `json:"value"`
-		RawValue float64 `json:"raw_value"`
+		Date     string                   `json:"date"`
+		Value    utils.Float64With2Decimals `json:"value"`
+		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
 	}{
 		Alias:    (*Alias)(&d),
 		Date:     d.Date,
-		Value:    utils.RoundTo2DecimalPlaces(d.Value),
-		RawValue: utils.RoundTo2DecimalPlaces(d.RawValue),
+		Value:    utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(d.Value)),
+		RawValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(d.RawValue)),
 	})
 }
 
@@ -777,15 +776,15 @@ func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias MonthlyDataPoint
 	return json.Marshal(struct {
-		Month    string  `json:"month"`
-		Value    float64 `json:"value"`
-		RawValue float64 `json:"raw_value"`
+		Month    string                   `json:"month"`
+		Value    utils.Float64With2Decimals `json:"value"`
+		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
 	}{
 		Alias:    (*Alias)(&m),
 		Month:    m.Month,
-		Value:    utils.RoundTo2DecimalPlaces(m.Value),
-		RawValue: utils.RoundTo2DecimalPlaces(m.RawValue),
+		Value:    utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(m.Value)),
+		RawValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(m.RawValue)),
 	})
 }
 
@@ -793,15 +792,15 @@ func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias YearlyDataPoint
 	return json.Marshal(struct {
-		Year     string  `json:"year"`
-		Value    float64 `json:"value"`
-		RawValue float64 `json:"raw_value"`
+		Year     string                   `json:"year"`
+		Value    utils.Float64With2Decimals `json:"value"`
+		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
 	}{
 		Alias:    (*Alias)(&y),
 		Year:     y.Year,
-		Value:    utils.RoundTo2DecimalPlaces(y.Value),
-		RawValue: utils.RoundTo2DecimalPlaces(y.RawValue),
+		Value:    utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(y.Value)),
+		RawValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(y.RawValue)),
 	})
 }
 
@@ -809,14 +808,14 @@ func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias TotalDataPoint
 	return json.Marshal(struct {
-		Value     float64 `json:"value"`
-		RawValue  float64 `json:"raw_value"`
-		Timestamp string  `json:"timestamp"`
+		Value     utils.Float64With2Decimals `json:"value"`
+		RawValue  utils.Float64With2Decimals `json:"raw_value"`
+		Timestamp string                       `json:"timestamp"`
 		*Alias
 	}{
 		Alias:     (*Alias)(&t),
-		Value:     utils.RoundTo2DecimalPlaces(t.Value),
-		RawValue:  utils.RoundTo2DecimalPlaces(t.RawValue),
+		Value:     utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(t.Value)),
+		RawValue:  utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(t.RawValue)),
 		Timestamp: t.Timestamp,
 	})
 }
@@ -825,14 +824,14 @@ func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias ErrorDataPoint
 	return json.Marshal(struct {
-		Timestamp   string  `json:"timestamp"`
-		RawValue    float64 `json:"raw_value"`
-		StringValue string  `json:"string_value,omitempty"`
+		Timestamp   string                       `json:"timestamp"`
+		RawValue    utils.Float64With2Decimals    `json:"raw_value"`
+		StringValue string                       `json:"string_value,omitempty"`
 		*Alias
 	}{
 		Alias:      (*Alias)(&e),
 		Timestamp:  e.Timestamp,
-		RawValue:   utils.RoundTo2DecimalPlaces(e.RawValue),
+		RawValue:   utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(e.RawValue)),
 		StringValue: e.StringValue,
 	})
 }
