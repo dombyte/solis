@@ -147,7 +147,7 @@ The application includes a comprehensive database lifecycle management system th
 - Automatic cleanup keeps only the most recent `max_backups` files
 - Old backups are removed oldest first
 - Set `max_backups: 0` to disable automatic cleanup (keep all backups)
-- Backup files are stored in the same directory as the database file
+- Backup files are stored in a `backups` subdirectory of the database directory
 
 **Backup Verification**:
 - Each backup is verified to have the same size as the source database
@@ -204,7 +204,7 @@ Backup files can be manually managed:
 
 **Application fails to start with migration error**:
 - Check logs for specific error message
-- Restore from the latest backup file: `cp solis.db.20260627_143022.backup solis.db`
+- Restore from the latest backup file: `cp backups/solis.db.20260627_143022.backup solis.db`
 - Ensure database file has proper permissions
 
 **Backup files accumulating**:

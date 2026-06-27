@@ -47,15 +47,16 @@ func DefaultBackupConfig() *BackupConfig {
 }
 
 // GenerateBackupFilename generates a backup filename with timestamp.
-// Format: {name}.{timestamp}.backup
+// Format: backups/{name}.{timestamp}.backup
 func GenerateBackupFilename(dbPath string) string {
 	dbName := filepath.Base(dbPath)
 	dir := filepath.Dir(dbPath)
+	backupsDir := filepath.Join(dir, "backups")
 	timestamp := time.Now().Format("20060102_150405")
 
 	prefix := fmt.Sprintf("%s.%s.backup", dbName, timestamp)
 
-	return filepath.Join(dir, prefix)
+	return filepath.Join(backupsDir, prefix)
 }
 
 // ExtractBackupInfo extracts information from a backup filename.
@@ -289,6 +290,12 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Ensure backups subdirectory exists
+	backupsDir := filepath.Join(dir, "backups")
+	if err := os.MkdirAll(backupsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create backups directory: %w", err)
+	}
+
 	// Generate backup filename
 	backupPath := GenerateBackupFilename(dbPath)
 
@@ -357,17 +364,22 @@ func RestoreBackup(backupPath string, targetPath string) error {
 	return nil
 }
 
-// ListBackups lists all backup files in the same directory as the database.
+// ListBackups lists all backup files in the backups subdirectory of the database directory.
 // Returns both migration backups and online backups, sorted by timestamp (newest first).
 func ListBackups(dbPath string) ([]BackupInfo, error) {
 	dir := filepath.Dir(dbPath)
 	if dir == "" {
 		dir = "."
 	}
+	backupsDir := filepath.Join(dir, "backups")
 
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(backupsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory: %w", err)
+		// If backups directory doesn't exist, return empty list
+		if os.IsNotExist(err) {
+			return []BackupInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to read backups directory: %w", err)
 	}
 
 	backups := make([]BackupInfo, 0)
@@ -381,7 +393,7 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 			continue
 		}
 
-		fullPath := filepath.Join(dir, filename)
+		fullPath := filepath.Join(backupsDir, filename)
 		info, err := ExtractBackupInfo(fullPath)
 		if err != nil {
 			// Skip files that don't match our naming pattern

@@ -17,8 +17,8 @@ func TestGenerateBackupFilename(t *testing.T) {
 	if !strings.HasSuffix(got, ".backup") {
 		t.Errorf("Expected filename to end with .backup, got: %s", got)
 	}
-	if !strings.Contains(got, filepath.Join("/path/to/db")) {
-		t.Errorf("Expected filename to be in same directory as db, got: %s", got)
+	if !strings.Contains(got, filepath.Join("/path/to/db", "backups")) {
+		t.Errorf("Expected filename to be in backups subdirectory, got: %s", got)
 	}
 	if !strings.Contains(got, "solis.db.") {
 		t.Errorf("Expected filename to contain database name, got: %s", got)
@@ -35,7 +35,7 @@ func TestGenerateBackupFilename(t *testing.T) {
 
 func TestExtractBackupInfo(t *testing.T) {
 	// Test new simplified backup filename parsing
-	filename := "/path/to/solis.db.20260627_143022.backup"
+	filename := "/path/to/backups/solis.db.20260627_143022.backup"
 	info, err := ExtractBackupInfo(filename)
 	if err != nil {
 		t.Fatalf("Failed to extract backup info: %v", err)
@@ -54,14 +54,14 @@ func TestExtractBackupInfo(t *testing.T) {
 	}
 
 	// Test invalid filename (no timestamp)
-	filename = "/path/to/solis.db.backup"
+	filename = "/path/to/backups/solis.db.backup"
 	_, err = ExtractBackupInfo(filename)
 	if err == nil {
 		t.Error("Expected error for invalid filename")
 	}
 
 	// Test invalid filename (no dot separator)
-	filename = "/path/to/solisdb20260627_143022.backup"
+	filename = "/path/to/backups/solisdb20260627_143022.backup"
 	_, err = ExtractBackupInfo(filename)
 	if err == nil {
 		t.Error("Expected error for invalid filename")
@@ -207,12 +207,18 @@ func TestCleanupBackups(t *testing.T) {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
+	// Create backups directory
+	backupsDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0755); err != nil {
+		t.Fatalf("Failed to create backups directory: %v", err)
+	}
+
 	// Create multiple backup files with different timestamps
 	backupFiles := []string{
-		filepath.Join(tmpDir, "test.db.v1.20260627_100000.backup"),
-		filepath.Join(tmpDir, "test.db.v1.20260627_110000.backup"),
-		filepath.Join(tmpDir, "test.db.v1.20260627_120000.backup"),
-		filepath.Join(tmpDir, "test.db.v1.20260627_130000.backup"),
+		filepath.Join(backupsDir, "test.db.v1.20260627_100000.backup"),
+		filepath.Join(backupsDir, "test.db.v1.20260627_110000.backup"),
+		filepath.Join(backupsDir, "test.db.v1.20260627_120000.backup"),
+		filepath.Join(backupsDir, "test.db.v1.20260627_130000.backup"),
 	}
 
 	for _, file := range backupFiles {
@@ -260,12 +266,18 @@ func TestListBackups(t *testing.T) {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
+	// Create backups directory
+	backupsDir := filepath.Join(tmpDir, "backups")
+	if err := os.MkdirAll(backupsDir, 0755); err != nil {
+		t.Fatalf("Failed to create backups directory: %v", err)
+	}
+
 	// Create backup files
 	backupFiles := []string{
-		filepath.Join(tmpDir, "test.db.v1.20260627_143022.backup"),
-		filepath.Join(tmpDir, "test.db.online.20260627_153022.backup"),
-		filepath.Join(tmpDir, "other_file.backup"), // Should be ignored
-		filepath.Join(tmpDir, "test.db.v2.20260627_163022.backup"),
+		filepath.Join(backupsDir, "test.db.v1.20260627_143022.backup"),
+		filepath.Join(backupsDir, "test.db.online.20260627_153022.backup"),
+		filepath.Join(backupsDir, "other_file.backup"), // Should be ignored
+		filepath.Join(backupsDir, "test.db.v2.20260627_163022.backup"),
 	}
 
 	for _, file := range backupFiles {
