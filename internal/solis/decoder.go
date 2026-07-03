@@ -4,10 +4,12 @@ package solis
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"time"
 
 	"github.com/dombyte/solis/internal/logging"
+	"github.com/dombyte/solis/internal/utils"
 )
 
 // decoderLogger is the package-level logger for decoder operations.
@@ -39,16 +41,34 @@ type Value struct {
 	StatusDecoded interface{} `json:"status_decoded,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaler for Value to ensure DecodedValue is rounded to 2 decimal places.
+func (v Value) MarshalJSON() ([]byte, error) {
+	// Create a copy with rounded DecodedValue
+	type Alias Value
+	aux := struct {
+		DecodedValue utils.Float64With2Decimals `json:"value"`
+		*Alias
+	}{
+		Alias:       (*Alias)(&v),
+		DecodedValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v.DecodedValue)),
+	}
+	return json.Marshal(aux)
+}
+
 // DecodeRegister decodes raw bytes from a register into a typed Value.
 // This is the main entry point for decoding individual register data.
 func DecodeRegister(reg *Register, raw []byte) Value {
 	rawVal := decodeRaw(reg.DataType, raw)
+	decoded := rawVal * reg.Scale
+	
+	// Round to exactly 2 decimal places for consistent display
+	decoded = utils.RoundTo2DecimalPlaces(decoded)
 
 	value := Value{
 		Key:          reg.Key,
 		Name:         reg.Name,
 		RawValue:     rawVal,
-		DecodedValue: rawVal * reg.Scale,
+		DecodedValue: decoded,
 		Unit:         reg.Unit,
 		DataType:     reg.DataType,
 		Stability:    reg.Stability,
