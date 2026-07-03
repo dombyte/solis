@@ -11,6 +11,13 @@ services:
       - TZ=Europe/Berlin
     ports:
       - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+          cpus: "4"
+        reservations:
+          memory: 512m
     healthcheck:
       test: ["CMD", "httpcheck", "http://localhost:8080/health"]
       interval: 30s
