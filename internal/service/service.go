@@ -365,17 +365,18 @@ func (s *ReadService) HealthCheck() (map[string]string, error) {
 
 	if s.modbusClient != nil {
 		status["modbus_connected"] = fmt.Sprintf("%v", s.modbusClient.IsConnected())
+	} else {
+		status["modbus_connected"] = "disabled"
 	}
 
 	if s.poller != nil {
 		status["poller_running"] = fmt.Sprintf("%v", s.poller.IsRunning())
-	}
-
-	if s.poller != nil {
 		if info := s.poller.GetLastPollInfo(); info != nil {
 			status["last_poll"] = info.Timestamp.Format(time.RFC3339)
 			status["poll_duration_ms"] = fmt.Sprintf("%d", info.DurationMs)
 		}
+	} else {
+		status["poller_running"] = "disabled"
 	}
 
 	// Storage status

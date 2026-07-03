@@ -105,37 +105,44 @@ func runApp() error {
 	}
 	registerFilter := solis.NewRegisterFilter(cfg.Registers.DisabledKeys)
 
-	// Initialize shared Modbus client (Solis inverter only handles one connection at a time)
-	// Use AllowDisconnected to allow app to start even if modbus is unavailable
-	modbusClient, err := modbus.NewClient(&cfg.Modbus, modbus.WithAllowDisconnected(true))
-	if err != nil {
-		return fmt.Errorf("failed to create Modbus client: %v", err)
-	}
-	defer modbusClient.Close()
-
-	// Initialize poller and service only if modbus is connected
-	// If modbus is not connected, start reconnection loop but don't start poller
+	// Initialize Modbus client and poller only if NOT in serve-only mode
+	var modbusClient *modbus.Client
 	var pl *poller.Poller
 
-	if modbusClient.IsConnected() {
-		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithRegisterFilter(registerFilter))
-		pl.Start()
-		defer pl.Stop()
+	if !cfg.App.ServeOnly {
+		// Initialize shared Modbus client (Solis inverter only handles one connection at a time)
+		// Use AllowDisconnected to allow app to start even if modbus is unavailable
+		var err error
+		modbusClient, err = modbus.NewClient(&cfg.Modbus, modbus.WithAllowDisconnected(true))
+		if err != nil {
+			return fmt.Errorf("failed to create Modbus client: %v", err)
+		}
+		defer modbusClient.Close()
 
-		// First poll - trigger immediate poll before HTTP server starts (non-blocking)
-		logger.Info().Msg("Triggering first poll...")
-		go func() {
-			if _, err := pl.PollNow(); err != nil {
-				logger.Error().Msgf("First poll failed: %v", err)
-			} else {
-				logger.Info().Msg("First poll completed")
-			}
-		}()
+		// Initialize poller and service only if modbus is connected
+		// If modbus is not connected, start reconnection loop but don't start poller
+		if modbusClient.IsConnected() {
+			pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithRegisterFilter(registerFilter))
+			pl.Start()
+			defer pl.Stop()
+
+			// First poll - trigger immediate poll before HTTP server starts (non-blocking)
+			logger.Info().Msg("Triggering first poll...")
+			go func() {
+				if _, err := pl.PollNow(); err != nil {
+					logger.Error().Msgf("First poll failed: %v", err)
+				} else {
+					logger.Info().Msg("First poll completed")
+				}
+			}()
+		} else {
+			logger.Warn().Msg("Modbus not connected, starting background reconnection loop")
+			logger.Warn().Msg("Poller will not start until Modbus is connected")
+			go modbusClient.StartReconnectionLoop(context.Background())
+			// Don't start poller - it needs modbus connection
+		}
 	} else {
-		logger.Warn().Msg("Modbus not connected, starting background reconnection loop")
-		logger.Warn().Msg("Poller will not start until Modbus is connected")
-		go modbusClient.StartReconnectionLoop(context.Background())
-		// Don't start poller - it needs modbus connection
+		logger.Info().Msg("Running in serve-only mode - Modbus and poller disabled")
 	}
 
 	// Initialize service (always needed for HTTP endpoints)
@@ -174,8 +181,12 @@ func runApp() error {
 	logger.Info().Msgf("  - API endpoints: /api/*")
 	logger.Info().Msgf("  - Health check: /health")
 	logger.Info().Msgf("  - API Documentation: /docs")
-	logger.Info().Msgf("  - Poller interval: %s", cfg.Poller.Interval)
-	logger.Info().Msgf("  - Modbus: %s:%d", cfg.Modbus.Host, cfg.Modbus.Port)
+	if !cfg.App.ServeOnly {
+		logger.Info().Msgf("  - Poller interval: %s", cfg.Poller.Interval)
+		logger.Info().Msgf("  - Modbus: %s:%d", cfg.Modbus.Host, cfg.Modbus.Port)
+	} else {
+		logger.Info().Msg("  - Mode: serve-only (no Modbus polling)")
+	}
 
 	// Wait for shutdown signal
 	quit := make(chan os.Signal, 1)

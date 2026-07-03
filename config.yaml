@@ -6,6 +6,7 @@ app:
   debug: DEBUG
   port: 8080
   timeout: 30s
+  serve_only: true
 
 poller:
   # Base interval between poll cycles
@@ -44,7 +45,7 @@ storage:
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
-  
+
   # Database maintenance settings
   # Enable automatic schema migrations on startup
   enable_migrations: true

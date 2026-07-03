@@ -31,6 +31,7 @@ app:
   debug: INFO      # DEBUG, INFO, WARN, ERROR, FATAL
   port: 8080
   timeout: 30s
+  serve_only: false  # Set to true to disable Modbus polling (serve-only mode)
 
 poller:
   interval: 30s
@@ -80,6 +81,48 @@ registers:
 | `debug` | string | INFO | Log level: DEBUG, INFO, WARN, ERROR, FATAL |
 | `port` | int | 8080 | HTTP server port (1-65535) |
 | `timeout` | duration | 30s | Request timeout |
+| `serve_only` | bool | false | Run in serve-only mode (disables Modbus polling, uses cached/stored data only) |
+
+### Serve-Only Mode
+
+Serve-only mode allows running the Solis Monitor **without** connecting to the inverter. This is useful for:
+
+- Running a read-only reporting/analytics instance
+- Deploying a backup instance that only serves stored data
+- Running the API when the inverter is temporarily unavailable
+- Containerized deployments where Modbus is not available
+
+**How it works:**
+- HTTP API, WebSocket, and Prometheus metrics all function normally
+- Historical data (daily, monthly, yearly, total energy) is served from SQLite
+- Current register values (PV voltage, battery SOC, power, etc.) are served from cache
+- Modbus connection and background polling are completely disabled
+
+**Important limitation:** Current register values are stored in memory (cache) only. In serve-only mode, the cache starts empty. To have current values available:
+1. First run in normal mode to poll and cache values from the inverter
+2. Then switch to serve-only mode (cache persists in memory until restart)
+3. Or ensure another instance is polling and updating the database
+
+**Configuration:**
+```yaml
+app:
+  serve_only: true
+```
+
+Or via environment variable:
+```bash
+SOLIS_APP_SERVE_ONLY=true ./solis
+```
+
+**Health check in serve-only mode:**
+```json
+{
+  "modbus_connected": "disabled",
+  "poller_running": "disabled",
+  "storage": "ok",
+  "status": "ok"
+}
+```
 
 ### Poller Settings
 

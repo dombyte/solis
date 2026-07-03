@@ -38,6 +38,9 @@ type AppSettings struct {
 	Port int `mapstructure:"port"`
 	// Timeout is the request timeout for the HTTP server.
 	Timeout time.Duration `mapstructure:"timeout"`
+	// ServeOnly enables serve-only mode (disables Modbus polling).
+	// When true, the HTTP API serves cached and stored data without connecting to the inverter.
+	ServeOnly bool `mapstructure:"serve_only"`
 }
 
 // PollerSettings contains configuration for the background polling service.
@@ -134,6 +137,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("app.debug", "INFO")
 	v.SetDefault("app.port", 8080)
 	v.SetDefault("app.timeout", "30s")
+	v.SetDefault("app.serve_only", false)
 
 	// Poller defaults
 	v.SetDefault("poller.interval", "30s")
