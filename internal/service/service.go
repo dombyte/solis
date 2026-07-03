@@ -258,6 +258,11 @@ func (s *ReadService) GetDailyHistory(key string, start, end time.Time) ([]*stor
 // getComputedDailyGridEnergy computes the net daily grid energy from source registers.
 // Returns today_energy_fed_into_grid - today_energy_imported_from_grid for each day
 func (s *ReadService) getComputedDailyGridEnergy(start, end time.Time) ([]*storage.DailyDataPoint, error) {
+	// Validate date range
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date (%s) cannot be before start date (%s)", end.Format("2006-01-02"), start.Format("2006-01-02"))
+	}
+
 	// Get daily fed into grid
 	fedDaily, err := s.storage.GetDailyHistory("today_energy_fed_into_grid", start, end)
 	if err != nil {
@@ -281,24 +286,45 @@ func (s *ReadService) getComputedDailyGridEnergy(start, end time.Time) ([]*stora
 		importMap[dp.Date] = dp
 	}
 
-	// Compute net for each date
+	// Compute net for each date - include ALL dates from both datasets
 	var result []*storage.DailyDataPoint
-	// Use dates from fedDaily as primary
+	// Collect all unique dates
+	allDates := make(map[string]bool)
 	for _, dp := range fedDaily {
-		importDp, exists := importMap[dp.Date]
+		allDates[dp.Date] = true
+	}
+	for _, dp := range importDaily {
+		allDates[dp.Date] = true
+	}
+
+	// Sort dates for consistent ordering
+	var sortedDates []string
+	for date := range allDates {
+		sortedDates = append(sortedDates, date)
+	}
+	sort.Strings(sortedDates)
+
+	for _, date := range sortedDates {
+		fedDp, fedExists := fedMap[date]
+		importDp, importExists := importMap[date]
+
 		var netValue, netRawValue float64
-		
-		if exists {
-			netValue = dp.Value - importDp.Value
-			netRawValue = dp.RawValue - importDp.RawValue
-		} else {
+
+		if fedExists && importExists {
+			netValue = fedDp.Value - importDp.Value
+			netRawValue = fedDp.RawValue - importDp.RawValue
+		} else if fedExists {
 			// If no import data, net = fed value
-			netValue = dp.Value
-			netRawValue = dp.RawValue
+			netValue = fedDp.Value
+			netRawValue = fedDp.RawValue
+		} else if importExists {
+			// If no fed data, net = -import value
+			netValue = -importDp.Value
+			netRawValue = -importDp.RawValue
 		}
-		
+
 		result = append(result, &storage.DailyDataPoint{
-			Date:     dp.Date,
+			Date:     date,
 			Value:    netValue,
 			RawValue: netRawValue,
 		})
@@ -477,48 +503,72 @@ func (s *ReadService) getComputedTotalGridEnergy() (*storage.TotalDataPoint, err
 
 // getComputedMonthlyEnergy returns monthly history for computed registers by aggregating daily values.
 func (s *ReadService) getComputedMonthlyEnergy(dailyKey string, start, end time.Time, monthlyKey string) ([]*storage.MonthlyDataPoint, error) {
-	// FIRST: Try to get stored values from database
-	stored, err := s.storage.GetMonthlyHistory(monthlyKey, start, end)
-	if err == nil && len(stored) > 0 {
-		// Found stored data, return it
-		return stored, nil
+	// Validate date range
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date (%s) cannot be before start date (%s)", end.Format("2006-01-02"), start.Format("2006-01-02"))
 	}
-	// If error or no data, continue to calculate
 
-	// Expand start to first day of the month at 00:00:00
-	start = time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
-	
-	// Expand end to last day of the month at 23:59:59
-	// time.Date(year, month+1, 0, 0, 0, 0, 0, loc) gives first of next month at 00:00:00
-	// Subtract 1 nanosecond to get last moment of current month
-	end = time.Date(end.Year(), end.Month()+1, 0, 0, 0, 0, -1, end.Location())
+	// Get stored data for the requested range (may be partial)
+	stored, err := s.storage.GetMonthlyHistory(monthlyKey, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stored monthly history: %w", err)
+	}
+
+	// Expand date range to full months to get all daily data
+	startExpanded := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
+	// Add one month to end and go to the first day of that month (exclusive end)
+	// This ensures we include all days of the end month
+	endExpanded := time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, end.Location()).AddDate(0, 1, 0)
 
 	// Get all daily values for the expanded date range
-	dailyHistory, err := s.storage.GetDailyHistory(dailyKey, start, end)
+	dailyHistory, err := s.storage.GetDailyHistory(dailyKey, startExpanded, endExpanded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get daily history: %w", err)
 	}
 
-	// Group by month and sum
-	monthlyMap := make(map[string]*storage.MonthlyDataPoint)
+	// Group daily values by month and sum
+	// For computed registers, we want RawValue * Scale = Value
+	// Since reg.Scale is 1 for these computed registers, RawValue should equal Value
+	// Value is the sum of already-scaled daily values
+	calculatedMap := make(map[string]*storage.MonthlyDataPoint)
 	for _, dp := range dailyHistory {
 		month := dp.Date[:7] // "2006-01-02" -> "2006-01"
-		if _, exists := monthlyMap[month]; !exists {
-			monthlyMap[month] = &storage.MonthlyDataPoint{
+		if _, exists := calculatedMap[month]; !exists {
+			calculatedMap[month] = &storage.MonthlyDataPoint{
 				Month:    month,
 				Value:    0,
 				RawValue: 0,
 			}
 		}
-		monthlyMap[month].Value += dp.Value
-		monthlyMap[month].RawValue += dp.RawValue
+		// Sum the already-scaled daily values (dp.Value contains the scaled value from daily_values)
+		// For computed registers with Scale=1, both Value and RawValue should equal this sum
+		calculatedMap[month].Value += dp.Value
+		calculatedMap[month].RawValue += dp.Value
+	}
+
+	// Build map of stored data for easy lookup
+	storedMap := make(map[string]*storage.MonthlyDataPoint)
+	for _, dp := range stored {
+		storedMap[dp.Month] = dp
+	}
+
+	// Determine current month
+	currentMonth := time.Now().Format("2006-01")
+
+	// Merge: for past months, use stored data; for current month, always use calculated
+	for month, storedDp := range storedMap {
+		// Only use stored data for past months (not current month)
+		if month != currentMonth {
+			calculatedMap[month] = storedDp
+		}
+		// For current month, we keep the calculated value (which will be backfilled)
 	}
 
 	// Convert map to slice and sort by month
-	result := make([]*storage.MonthlyDataPoint, 0, len(monthlyMap))
-	for _, dp := range monthlyMap {
+	result := make([]*storage.MonthlyDataPoint, 0, len(calculatedMap))
+	for _, dp := range calculatedMap {
 		result = append(result, dp)
-		
+
 		// Store computed value in database for future queries
 		if storeErr := s.storage.StoreMonthlyDataPoint(monthlyKey, dp); storeErr != nil {
 			logger.Warn().Msgf("Failed to store computed monthly value for %s month %s: %v", monthlyKey, dp.Month, storeErr)
@@ -534,27 +584,31 @@ func (s *ReadService) getComputedMonthlyEnergy(dailyKey string, start, end time.
 // getComputedMonthlyGridEnergy returns monthly history for the net grid energy register.
 // Computes: energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy
 func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*storage.MonthlyDataPoint, error) {
-	// FIRST: Try to get stored net values from database
-	stored, err := s.storage.GetMonthlyHistory("month_grid_energy", start, end)
-	if err == nil && len(stored) > 0 {
-		// Found stored data, return it
-		return stored, nil
+	// Validate date range
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date (%s) cannot be before start date (%s)", end.Format("2006-01-02"), start.Format("2006-01-02"))
 	}
-	// If error or no data, continue to calculate
+
+	// Get stored net values from database (may be partial)
+	stored, err := s.storage.GetMonthlyHistory("month_grid_energy", start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stored month_grid_energy: %w", err)
+	}
 
 	// Expand date range to cover full months
-	// Expand start to first day of the month at 00:00:00
 	startExpanded := time.Date(start.Year(), start.Month(), 1, 0, 0, 0, 0, start.Location())
-	// Expand end to last day of the month at 23:59:59
-	endExpanded := time.Date(end.Year(), end.Month()+1, 0, 0, 0, 0, -1, end.Location())
+	// Add one month to end and go to the first day of that month (exclusive end)
+	// This ensures we include all days of the end month
+	endExpanded := time.Date(end.Year(), end.Month(), 1, 0, 0, 0, 0, end.Location()).AddDate(0, 1, 0)
 
-	// Get monthly history for both source registers with expanded range
-	fedMonthly, err := s.storage.GetMonthlyHistory("energy_fed_into_grid_month_energy", startExpanded, endExpanded)
+	// Get source monthly registers using the FIXED aggregation functions
+	// These will handle missing data by calculating from daily values
+	fedMonthly, err := s.getComputedMonthlyEnergy("today_energy_fed_into_grid", startExpanded, endExpanded, "energy_fed_into_grid_month_energy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get fed monthly history: %w", err)
 	}
 
-	importMonthly, err := s.storage.GetMonthlyHistory("energy_imported_from_grid_month_energy", startExpanded, endExpanded)
+	importMonthly, err := s.getComputedMonthlyEnergy("today_energy_imported_from_grid", startExpanded, endExpanded, "energy_imported_from_grid_month_energy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import monthly history: %w", err)
 	}
@@ -570,9 +624,15 @@ func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*sto
 		importMap[dp.Month] = dp
 	}
 
+	// Build map of stored net values
+	storedMap := make(map[string]*storage.MonthlyDataPoint)
+	for _, dp := range stored {
+		storedMap[dp.Month] = dp
+	}
+
 	// Compute net for each month
 	var result []*storage.MonthlyDataPoint
-	// Use all months from both datasets
+	// Collect all unique months from all sources
 	allMonths := make(map[string]bool)
 	for _, dp := range fedMonthly {
 		allMonths[dp.Month] = true
@@ -580,8 +640,21 @@ func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*sto
 	for _, dp := range importMonthly {
 		allMonths[dp.Month] = true
 	}
+	for _, dp := range stored {
+		allMonths[dp.Month] = true
+	}
+
+	// Determine current month
+	currentMonth := time.Now().Format("2006-01")
 
 	for month := range allMonths {
+		// Use stored net value if available and it's not the current month
+		// For current month, always calculate to ensure it's up-to-date
+		if storedDp, exists := storedMap[month]; exists && month != currentMonth {
+			result = append(result, storedDp)
+			continue
+		}
+
 		fedDp, fedExists := fedMap[month]
 		importDp, importExists := importMap[month]
 
@@ -591,11 +664,9 @@ func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*sto
 			netValue = fedDp.Value - importDp.Value
 			netRawValue = fedDp.RawValue - importDp.RawValue
 		} else if fedExists {
-			// If no import data, net = fed value
 			netValue = fedDp.Value
 			netRawValue = fedDp.RawValue
 		} else if importExists {
-			// If no fed data, net = -import value
 			netValue = -importDp.Value
 			netRawValue = -importDp.RawValue
 		}
@@ -606,7 +677,7 @@ func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*sto
 			RawValue: netRawValue,
 		}
 		result = append(result, netDp)
-		
+
 		// Store computed net value in database for future queries
 		if storeErr := s.storage.StoreMonthlyDataPoint("month_grid_energy", netDp); storeErr != nil {
 			logger.Warn().Msgf("Failed to store computed month_grid_energy for month %s: %v", month, storeErr)
@@ -623,46 +694,72 @@ func (s *ReadService) getComputedMonthlyGridEnergy(start, end time.Time) ([]*sto
 
 // getComputedYearlyEnergy returns yearly history for computed registers by aggregating daily values.
 func (s *ReadService) getComputedYearlyEnergy(dailyKey string, start, end time.Time, yearlyKey string) ([]*storage.YearlyDataPoint, error) {
-	// FIRST: Try to get stored values from database
-	stored, err := s.storage.GetYearlyHistory(yearlyKey, start, end)
-	if err == nil && len(stored) > 0 {
-		// Found stored data, return it
-		return stored, nil
+	// Validate date range
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date (%s) cannot be before start date (%s)", end.Format("2006-01-02"), start.Format("2006-01-02"))
 	}
-	// If error or no data, continue to calculate
 
-	// Expand start to first day of the year at 00:00:00
-	start = time.Date(start.Year(), time.January, 1, 0, 0, 0, 0, start.Location())
-	
-	// Expand end to last day of the year at 23:59:59
-	end = time.Date(end.Year()+1, time.January, 0, 0, 0, 0, -1, end.Location())
+	// Get stored data for the requested range (may be partial)
+	stored, err := s.storage.GetYearlyHistory(yearlyKey, start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stored yearly history: %w", err)
+	}
+
+	// Expand date range to full years to get all daily data
+	startExpanded := time.Date(start.Year(), time.January, 1, 0, 0, 0, 0, start.Location())
+	// Add one year to end and go to the first day of that year (exclusive end)
+	// This ensures we include all days of the end year
+	endExpanded := time.Date(end.Year(), time.January, 1, 0, 0, 0, 0, end.Location()).AddDate(1, 0, 0)
 
 	// Get all daily values for the expanded date range
-	dailyHistory, err := s.storage.GetDailyHistory(dailyKey, start, end)
+	dailyHistory, err := s.storage.GetDailyHistory(dailyKey, startExpanded, endExpanded)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get daily history: %w", err)
 	}
 
-	// Group by year and sum
-	yearlyMap := make(map[string]*storage.YearlyDataPoint)
+	// Group daily values by year and sum
+	// For computed registers, we want RawValue * Scale = Value
+	// Since reg.Scale is 1 for these computed registers, RawValue should equal Value
+	// Value is the sum of already-scaled daily values
+	calculatedMap := make(map[string]*storage.YearlyDataPoint)
 	for _, dp := range dailyHistory {
 		year := dp.Date[:4] // "2006-01-02" -> "2006"
-		if _, exists := yearlyMap[year]; !exists {
-			yearlyMap[year] = &storage.YearlyDataPoint{
+		if _, exists := calculatedMap[year]; !exists {
+			calculatedMap[year] = &storage.YearlyDataPoint{
 				Year:     year,
 				Value:    0,
 				RawValue: 0,
 			}
 		}
-		yearlyMap[year].Value += dp.Value
-		yearlyMap[year].RawValue += dp.RawValue
+		// Sum the already-scaled daily values (dp.Value contains the scaled value from daily_values)
+		// For computed registers with Scale=1, both Value and RawValue should equal this sum
+		calculatedMap[year].Value += dp.Value
+		calculatedMap[year].RawValue += dp.Value
+	}
+
+	// Build map of stored data for easy lookup
+	storedMap := make(map[string]*storage.YearlyDataPoint)
+	for _, dp := range stored {
+		storedMap[dp.Year] = dp
+	}
+
+	// Determine current year
+	currentYear := time.Now().Format("2006")
+
+	// Merge: for past years, use stored data; for current year, always use calculated
+	for year, storedDp := range storedMap {
+		// Only use stored data for past years (not current year)
+		if year != currentYear {
+			calculatedMap[year] = storedDp
+		}
+		// For current year, we keep the calculated value (which will be backfilled)
 	}
 
 	// Convert map to slice and sort by year
-	result := make([]*storage.YearlyDataPoint, 0, len(yearlyMap))
-	for _, dp := range yearlyMap {
+	result := make([]*storage.YearlyDataPoint, 0, len(calculatedMap))
+	for _, dp := range calculatedMap {
 		result = append(result, dp)
-		
+
 		// Store computed value in database for future queries
 		if storeErr := s.storage.StoreYearlyDataPoint(yearlyKey, dp); storeErr != nil {
 			logger.Warn().Msgf("Failed to store computed yearly value for %s year %s: %v", yearlyKey, dp.Year, storeErr)
@@ -678,27 +775,31 @@ func (s *ReadService) getComputedYearlyEnergy(dailyKey string, start, end time.T
 // getComputedYearlyGridEnergy returns yearly history for the net grid energy register.
 // Computes: energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy
 func (s *ReadService) getComputedYearlyGridEnergy(start, end time.Time) ([]*storage.YearlyDataPoint, error) {
-	// FIRST: Try to get stored net values from database
-	stored, err := s.storage.GetYearlyHistory("year_grid_energy", start, end)
-	if err == nil && len(stored) > 0 {
-		// Found stored data, return it
-		return stored, nil
+	// Validate date range
+	if end.Before(start) {
+		return nil, fmt.Errorf("end date (%s) cannot be before start date (%s)", end.Format("2006-01-02"), start.Format("2006-01-02"))
 	}
-	// If error or no data, continue to calculate
+
+	// Get stored net values from database (may be partial)
+	stored, err := s.storage.GetYearlyHistory("year_grid_energy", start, end)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get stored year_grid_energy: %w", err)
+	}
 
 	// Expand date range to cover full years
-	// Expand start to first day of the year at 00:00:00
 	startExpanded := time.Date(start.Year(), time.January, 1, 0, 0, 0, 0, start.Location())
-	// Expand end to last day of the year at 23:59:59
-	endExpanded := time.Date(end.Year()+1, time.January, 0, 0, 0, 0, -1, end.Location())
+	// Add one year to end and go to the first day of that year (exclusive end)
+	// This ensures we include all days of the end year
+	endExpanded := time.Date(end.Year(), time.January, 1, 0, 0, 0, 0, end.Location()).AddDate(1, 0, 0)
 
-	// Get yearly history for both source registers with expanded range
-	fedYearly, err := s.storage.GetYearlyHistory("energy_fed_into_grid_year_energy", startExpanded, endExpanded)
+	// Get source yearly registers using the FIXED aggregation functions
+	// These will handle missing data by calculating from daily values
+	fedYearly, err := s.getComputedYearlyEnergy("today_energy_fed_into_grid", startExpanded, endExpanded, "energy_fed_into_grid_year_energy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get fed yearly history: %w", err)
 	}
 
-	importYearly, err := s.storage.GetYearlyHistory("energy_imported_from_grid_year_energy", startExpanded, endExpanded)
+	importYearly, err := s.getComputedYearlyEnergy("today_energy_imported_from_grid", startExpanded, endExpanded, "energy_imported_from_grid_year_energy")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get import yearly history: %w", err)
 	}
@@ -714,9 +815,15 @@ func (s *ReadService) getComputedYearlyGridEnergy(start, end time.Time) ([]*stor
 		importMap[dp.Year] = dp
 	}
 
+	// Build map of stored net values
+	storedMap := make(map[string]*storage.YearlyDataPoint)
+	for _, dp := range stored {
+		storedMap[dp.Year] = dp
+	}
+
 	// Compute net for each year
 	var result []*storage.YearlyDataPoint
-	// Use all years from both datasets
+	// Collect all unique years from all sources
 	allYears := make(map[string]bool)
 	for _, dp := range fedYearly {
 		allYears[dp.Year] = true
@@ -724,8 +831,21 @@ func (s *ReadService) getComputedYearlyGridEnergy(start, end time.Time) ([]*stor
 	for _, dp := range importYearly {
 		allYears[dp.Year] = true
 	}
+	for _, dp := range stored {
+		allYears[dp.Year] = true
+	}
+
+	// Determine current year
+	currentYear := time.Now().Format("2006")
 
 	for year := range allYears {
+		// Use stored net value if available and it's not the current year
+		// For current year, always calculate to ensure it's up-to-date
+		if storedDp, exists := storedMap[year]; exists && year != currentYear {
+			result = append(result, storedDp)
+			continue
+		}
+
 		fedDp, fedExists := fedMap[year]
 		importDp, importExists := importMap[year]
 
@@ -735,11 +855,9 @@ func (s *ReadService) getComputedYearlyGridEnergy(start, end time.Time) ([]*stor
 			netValue = fedDp.Value - importDp.Value
 			netRawValue = fedDp.RawValue - importDp.RawValue
 		} else if fedExists {
-			// If no import data, net = fed value
 			netValue = fedDp.Value
 			netRawValue = fedDp.RawValue
 		} else if importExists {
-			// If no fed data, net = -import value
 			netValue = -importDp.Value
 			netRawValue = -importDp.RawValue
 		}
@@ -750,7 +868,7 @@ func (s *ReadService) getComputedYearlyGridEnergy(start, end time.Time) ([]*stor
 			RawValue: netRawValue,
 		}
 		result = append(result, netDp)
-		
+
 		// Store computed net value in database for future queries
 		if storeErr := s.storage.StoreYearlyDataPoint("year_grid_energy", netDp); storeErr != nil {
 			logger.Warn().Msgf("Failed to store computed year_grid_energy for year %s: %v", year, storeErr)

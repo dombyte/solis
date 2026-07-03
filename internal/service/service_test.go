@@ -344,13 +344,13 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 	fedValues := map[string]*solis.Value{
 		"today_energy_fed_into_grid": {
 			Key:          "today_energy_fed_into_grid",
-			Name:        "Today Energy Fed Into Grid",
-			RawValue:    150, // 15.0 kWh after scaling (0.1)
+			Name:         "Today Energy Fed Into Grid",
+			RawValue:     150, // 15.0 kWh after scaling (0.1)
 			DecodedValue: 15.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -363,13 +363,13 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 	importValues := map[string]*solis.Value{
 		"today_energy_imported_from_grid": {
 			Key:          "today_energy_imported_from_grid",
-			Name:        "Today Energy Imported From Grid",
-			RawValue:    50, // 5.0 kWh after scaling (0.1)
+			Name:         "Today Energy Imported From Grid",
+			RawValue:     50, // 5.0 kWh after scaling (0.1)
 			DecodedValue: 5.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -437,13 +437,13 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 	fedValues := map[string]*solis.Value{
 		"total_energy_fed_into_grid": {
 			Key:          "total_energy_fed_into_grid",
-			Name:        "Total Energy Fed Into Grid",
-			RawValue:    2000, // 2000 kWh (scale = 1)
+			Name:         "Total Energy Fed Into Grid",
+			RawValue:     2000, // 2000 kWh (scale = 1)
 			DecodedValue: 2000.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint32,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint32,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -456,13 +456,13 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 	importValues := map[string]*solis.Value{
 		"total_energy_imported_from_grid": {
 			Key:          "total_energy_imported_from_grid",
-			Name:        "Total Energy Imported From Grid",
-			RawValue:    500, // 500 kWh (scale = 1)
+			Name:         "Total Energy Imported From Grid",
+			RawValue:     500, // 500 kWh (scale = 1)
 			DecodedValue: 500.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint32,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint32,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -525,13 +525,13 @@ func TestService_GetComputedMonthlyEnergy(t *testing.T) {
 	values := map[string]*solis.Value{
 		"today_energy_consumption": {
 			Key:          "today_energy_consumption",
-			Name:        "Today Energy Consumption",
-			RawValue:    100, // 10.0 kWh after scaling (0.1)
+			Name:         "Today Energy Consumption",
+			RawValue:     100, // 10.0 kWh after scaling (0.1)
 			DecodedValue: 10.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -596,8 +596,8 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 	// For computed registers, scale is 1, so Value = RawValue * 1 = RawValue
 	fedDp := &storage.MonthlyDataPoint{
 		Month:    "2024-06",
-		Value:    500.0,  // This is the decoded value (already scaled)
-		RawValue: 500.0,  // For scale=1 registers, RawValue equals Value
+		Value:    500.0, // This is the decoded value (already scaled)
+		RawValue: 500.0, // For scale=1 registers, RawValue equals Value
 	}
 	err = st.StoreMonthlyDataPoint("energy_fed_into_grid_month_energy", fedDp)
 	if err != nil {
@@ -606,8 +606,8 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 
 	importDp := &storage.MonthlyDataPoint{
 		Month:    "2024-06",
-		Value:    200.0,  // This is the decoded value (already scaled)
-		RawValue: 200.0,  // For scale=1 registers, RawValue equals Value
+		Value:    200.0, // This is the decoded value (already scaled)
+		RawValue: 200.0, // For scale=1 registers, RawValue equals Value
 	}
 	err = st.StoreMonthlyDataPoint("energy_imported_from_grid_month_energy", importDp)
 	if err != nil {
@@ -668,13 +668,13 @@ func TestService_GetComputedYearlyEnergy(t *testing.T) {
 	values := map[string]*solis.Value{
 		"today_energy_consumption": {
 			Key:          "today_energy_consumption",
-			Name:        "Today Energy Consumption",
-			RawValue:    100, // 10.0 kWh after scaling (0.1)
+			Name:         "Today Energy Consumption",
+			RawValue:     100, // 10.0 kWh after scaling (0.1)
 			DecodedValue: 10.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -737,8 +737,8 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 	// For computed registers, scale is 1, so Value = RawValue * 1 = RawValue
 	fedDp := &storage.YearlyDataPoint{
 		Year:     "2024",
-		Value:    3000.0,  // This is the decoded value (already scaled)
-		RawValue: 3000.0,  // For scale=1 registers, RawValue equals Value
+		Value:    3000.0, // This is the decoded value (already scaled)
+		RawValue: 3000.0, // For scale=1 registers, RawValue equals Value
 	}
 	err = st.StoreYearlyDataPoint("energy_fed_into_grid_year_energy", fedDp)
 	if err != nil {
@@ -747,8 +747,8 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 
 	importDp := &storage.YearlyDataPoint{
 		Year:     "2024",
-		Value:    1000.0,  // This is the decoded value (already scaled)
-		RawValue: 1000.0,  // For scale=1 registers, RawValue equals Value
+		Value:    1000.0, // This is the decoded value (already scaled)
+		RawValue: 1000.0, // For scale=1 registers, RawValue equals Value
 	}
 	err = st.StoreYearlyDataPoint("energy_imported_from_grid_year_energy", importDp)
 	if err != nil {

@@ -367,7 +367,7 @@ func TestStorage_GetMonthlySum(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test_monthly_sum.db")
 
 	cfg := &config.StorageSettings{
-		Path:        dbPath,
+		Path:           dbPath,
 		DailyRetention: 365 * 24 * time.Hour,
 	}
 
@@ -385,13 +385,13 @@ func TestStorage_GetMonthlySum(t *testing.T) {
 	dailyValues := map[string]*solis.Value{
 		"today_energy_consumption": {
 			Key:          "today_energy_consumption",
-			Name:        "Today Energy Consumption",
-			RawValue:    100,
+			Name:         "Today Energy Consumption",
+			RawValue:     100,
 			DecodedValue: 10.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -461,7 +461,7 @@ func TestStorage_GetYearlySum(t *testing.T) {
 	dbPath := filepath.Join(tempDir, "test_yearly_sum.db")
 
 	cfg := &config.StorageSettings{
-		Path:        dbPath,
+		Path:           dbPath,
 		DailyRetention: 365 * 24 * time.Hour,
 	}
 
@@ -479,13 +479,13 @@ func TestStorage_GetYearlySum(t *testing.T) {
 	dailyValues := map[string]*solis.Value{
 		"today_energy_consumption": {
 			Key:          "today_energy_consumption",
-			Name:        "Today Energy Consumption",
-			RawValue:    150,
+			Name:         "Today Energy Consumption",
+			RawValue:     150,
 			DecodedValue: 15.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint16,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint16,
+			Stability:    solis.Dynamic,
 		},
 	}
 
@@ -578,7 +578,7 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 	}
 
 	// Verify it was stored by retrieving it
-	retrieved, err := st.GetMonthlyHistory("energy_consumption_month_energy", 
+	retrieved, err := st.GetMonthlyHistory("energy_consumption_month_energy",
 		time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC))
 	if err != nil {
@@ -746,13 +746,13 @@ func TestStorage_GetTotalHistory(t *testing.T) {
 	totalValues := map[string]*solis.Value{
 		"total_energy_fed_into_grid": {
 			Key:          "total_energy_fed_into_grid",
-			Name:        "Total Energy Fed Into Grid",
-			RawValue:    5000,
+			Name:         "Total Energy Fed Into Grid",
+			RawValue:     5000,
 			DecodedValue: 500.0,
-			Unit:        "kWh",
-			Timestamp:   timestamp,
-			DataType:    solis.Uint32,
-			Stability:   solis.Dynamic,
+			Unit:         "kWh",
+			Timestamp:    timestamp,
+			DataType:     solis.Uint32,
+			Stability:    solis.Dynamic,
 		},
 	}
 

@@ -272,7 +272,7 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 	// Get existing value for today
 	var existingValue float64
 	err := tx.QueryRow(`
-		SELECT value FROM daily_values 
+		SELECT value FROM daily_values
 		WHERE register_key = ? AND date = ?
 	`, key, date).Scan(&existingValue)
 
@@ -294,7 +294,7 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 		// Update existing record if new value is higher
 		if decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE daily_values 
+				UPDATE daily_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND date = ?
 			`, decodedValue, value.RawValue, key, date)
@@ -317,7 +317,7 @@ func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, 
 	// Get existing value for this month
 	var existingValue float64
 	err := tx.QueryRow(`
-		SELECT value FROM monthly_values 
+		SELECT value FROM monthly_values
 		WHERE register_key = ? AND month = ?
 	`, key, month).Scan(&existingValue)
 
@@ -339,7 +339,7 @@ func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, 
 		// Update existing record if new value is higher
 		if decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE monthly_values 
+				UPDATE monthly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND month = ?
 			`, decodedValue, value.RawValue, key, month)
@@ -362,7 +362,7 @@ func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, t
 	// Get existing value for this year
 	var existingValue float64
 	err := tx.QueryRow(`
-		SELECT value FROM yearly_values 
+		SELECT value FROM yearly_values
 		WHERE register_key = ? AND year = ?
 	`, key, year).Scan(&existingValue)
 
@@ -384,7 +384,7 @@ func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, t
 		// Update existing record if new value is higher
 		if decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE yearly_values 
+				UPDATE yearly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND year = ?
 			`, decodedValue, value.RawValue, key, year)
@@ -408,7 +408,7 @@ func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, ti
 	// Get existing value
 	var existingValue float64
 	err := tx.QueryRow(`
-		SELECT value FROM total_values 
+		SELECT value FROM total_values
 		WHERE register_key = ?
 	`, key).Scan(&existingValue)
 
@@ -427,7 +427,7 @@ func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, ti
 		// Update existing record if new value is higher
 		if decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE total_values 
+				UPDATE total_values
 				SET value = ?, raw_value = ?, timestamp = ?
 				WHERE register_key = ?
 			`, decodedValue, value.RawValue, timestampStr, key)
@@ -556,7 +556,7 @@ func (s *Storage) CleanupDailyData() error {
 	cutoffDate := cutoff.Format("2006-01-02")
 
 	result, err := s.db.Exec(`
-		DELETE FROM daily_values 
+		DELETE FROM daily_values
 		WHERE date < ?
 	`, cutoffDate)
 	if err != nil {
@@ -591,7 +591,7 @@ func (s *Storage) CleanupMonthlyData() error {
 	cutoffMonth := cutoff.Format("2006-01")
 
 	result, err := s.db.Exec(`
-		DELETE FROM monthly_values 
+		DELETE FROM monthly_values
 		WHERE month < ?
 	`, cutoffMonth)
 	if err != nil {
@@ -616,7 +616,7 @@ func (s *Storage) CleanupYearlyData() error {
 	cutoffYear := cutoff.Format("2006")
 
 	result, err := s.db.Exec(`
-		DELETE FROM yearly_values 
+		DELETE FROM yearly_values
 		WHERE year < ?
 	`, cutoffYear)
 	if err != nil {
@@ -640,7 +640,7 @@ func (s *Storage) CleanupErrorData() error {
 	cutoff := time.Now().Add(-s.config.ErrorRetention)
 
 	result, err := s.db.Exec(`
-		DELETE FROM error_data 
+		DELETE FROM error_data
 		WHERE timestamp < ?
 	`, cutoff)
 	if err != nil {
@@ -735,7 +735,7 @@ type TotalDataPoint struct {
 func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias HistoryDataPoint
 	aux := struct {
-		Value utils.Float64With2Decimals `json:"value"`
+		Value utils.Float64With2Decimals  `json:"value"`
 		Min   *utils.Float64With2Decimals `json:"min,omitempty"`
 		Max   *utils.Float64With2Decimals `json:"max,omitempty"`
 		*Alias
@@ -760,7 +760,7 @@ func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias DailyDataPoint
 	return json.Marshal(struct {
-		Date     string                   `json:"date"`
+		Date     string                     `json:"date"`
 		Value    utils.Float64With2Decimals `json:"value"`
 		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
@@ -776,7 +776,7 @@ func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias MonthlyDataPoint
 	return json.Marshal(struct {
-		Month    string                   `json:"month"`
+		Month    string                     `json:"month"`
 		Value    utils.Float64With2Decimals `json:"value"`
 		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
@@ -792,7 +792,7 @@ func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias YearlyDataPoint
 	return json.Marshal(struct {
-		Year     string                   `json:"year"`
+		Year     string                     `json:"year"`
 		Value    utils.Float64With2Decimals `json:"value"`
 		RawValue utils.Float64With2Decimals `json:"raw_value"`
 		*Alias
@@ -810,7 +810,7 @@ func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Value     utils.Float64With2Decimals `json:"value"`
 		RawValue  utils.Float64With2Decimals `json:"raw_value"`
-		Timestamp string                       `json:"timestamp"`
+		Timestamp string                     `json:"timestamp"`
 		*Alias
 	}{
 		Alias:     (*Alias)(&t),
@@ -824,14 +824,14 @@ func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias ErrorDataPoint
 	return json.Marshal(struct {
-		Timestamp   string                       `json:"timestamp"`
-		RawValue    utils.Float64With2Decimals    `json:"raw_value"`
-		StringValue string                       `json:"string_value,omitempty"`
+		Timestamp   string                     `json:"timestamp"`
+		RawValue    utils.Float64With2Decimals `json:"raw_value"`
+		StringValue string                     `json:"string_value,omitempty"`
 		*Alias
 	}{
-		Alias:      (*Alias)(&e),
-		Timestamp:  e.Timestamp,
-		RawValue:   utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(e.RawValue)),
+		Alias:       (*Alias)(&e),
+		Timestamp:   e.Timestamp,
+		RawValue:    utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(e.RawValue)),
 		StringValue: e.StringValue,
 	})
 }
@@ -996,13 +996,17 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 	// Get existing value for this month
 	var existingValue float64
 	err = tx.QueryRow(`
-		SELECT value FROM monthly_values 
+		SELECT value FROM monthly_values
 		WHERE register_key = ? AND month = ?
 	`, key, dp.Month).Scan(&existingValue)
 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("failed to query existing monthly value: %w", err)
 	}
+
+	// For net energy registers, always update (they can be negative or decrease)
+	// For other monthly registers (energy totals), only update if value is higher
+	isNetRegister := key == "month_grid_energy"
 
 	if err == sql.ErrNoRows {
 		// New month, insert new record
@@ -1011,10 +1015,10 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 			VALUES (?, ?, ?, ?)
 		`, dp.Month, key, decodedValue, dp.RawValue)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update; for others, only update if higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE monthly_values 
+				UPDATE monthly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND month = ?
 			`, decodedValue, dp.RawValue, key, dp.Month)
@@ -1046,10 +1050,14 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	// Calculate decoded value using the register's scale
 	decodedValue := dp.RawValue * reg.Scale
 
+	// For net energy registers, always update (they can be negative or decrease)
+	// For other yearly registers (energy totals), only update if value is higher
+	isNetRegister := key == "year_grid_energy"
+
 	// Get existing value for this year
 	var existingValue float64
 	err = tx.QueryRow(`
-		SELECT value FROM yearly_values 
+		SELECT value FROM yearly_values
 		WHERE register_key = ? AND year = ?
 	`, key, dp.Year).Scan(&existingValue)
 
@@ -1064,10 +1072,10 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 			VALUES (?, ?, ?, ?)
 		`, dp.Year, key, decodedValue, dp.RawValue)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update; for others, only update if higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
-				UPDATE yearly_values 
+				UPDATE yearly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND year = ?
 			`, decodedValue, dp.RawValue, key, dp.Year)
