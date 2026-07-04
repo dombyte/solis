@@ -59,14 +59,14 @@ type ErrorResponse struct {
 
 // StatusHistoryEntry represents a single decoded status entry in the history.
 type StatusHistoryEntry struct {
-	Timestamp    string      `json:"timestamp"`
+	Timestamp     string      `json:"timestamp"`
 	StatusDecoded interface{} `json:"status_decoded"`
 }
 
 // StatusResponse represents the response for status register requests.
 type StatusResponse struct {
-	Key     string              `json:"key"`
-	Name    string              `json:"name"`
+	Key     string               `json:"key"`
+	Name    string               `json:"name"`
 	History []StatusHistoryEntry `json:"history"`
 }
 
@@ -246,13 +246,13 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 		if reg.Status {
 			// Get all error history for this status register (no time filter = all data)
 			// Use min and max time to get all records
-			startTime := time.Unix(0, 0) // Unix epoch start
+			startTime := time.Unix(0, 0)     // Unix epoch start
 			endTime := time.Unix(1<<63-1, 0) // Far future
 			errorHistory, err := deps.Service.GetErrorHistory(key, startTime, endTime)
-			
+
 			// Pre-allocate entries with capacity for database entries + current value
 			entries := make([]StatusHistoryEntry, 0, len(errorHistory)+1)
-			
+
 			// Add stored history from database
 			if err != nil {
 				logger.Warn().Msgf("Failed to get error history for %s: %v", key, err)
@@ -263,7 +263,7 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 					// Use reg directly (already have it from line 200) instead of looking it up again
 					rawBytes := []byte{byte(rawUint16 >> 8), byte(rawUint16 & 0xFF)}
 					decodedValue := solis.DecodeRegister(reg, rawBytes)
-					
+
 					if decodedValue.StatusDecoded != nil {
 						entries = append(entries, StatusHistoryEntry{
 							Timestamp:     dp.Timestamp,
@@ -272,7 +272,7 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 					}
 				}
 			}
-			
+
 			// Include current cached value if we have status_decoded
 			if value.StatusDecoded != nil {
 				entries = append(entries, StatusHistoryEntry{
@@ -280,12 +280,12 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 					StatusDecoded: value.StatusDecoded,
 				})
 			}
-			
+
 			// Sort entries by timestamp (latest first)
 			sort.Slice(entries, func(i, j int) bool {
 				return entries[i].Timestamp > entries[j].Timestamp
 			})
-			
+
 			WriteJSON(w, StatusResponse{
 				Key:     key,
 				Name:    value.Name,

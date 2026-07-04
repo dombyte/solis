@@ -132,7 +132,7 @@ func TestServer_Start_WithPortInUse(t *testing.T) {
 	// This should fail
 	router2 := chi.NewRouter()
 	server2 := New(cfg, router2)
-	err = server2.Start()
+	_ = server2.Start()
 	// We can't easily test for port-in-use error in a portable way,
 	// so just verify the server was created
 	if server2 == nil {

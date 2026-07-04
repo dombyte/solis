@@ -6,7 +6,7 @@ app:
   debug: DEBUG
   port: 8080
   timeout: 30s
-  serve_only: true
+  serve_only: false
 
 poller:
   # Base interval between poll cycles

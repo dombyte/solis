@@ -13,11 +13,11 @@ import (
 
 	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
+	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/http/routes"
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/metrics"
-	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/service"

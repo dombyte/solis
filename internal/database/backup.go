@@ -30,11 +30,11 @@ type BackupConfig struct {
 
 // BackupInfo contains information about a backup file.
 type BackupInfo struct {
-	Filename    string
-	Timestamp   time.Time
-	Size        int64
-	IsOnline    bool // Deprecated: all backups use the same format now
-	Version     int  // Deprecated: all backups are version 0 in simplified scheme
+	Filename  string
+	Timestamp time.Time
+	Size      int64
+	IsOnline  bool // Deprecated: all backups use the same format now
+	Version   int  // Deprecated: all backups are version 0 in simplified scheme
 }
 
 // DefaultBackupConfig returns a BackupConfig with sensible defaults.
@@ -79,9 +79,9 @@ func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 	timestampStr := nameWithoutExt[lastDotIndex+1:]
 
 	info := &BackupInfo{
-		Filename:  filename,
-		Version:   0, // All backups are version 0 in simplified scheme
-		IsOnline:  false, // No distinction between online and migration backups
+		Filename: filename,
+		Version:  0,     // All backups are version 0 in simplified scheme
+		IsOnline: false, // No distinction between online and migration backups
 	}
 
 	if t, err := time.Parse("20060102_150405", timestampStr); err == nil {

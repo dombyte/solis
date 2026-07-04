@@ -40,17 +40,17 @@ type MigrationFunc func(tx *sql.Tx) error
 
 // SimpleMigration is a basic implementation of Migration with just Up functionality.
 type SimpleMigration struct {
-	version    int
+	version     int
 	description string
-	upFunc     MigrationFunc
+	upFunc      MigrationFunc
 }
 
 // NewSimpleMigration creates a new SimpleMigration with the given version, description, and up function.
 func NewSimpleMigration(version int, description string, upFunc MigrationFunc) *SimpleMigration {
 	return &SimpleMigration{
-		version:    version,
+		version:     version,
 		description: description,
-		upFunc:     upFunc,
+		upFunc:      upFunc,
 	}
 }
 

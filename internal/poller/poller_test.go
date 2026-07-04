@@ -407,7 +407,7 @@ func TestPoller_ComputedValues(t *testing.T) {
 		BlockRetryDelay: 10 * time.Millisecond,
 		BlockInterval:   0,
 		PollTimeout:     500 * time.Millisecond,
-		JitterMax:      0,
+		JitterMax:       0,
 	}
 
 	// Create a modbus client (will fail to connect, but we can test the computation logic)

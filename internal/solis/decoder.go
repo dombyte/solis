@@ -49,7 +49,7 @@ func (v Value) MarshalJSON() ([]byte, error) {
 		DecodedValue utils.Float64With2Decimals `json:"value"`
 		*Alias
 	}{
-		Alias:       (*Alias)(&v),
+		Alias:        (*Alias)(&v),
 		DecodedValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v.DecodedValue)),
 	}
 	return json.Marshal(aux)
@@ -60,7 +60,7 @@ func (v Value) MarshalJSON() ([]byte, error) {
 func DecodeRegister(reg *Register, raw []byte) Value {
 	rawVal := decodeRaw(reg.DataType, raw)
 	decoded := rawVal * reg.Scale
-	
+
 	// Round to exactly 2 decimal places for consistent display
 	decoded = utils.RoundTo2DecimalPlaces(decoded)
 

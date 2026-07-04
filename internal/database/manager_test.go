@@ -193,7 +193,7 @@ func TestStartPeriodicBackups(t *testing.T) {
 	// For periodic backups test, we don't actually need storage and db to be functional
 	// We just need them to be non-nil to pass the initialization check
 	// So we'll directly test the CreateBackup function instead
-	
+
 	// Wait for the timer to trigger and create backup
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

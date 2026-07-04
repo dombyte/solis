@@ -15,7 +15,7 @@ func TestRealWorldExamples(t *testing.T) {
 	formatted1 := Float64With2Decimals(rounded1)
 	data1, _ := json.Marshal(formatted1)
 	fmt.Printf("Raw 3086, scale 0.01: scaled=%f, rounded=%f, json=%s\n", scaled1, rounded1, string(data1))
-	
+
 	// Example 2: raw 30864, scale 0.001
 	raw2 := 30864.0
 	scale2 := 0.001
@@ -24,7 +24,7 @@ func TestRealWorldExamples(t *testing.T) {
 	formatted2 := Float64With2Decimals(rounded2)
 	data2, _ := json.Marshal(formatted2)
 	fmt.Printf("Raw 30864, scale 0.001: scaled=%f, rounded=%f, json=%s\n", scaled2, rounded2, string(data2))
-	
+
 	// Example 3: raw 30866, scale 0.001 (to test rounding up)
 	raw3 := 30866.0
 	scale3 := 0.001

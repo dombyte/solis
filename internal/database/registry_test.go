@@ -7,7 +7,7 @@ import (
 
 // Mock migration for testing
 type mockMigration struct {
-	version    int
+	version     int
 	description string
 	upCalled    bool
 	downCalled  bool

@@ -106,7 +106,7 @@ type StorageSettings struct {
 	// TempStore controls where temporary files are stored.
 	// "DEFAULT", "FILE", "MEMORY"
 	TempStore string `mapstructure:"temp_store"`
-	
+
 	// Database maintenance settings
 	// EnableMigrations enables automatic schema migrations on startup.
 	EnableMigrations bool `mapstructure:"enable_migrations"`
@@ -163,7 +163,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.wal_mode", true)
 	v.SetDefault("storage.synchronous", "NORMAL")
 	v.SetDefault("storage.temp_store", "MEMORY")
-	
+
 	// Database maintenance defaults
 	v.SetDefault("storage.enable_migrations", true)
 	v.SetDefault("storage.enable_backup", true)
@@ -288,10 +288,10 @@ func validateConfig(cfg *AppConfig) error {
 	if cfg.Storage.MaxBackups < 0 {
 		return fmt.Errorf("max_backups must be >= 0")
 	}
-	
+
 	if cfg.Storage.BackupInterval < 0 {
 		return fmt.Errorf("backup_interval must be >= 0")
 	}
-	
+
 	return nil
 }

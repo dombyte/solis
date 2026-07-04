@@ -161,16 +161,16 @@ var MonthlyRegisterKeys = []string{
 
 // monthlyRegisterSet provides O(1) lookup for monthly registers.
 var monthlyRegisterSet = map[string]bool{
-	"pv_month_energy":                 true,
-	"household_load_month_energy":     true,
-	"backup_load_month_energy":        true,
+	"pv_month_energy":             true,
+	"household_load_month_energy": true,
+	"backup_load_month_energy":    true,
 	// Computed monthly registers
-	"energy_consumption_month_energy":     true,
-	"energy_fed_into_grid_month_energy":    true,
+	"energy_consumption_month_energy":        true,
+	"energy_fed_into_grid_month_energy":      true,
 	"energy_imported_from_grid_month_energy": true,
-	"battery_discharge_month_energy":      true,
-	"battery_charge_month_energy":         true,
-	"month_grid_energy":                    true,
+	"battery_discharge_month_energy":         true,
+	"battery_charge_month_energy":            true,
+	"month_grid_energy":                      true,
 }
 
 // IsMonthlyRegister returns true if the key is a monthly energy register.
@@ -195,16 +195,16 @@ var YearlyRegisterKeys = []string{
 
 // yearlyRegisterSet provides O(1) lookup for yearly registers.
 var yearlyRegisterSet = map[string]bool{
-	"pv_year_energy":                 true,
-	"household_load_year_energy":     true,
-	"backup_load_year_energy":        true,
+	"pv_year_energy":             true,
+	"household_load_year_energy": true,
+	"backup_load_year_energy":    true,
 	// Computed yearly registers
-	"energy_consumption_year_energy":     true,
-	"energy_fed_into_grid_year_energy":    true,
+	"energy_consumption_year_energy":        true,
+	"energy_fed_into_grid_year_energy":      true,
 	"energy_imported_from_grid_year_energy": true,
-	"battery_discharge_year_energy":      true,
-	"battery_charge_year_energy":         true,
-	"year_grid_energy":                   true,
+	"battery_discharge_year_energy":         true,
+	"battery_charge_year_energy":            true,
+	"year_grid_energy":                      true,
 }
 
 // IsYearlyRegister returns true if the key is a yearly energy register.

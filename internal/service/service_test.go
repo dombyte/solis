@@ -837,7 +837,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_december.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -846,7 +846,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -855,9 +855,9 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Store daily values for December
 	dailyValues := []struct {
 		date  string
@@ -868,7 +868,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 		{"2024-12-02", 20.0, 200.0},
 		{"2024-12-03", 15.0, 150.0},
 	}
-	
+
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
@@ -878,16 +878,16 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 			t.Fatalf("Failed to insert daily value: %v", err)
 		}
 	}
-	
+
 	// Query for December (this tests the date expansion fix for December)
 	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
-	
+
 	monthly, err := service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
 	if err != nil {
 		t.Fatalf("GetMonthlyHistory for December error = %v", err)
 	}
-	
+
 	if len(monthly) == 0 {
 		t.Error("Expected computed monthly energy results for December, got empty")
 	} else {
@@ -905,7 +905,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_year_boundary.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -914,7 +914,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -923,9 +923,9 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Store daily values across year boundary (Dec 2024 and Jan 2025)
 	dailyValues := []struct {
 		date  string
@@ -937,7 +937,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 		{"2025-01-01", 15.0, 150.0},
 		{"2025-01-02", 5.0, 50.0},
 	}
-	
+
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
@@ -947,16 +947,16 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 			t.Fatalf("Failed to insert daily value: %v", err)
 		}
 	}
-	
+
 	// Query for 2024 (this tests the date expansion fix for year boundary)
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
-	
+
 	yearly, err := service.GetYearlyHistory("energy_consumption_year_energy", start, end)
 	if err != nil {
 		t.Fatalf("GetYearlyHistory for 2024 error = %v", err)
 	}
-	
+
 	if len(yearly) == 0 {
 		t.Error("Expected computed yearly energy results for 2024, got empty")
 	} else {
@@ -974,7 +974,7 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_net_decreasing.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -983,7 +983,7 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -992,49 +992,49 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// First, store a higher value for year_grid_energy
 	yearlyDp1 := &storage.YearlyDataPoint{
 		Year:     "2024",
 		Value:    1000.0,
 		RawValue: 1000.0,
 	}
-	
+
 	// Store initial high value
 	err = st.StoreYearlyDataPoint("year_grid_energy", yearlyDp1)
 	if err != nil {
 		t.Fatalf("Failed to store initial yearly grid energy: %v", err)
 	}
-	
+
 	// Now store a lower value (net energy decreased)
 	yearlyDp2 := &storage.YearlyDataPoint{
 		Year:     "2024",
 		Value:    500.0, // Lower than 1000.0
 		RawValue: 500.0,
 	}
-	
+
 	// This should succeed because year_grid_energy is a net register
 	err = st.StoreYearlyDataPoint("year_grid_energy", yearlyDp2)
 	if err != nil {
 		t.Fatalf("Failed to store decreased yearly grid energy: %v", err)
 	}
-	
+
 	// Verify the value was updated to the lower value
 	retrieved, err := service.GetYearlyHistory("year_grid_energy", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Failed to retrieve yearly grid energy: %v", err)
 	}
-	
+
 	if len(retrieved) == 0 {
 		t.Fatal("Expected to retrieve yearly grid energy, got empty")
 	}
-	
+
 	if retrieved[0].Value != 500.0 {
 		t.Errorf("Yearly grid energy value = %v, want 500.0 (should have been updated to lower value)", retrieved[0].Value)
 	}
-	
+
 	t.Logf("Net register decreasing value test passed: value updated from 1000.0 to 500.0")
 }
 
@@ -1043,7 +1043,7 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_daily_grid_missing.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -1052,7 +1052,7 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -1061,9 +1061,9 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Store only fed values (no import values)
 	fedValues := []struct {
 		date  string
@@ -1073,7 +1073,7 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 		{"2024-06-01", 100.0, 1000.0},
 		{"2024-06-02", 200.0, 2000.0},
 	}
-	
+
 	for _, dv := range fedValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
@@ -1083,16 +1083,16 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 			t.Fatalf("Failed to insert fed daily value: %v", err)
 		}
 	}
-	
+
 	// Query for daily grid energy
 	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 2, 23, 59, 59, 0, time.UTC)
-	
+
 	dailyGrid, err := service.GetDailyHistory("today_grid_energy", start, end)
 	if err != nil {
 		t.Fatalf("GetDailyHistory for today_grid_energy error = %v", err)
 	}
-	
+
 	if len(dailyGrid) == 0 {
 		t.Error("Expected computed daily grid energy results, got empty")
 	} else {
@@ -1112,7 +1112,7 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_monthly_grid_missing.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -1121,7 +1121,7 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -1130,9 +1130,9 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Store only fed values (no import values) for a month
 	fedValues := []struct {
 		date  string
@@ -1142,7 +1142,7 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 		{"2024-06-01", 100.0, 1000.0},
 		{"2024-06-02", 200.0, 2000.0},
 	}
-	
+
 	for _, dv := range fedValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
@@ -1152,16 +1152,16 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 			t.Fatalf("Failed to insert fed daily value: %v", err)
 		}
 	}
-	
+
 	// Query for monthly grid energy for June
 	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
-	
+
 	monthlyGrid, err := service.GetMonthlyHistory("month_grid_energy", start, end)
 	if err != nil {
 		t.Fatalf("GetMonthlyHistory for month_grid_energy error = %v", err)
 	}
-	
+
 	if len(monthlyGrid) == 0 {
 		t.Error("Expected computed monthly grid energy results, got empty")
 	} else {
@@ -1179,7 +1179,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_february.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -1188,7 +1188,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -1197,9 +1197,9 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Store daily values for February 2024 (leap year - 29 days)
 	// Test with Feb 29
 	dailyValues := []struct {
@@ -1210,7 +1210,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 		{"2024-02-28", 10.0, 100.0},
 		{"2024-02-29", 20.0, 200.0}, // Leap day
 	}
-	
+
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
@@ -1220,16 +1220,16 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 			t.Fatalf("Failed to insert daily value: %v", err)
 		}
 	}
-	
+
 	// Query for February 2024
 	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 2, 29, 23, 59, 59, 0, time.UTC)
-	
+
 	monthly, err := service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
 	if err != nil {
 		t.Fatalf("GetMonthlyHistory for February 2024 error = %v", err)
 	}
-	
+
 	if len(monthly) == 0 {
 		t.Error("Expected computed monthly energy results for February, got empty")
 	} else {
@@ -1247,7 +1247,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 	// Create a temporary database for testing
 	tempDir := t.TempDir()
 	dbPath := tempDir + "/test_invalid_range.db"
-	
+
 	cfg := &config.AppConfig{
 		Storage: config.StorageSettings{
 			Path:        dbPath,
@@ -1256,7 +1256,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 			TempStore:   "MEMORY",
 		},
 	}
-	
+
 	st, err := storage.New(&cfg.Storage)
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
@@ -1265,20 +1265,20 @@ func TestService_InvalidDateRange(t *testing.T) {
 		st.Close()
 		os.RemoveAll(tempDir)
 	}()
-	
+
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
-	
+
 	// Test monthly with end before start
 	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) // end is before start
-	
+
 	_, err = service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
 	if err == nil {
 		t.Error("Expected error for invalid date range (end before start), got nil")
 	} else {
 		t.Logf("Invalid date range correctly returned error: %v", err)
 	}
-	
+
 	// Test yearly with end before start
 	_, err = service.GetYearlyHistory("energy_consumption_year_energy", start, end)
 	if err == nil {
@@ -1286,7 +1286,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 	} else {
 		t.Logf("Invalid yearly date range correctly returned error: %v", err)
 	}
-	
+
 	// Test daily with end before start - storage doesn't validate, just returns empty
 	// This is acceptable behavior
 	result, err := service.GetDailyHistory("today_energy_consumption", start, end)

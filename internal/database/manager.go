@@ -43,16 +43,16 @@ type DatabaseManager struct {
 func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *BackupConfig) *DatabaseManager {
 	// Create migration registry
 	registry := NewMigrationRegistry()
-	
+
 	// Register V1 migration directly to avoid circular imports
 	// In the future, we can use a better registration mechanism
 	registry.Register(V1MigrationForManager())
-	
+
 	return &DatabaseManager{
-		config:       storageConfig,
-		backupConfig: backupConfig,
-		registry:     registry,
-		dbPath:       storageConfig.Path,
+		config:        storageConfig,
+		backupConfig:  backupConfig,
+		registry:      registry,
+		dbPath:        storageConfig.Path,
 		isInitialized: false,
 	}
 }
@@ -369,10 +369,10 @@ func VerifyDatabasePath(dbPath string) error {
 	if dir == "" || dir == "." {
 		return nil
 	}
-	
+
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
-	
+
 	return nil
 }

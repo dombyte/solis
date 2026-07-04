@@ -472,11 +472,11 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
 			computedValue := &solis.Value{
 				Key:          monthlyKey,
-				Name:        reg.Name,
-				RawValue:    value,  // Store the already-scaled value as RawValue
+				Name:         reg.Name,
+				RawValue:     value, // Store the already-scaled value as RawValue
 				DecodedValue: value,
-				Unit:        reg.Unit,
-				Timestamp:   startTime,
+				Unit:         reg.Unit,
+				Timestamp:    startTime,
 			}
 			values[monthlyKey] = computedValue
 			logger.Debug().Msgf("Computed %s: %.1f kWh", monthlyKey, value)
@@ -502,11 +502,11 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
 			computedValue := &solis.Value{
 				Key:          yearlyKey,
-				Name:        reg.Name,
-				RawValue:    value,  // Store the already-scaled value as RawValue
+				Name:         reg.Name,
+				RawValue:     value, // Store the already-scaled value as RawValue
 				DecodedValue: value,
-				Unit:        reg.Unit,
-				Timestamp:   startTime,
+				Unit:         reg.Unit,
+				Timestamp:    startTime,
 			}
 			values[yearlyKey] = computedValue
 			logger.Debug().Msgf("Computed %s: %.1f kWh", yearlyKey, value)
@@ -524,11 +524,11 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 				} else {
 					netMonthValue := &solis.Value{
 						Key:          "month_grid_energy",
-						Name:        reg.Name,
-						RawValue:    netValue,  // Store already-scaled value as RawValue
+						Name:         reg.Name,
+						RawValue:     netValue, // Store already-scaled value as RawValue
 						DecodedValue: netValue,
-						Unit:        reg.Unit,
-						Timestamp:   startTime,
+						Unit:         reg.Unit,
+						Timestamp:    startTime,
 					}
 					values["month_grid_energy"] = netMonthValue
 					logger.Debug().Msgf("Computed month_grid_energy: %.1f kWh", netMonthValue.DecodedValue)
@@ -548,11 +548,11 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 				} else {
 					netYearValue := &solis.Value{
 						Key:          "year_grid_energy",
-						Name:        reg.Name,
-						RawValue:    netValue,  // Store already-scaled value as RawValue
+						Name:         reg.Name,
+						RawValue:     netValue, // Store already-scaled value as RawValue
 						DecodedValue: netValue,
-						Unit:        reg.Unit,
-						Timestamp:   startTime,
+						Unit:         reg.Unit,
+						Timestamp:    startTime,
 					}
 					values["year_grid_energy"] = netYearValue
 					logger.Debug().Msgf("Computed year_grid_energy: %.1f kWh", netYearValue.DecodedValue)
