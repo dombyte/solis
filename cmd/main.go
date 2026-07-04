@@ -43,7 +43,7 @@ func runApp() error {
 	logger.Info().Msg("Solis Monitor starting...")
 
 	// Create data directory if it doesn't exist
-	if err := os.MkdirAll("./data", 0755); err != nil && !os.IsExist(err) {
+	if err := os.MkdirAll("./data", 0750); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("failed to create data directory: %v", err)
 	}
 

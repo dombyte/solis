@@ -122,7 +122,7 @@ func decodeRaw(dataType DataType, raw []byte) float64 {
 	case Uint16:
 		return float64(binary.BigEndian.Uint16(raw))
 	case Int16:
-		return float64(int16(binary.BigEndian.Uint16(raw)))
+		return float64(int16(binary.BigEndian.Uint16(raw))) // #nosec G115
 	case Uint32:
 		if len(raw) >= 4 {
 			return float64(binary.BigEndian.Uint32(raw))
@@ -130,7 +130,7 @@ func decodeRaw(dataType DataType, raw []byte) float64 {
 		return 0
 	case Int32:
 		if len(raw) >= 4 {
-			return float64(int32(binary.BigEndian.Uint32(raw)))
+			return float64(int32(binary.BigEndian.Uint32(raw))) // #nosec G115
 		}
 		return 0
 	case Float32:

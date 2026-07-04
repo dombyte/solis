@@ -59,7 +59,7 @@ func New(cfg *config.StorageSettings) (*Storage, error) {
 	// Create parent directories if they don't exist
 	dir := filepath.Dir(cfg.Path)
 	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			logger.Error().Msgf("Failed to create storage directory: %v", err)
 			return nil, fmt.Errorf("failed to create directory: %w", err)
 		}

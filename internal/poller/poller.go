@@ -196,7 +196,7 @@ func (p *Poller) run() {
 
 				// For RTU, add random jitter to avoid collision with other devices on the bus
 				if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.config.JitterMax > 0 {
-					jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax)))
+					jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax))) // #nosec G404
 					logger.Debug().Msgf("Adding %s jitter before poll to avoid RTU bus collision", jitter)
 					select {
 					case <-p.ctx.Done():

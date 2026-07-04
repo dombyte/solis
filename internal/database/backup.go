@@ -117,7 +117,7 @@ func createSQLiteBackup(sourcePath, destPath string) error {
 	// Ensure parent directory exists for destination
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0755); err != nil {
+		if err := os.MkdirAll(destDir, 0750); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
@@ -176,7 +176,7 @@ func restoreSQLiteBackup(sourcePath, destPath string) error {
 	// Ensure parent directory exists for destination
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0755); err != nil {
+		if err := os.MkdirAll(destDir, 0750); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
@@ -239,7 +239,7 @@ func restoreSQLiteBackup(sourcePath, destPath string) error {
 // copyFile copies a file from src to dst using simple file copy.
 // This is kept as a fallback method if SQLite native backup fails.
 func copyFile(src, dst string) error {
-	source, err := os.Open(src)
+	source, err := os.Open(src) // #nosec G304
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
@@ -252,7 +252,7 @@ func copyFile(src, dst string) error {
 	}
 
 	// Create destination file
-	destination, err := os.Create(dst)
+	destination, err := os.Create(dst) // #nosec G304
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
@@ -286,13 +286,13 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 
 	// Ensure directory exists
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return "", fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	// Ensure backups subdirectory exists
 	backupsDir := filepath.Join(dir, "backups")
-	if err := os.MkdirAll(backupsDir, 0755); err != nil {
+	if err := os.MkdirAll(backupsDir, 0750); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
 
@@ -334,7 +334,7 @@ func RestoreBackup(backupPath string, targetPath string) error {
 
 	// Ensure target directory exists
 	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0750); err != nil {
 		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 

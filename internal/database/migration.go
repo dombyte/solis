@@ -72,21 +72,21 @@ func (e *MigrationExecutor) ApplyMigration(db *sql.DB, migration Migration) erro
 
 	// Apply the migration
 	if err := migration.Up(tx); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // #nosec G104
 		return fmt.Errorf("migration %d failed: %w", version, err)
 	}
 
 	// Record successful migration in schema_version table
 	// First ensure schema_version table exists
 	if _, err := tx.Exec(SchemaVersionTableSQL); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // #nosec G104
 		return fmt.Errorf("failed to ensure schema_version table exists: %w", err)
 	}
 
 	// Insert or update version record
 	insertSQL := `INSERT OR REPLACE INTO schema_version (version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
 	if _, err := tx.Exec(insertSQL, version, description); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // #nosec G104
 		return fmt.Errorf("failed to record migration: %w", err)
 	}
 
@@ -211,7 +211,7 @@ func (e *MigrationExecutor) RollbackMigration(db *sql.DB, version int) error {
 	}
 
 	if err := migration.Down(tx); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // #nosec G104
 		if err == ErrNotImplemented {
 			return fmt.Errorf("migration %d does not support rollback", version)
 		}
@@ -221,7 +221,7 @@ func (e *MigrationExecutor) RollbackMigration(db *sql.DB, version int) error {
 	// Mark as unsuccessful in schema_version table (within the same transaction)
 	updateSQL := "UPDATE schema_version SET success = 0 WHERE version = ?"
 	if _, err := tx.Exec(updateSQL, version); err != nil {
-		tx.Rollback()
+		_ = tx.Rollback() // #nosec G104
 		return fmt.Errorf("failed to mark migration as unsuccessful: %w", err)
 	}
 

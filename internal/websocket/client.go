@@ -48,13 +48,13 @@ func (c *Client) Send(message []byte) bool {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		_ = c.conn.Close() // #nosec G104
 	}()
 
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait)) // #nosec G104
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait)) // #nosec G104
 		return nil
 	})
 
@@ -96,13 +96,13 @@ func (c *Client) writePump() {
 		ticker.Stop()
 		// Graceful close: wait for write to complete or timeout
 		time.Sleep(closeGracePeriod)
-		c.conn.Close()
+		_ = c.conn.Close() // #nosec G104
 	}()
 
 	for {
 		select {
 		case message := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
 				logger.Error().Msgf("Failed to get writer: %v", err)
@@ -120,7 +120,7 @@ func (c *Client) writePump() {
 			c.hub.UpdateLastActivity(c)
 
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				logger.Debug().Msgf("Failed to write ping: %v", err)
 				return
