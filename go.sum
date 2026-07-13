@@ -55,6 +55,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/grid-x/modbus v0.0.0-20260527064858-ef3bed576432 h1:dcTB6QHLGh1m8PtQlzA2ERPDTqP22wnRmU1gfRsh3Yo=
 github.com/grid-x/modbus v0.0.0-20260527064858-ef3bed576432/go.mod h1:WpbUAyptAAi0VAriSRopZa6uhiJOJCTz7KFvgGtNRXc=
+github.com/grid-x/modbus v0.0.0-20260701064235-82e41c9acfb6 h1:SU+JFCzk2CXTrFrYkB8X9vBUTYhdsXmUoXnSTOIInXk=
+github.com/grid-x/modbus v0.0.0-20260701064235-82e41c9acfb6/go.mod h1:WpbUAyptAAi0VAriSRopZa6uhiJOJCTz7KFvgGtNRXc=
 github.com/grid-x/serial v0.0.0-20211107191517-583c7356b3aa h1:Rsn6ARgNkXrsXJIzhkE4vQr5Gbx2LvtEMv4BJOK4LyU=
 github.com/grid-x/serial v0.0.0-20211107191517-583c7356b3aa/go.mod h1:kdOd86/VGFWRrtkNwf1MPk0u1gIjc4Y7R2j7nhwc7Rk=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=

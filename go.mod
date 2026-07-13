@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/grid-x/modbus v0.0.0-20260527064858-ef3bed576432
+	github.com/grid-x/modbus v0.0.0-20260701064235-82e41c9acfb6
 	github.com/prometheus/client_golang v1.23.2
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/viper v1.21.0
