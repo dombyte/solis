@@ -77,9 +77,16 @@ export default defineConfig({
         display: "standalone",
       },
       includeAssets: ["favicon.svg"],
+      strategies: "generateSW",
+      injectRegister: false,
+      pwaAssets: {
+        disabled: false,
+        preset: "minimal-2023",
+        image: "public/favicon.svg",
+      },
       workbox: {
         globPatterns: [
-          "**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2,ttf,eot,json}"
+          "**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2,ttf,eot,json,ico}"
         ],
         runtimeCaching: [],
         navigateFallback: "/index.html",
@@ -89,12 +96,8 @@ export default defineConfig({
           /^\/health/,
           /^\/metrics/,
           /^\/ws/,
+          /\.\w+$/,
         ],
-      },
-      pwaAssets: {
-        disabled: false,
-        preset: "minimal-2023",
-        image: "public/favicon.svg",
       },
     }),
   ],

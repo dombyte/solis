@@ -16,6 +16,46 @@ initWebSocket();
 // The plugin handles registration in development and production
 // For online-only mode with offline fallback, see public/sw.js
 
+// Service Worker Update Detection
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      .then((registration) => {
+        // Detect service worker updates
+
+        // Detect service worker updates
+        registration.onupdatefound = () => {
+          const installingWorker = registration.installing;
+
+          if (installingWorker) {
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed') {
+                // A new service worker has been installed and is waiting
+                // Show update prompt to user
+                const updatePrompt = () => {
+                  const shouldUpdate = confirm(
+                    'A new version is available. Refresh now to update?'
+                  );
+                  if (shouldUpdate) {
+                    installingWorker.postMessage({ type: 'SKIP_WAITING' });
+                    window.location.reload();
+                  }
+                };
+
+                // Show prompt immediately for critical updates
+                // or delay slightly for better UX
+                setTimeout(updatePrompt, 1000);
+              }
+            };
+          }
+        };
+      })
+      .catch((error) => {
+        console.error('Service worker registration failed:', error);
+      });
+  });
+}
+
 function OnlineStatusProvider({ children }: { children: React.ReactNode }) {
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const MAX_FAILURES_BEFORE_SHOWING = 3;
