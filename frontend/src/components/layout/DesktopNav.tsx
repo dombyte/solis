@@ -12,7 +12,10 @@ export function DesktopNav() {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const isActive = (path: string) => {
-    return location.pathname === path || (path === '/' && location.pathname === '/dashboard');
+    if (location.pathname === path) return true;
+    if (path === '/dashboard' && (location.pathname === '/' || location.pathname.startsWith('/dashboard'))) return true;
+    if (location.pathname.startsWith(path)) return true;
+    return false;
   };
 
   const navItems = [
