@@ -23,7 +23,7 @@ poller:
 modbus:
   # Connection type: tcp, rtu, or rtu_over_tcp
   type: tcp
-  host: 192.168.2.151
+  host: 192.168.2.225
   port: 502
   timeout: 15s
   unit_id: 1

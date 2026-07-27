@@ -426,11 +426,11 @@ All registers are polled by default. Disable specific ones via `registers.disabl
 
 ### Computed Registers
 
-**Note:** These registers are **computed/virtual** (Address = 0) and do not exist in the inverter's Modbus interface. They are calculated from other registers and stored in the database. Values may be inaccurate if source registers are incorrect or if the calculation logic has changed.
+**Note:** These registers are **computed/virtual** (Address = 0) and do not exist in the inverter's Modbus interface. They are calculated from other registers. Values may be inaccurate if source registers are incorrect or if the calculation logic has changed.
 
 | Key | Name | Source | Scale | Unit | Stability |
 |-----|------|--------|-------|------|-----------|
-| today_grid_energy | Today Grid Energy (Net) | total_energy_fed_into_grid - total_energy_imported_from_grid | 1 | kWh | dynamic |
+| today_grid_energy | Today Grid Energy (Net) | today_energy_fed_into_grid - today_energy_imported_from_grid | 1 | kWh | dynamic |
 | total_grid_energy | Total Grid Energy (Net) | total_energy_fed_into_grid - total_energy_imported_from_grid | 1 | kWh | dynamic |
 | energy_consumption_month_energy | Energy Consumption Month Energy (Computed) | Sum of today_energy_consumption daily values | 1 | kWh | dynamic |
 | energy_fed_into_grid_month_energy | Energy Fed Into Grid Month Energy (Computed) | Sum of today_energy_fed_into_grid daily values | 1 | kWh | dynamic |
@@ -444,6 +444,251 @@ All registers are polled by default. Disable specific ones via `registers.disabl
 | battery_discharge_year_energy | Battery Discharge Year Energy (Computed) | Sum of today_battery_discharge_energy daily values | 1 | kWh | dynamic |
 | battery_charge_year_energy | Battery Charge Year Energy (Computed) | Sum of today_battery_charge_energy daily values | 1 | kWh | dynamic |
 | year_grid_energy | Year Grid Energy (Net, Computed) | energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy | 1 | kWh | dynamic |
+
+---
+
+## Virtual/Computed Registers - Detailed Lifecycle
+
+The Solis Monitor provides **virtual registers** that are computed from real Modbus registers. These derived metrics enable powerful energy analysis. This section explains exactly **when**, **where**, and **how** each type of computed register is calculated, stored, and retrieved.
+
+### Register Categories
+
+Virtual registers fall into **4 categories** based on their computation method and storage pattern:
+
+| Category | Computation | Storage | Examples |
+|----------|------------|---------|----------|
+| **Real-time Net** | Simple subtraction in poller | Cache + total_values/daily_values tables | `total_grid_energy`, `today_grid_energy` |
+| **Aggregated Monthly** | Sum of daily values | Cache + monthly_values table | `energy_consumption_month_energy`, `battery_discharge_month_energy` |
+| **Aggregated Yearly** | Sum of daily values | Cache + yearly_values table | `energy_consumption_year_energy`, `battery_discharge_year_energy` |
+| **Net Monthly/Yearly** | Subtraction of aggregated values | Cache + monthly_values/yearly_values tables | `month_grid_energy`, `year_grid_energy` |
+
+---
+
+### When Are Virtual Registers Computed?
+
+#### 1. Poller Cycle (Every `poller.interval`, e.g., 30-60 seconds)
+
+On **every poll cycle**, the poller:
+
+```
+Timer triggers (e.g., every 60 seconds)
+  ↓
+Read real registers from Modbus (4 contiguous blocks)
+  ↓
+Compute virtual registers:
+  ├─ total_grid_energy = total_energy_fed_into_grid - total_energy_imported_from_grid
+  ├─ today_grid_energy = today_energy_fed_into_grid - today_energy_imported_from_grid
+  ├─ energy_consumption_month_energy = SUM(today_energy_consumption for current month)
+  ├─ energy_fed_into_grid_month_energy = SUM(today_energy_fed_into_grid for current month)
+  ├─ energy_imported_from_grid_month_energy = SUM(today_energy_imported_from_grid for current month)
+  ├─ battery_discharge_month_energy = SUM(today_battery_discharge_energy for current month)
+  ├─ battery_charge_month_energy = SUM(today_battery_charge_energy for current month)
+  ├─ month_grid_energy = energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy
+  ├─ energy_consumption_year_energy = SUM(today_energy_consumption for current year)
+  ├─ energy_fed_into_grid_year_energy = SUM(today_energy_fed_into_grid for current year)
+  ├─ energy_imported_from_grid_year_energy = SUM(today_energy_imported_from_grid for current year)
+  ├─ battery_discharge_year_energy = SUM(today_battery_discharge_energy for current year)
+  ├─ battery_charge_year_energy = SUM(today_battery_charge_energy for current year)
+  └─ year_grid_energy = energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy
+  ↓
+Update cache with ALL values (real + virtual)
+  ↓
+Store in database:
+  ├─ daily_values table ← today_* registers + today_grid_energy
+  ├─ total_values table ← total_* registers + total_grid_energy
+  ├─ monthly_values table ← month_* registers (computed)
+  └─ yearly_values table ← year_* registers (computed)
+  ↓
+IF WebSocket clients connected:
+  ↓
+Broadcast cache update to all clients
+```
+
+**Key point:** All virtual registers are recomputed on every poll cycle, **regardless of WebSocket connections**. The poller's timer runs independently.
+
+#### 2. On-Demand Historical Queries (When API is Called)
+
+When you request historical data via the API (e.g., `GET /api/history/monthly/energy_consumption_month_energy?start=2024-01&end=2024-12`):
+
+```
+API Request received
+  ↓
+Check if key is a computed register
+  ↓
+Retrieve stored data from database (for past periods)
+  ↓
+For current period (current month/year):
+  ↓
+  Recalculate from source daily registers
+  ↓
+  Store computed values back to database (backfill)
+  ↓
+Return complete dataset
+```
+
+This ensures:
+- **Past periods** use cached/stored values (fast response)
+- **Current period** is always fresh (accurate)
+- **Missing data** gets backfilled automatically
+
+---
+
+### Where Are Virtual Registers Stored?
+
+| Register | In Memory (Cache) | Database Table | Persistence |
+|----------|------------------|----------------|-------------|
+| `today_grid_energy` | ✅ Yes | `daily_values` | ✅ Permanent |
+| `total_grid_energy` | ✅ Yes | `total_values` | ✅ Permanent |
+| `energy_consumption_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `energy_fed_into_grid_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `energy_imported_from_grid_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `battery_discharge_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `battery_charge_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `month_grid_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
+| `energy_consumption_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `energy_fed_into_grid_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `energy_imported_from_grid_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `battery_discharge_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `battery_charge_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `year_grid_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+
+---
+
+### How Are Virtual Registers Retrieved?
+
+#### Method 1: HTTP API - Current Values
+
+```bash
+# Get all current register values (includes virtual registers)
+GET /api/keys
+
+# Get specific current value (real or virtual)
+GET /api/data/total_grid_energy
+GET /api/data/month_grid_energy
+```
+
+**Response:** Current value from cache (computed during last poll)
+
+```json
+{
+  "key": "total_grid_energy",
+  "name": "Total Grid Energy (Net)",
+  "value": 15000.5,
+  "unit": "kWh",
+  "timestamp": "2024-01-15T10:30:00+01:00"
+}
+```
+
+#### Method 2: HTTP API - Historical Values
+
+```bash
+# Get daily history (computed daily net grid energy)
+GET /api/history/daily/today_grid_energy?start=2024-01-01&end=2024-01-31
+
+# Get monthly history (computed monthly aggregations)
+GET /api/history/monthly/energy_consumption_month_energy?start=2024-01&end=2024-12
+GET /api/history/monthly/month_grid_energy?start=2024-01&end=2024-12
+
+# Get yearly history
+GET /api/history/yearly/year_grid_energy?start=2023&end=2024
+
+# Get total (lifetime) value
+GET /api/history/total/total_grid_energy
+```
+
+
+---
+
+### Computation Logic Examples
+
+#### Example 1: Net Grid Energy (Simple Subtraction)
+
+```
+# At time T (poll cycle):
+total_energy_fed_into_grid    = 15,000 kWh  (from Modbus register 33173)
+total_energy_imported_from_grid = 5,000 kWh  (from Modbus register 33169)
+
+# Computation in poller:
+total_grid_energy = 15,000 - 5,000 = 10,000 kWh
+
+# Stored in:
+- Cache: available immediately for API/WebSocket
+- total_values table: permanent storage
+```
+
+#### Example 2: Monthly Energy Aggregation
+
+```
+# In database (daily_values table):
+Date          | today_energy_consumption |
+-------------|--------------------------|
+2024-01-01   | 25.5 kWh                 |
+2024-01-02   | 30.2 kWh                 |
+2024-01-03   | 28.7 kWh                 |
+...           | ...                      |
+2024-01-31   | 22.1 kWh                 |
+
+# At poll cycle on 2024-01-31:
+# Computation in poller:
+energy_consumption_month_energy = SUM(25.5 + 30.2 + 28.7 + ... + 22.1) = 850.0 kWh
+
+# Stored in:
+- Cache: available immediately
+- monthly_values table: {month: "2024-01", value: 850.0}
+```
+
+#### Example 3: Net Monthly Grid Energy (Nested Computation)
+
+```
+# From monthly_values table (or computed on demand):
+energy_fed_into_grid_month_energy      = 600 kWh  (Jan 2024)
+energy_imported_from_grid_month_energy = 250 kWh  (Jan 2024)
+
+# Computation in poller/service:
+month_grid_energy = 600 - 250 = 350 kWh
+
+# Stored in:
+- Cache: available immediately
+- monthly_values table: {month: "2024-01", value: 350.0}
+```
+
+---
+
+### Timing Summary
+
+| Scenario | When Computed | Where Stored | How Retrieved |
+|----------|---------------|--------------|---------------|
+| Current real-time value | Every poll cycle (30-60s) | Cache + DB | API `/api/data/{key}`, WebSocket |
+| Historical daily value | On first request, then cached | daily_values | API `/api/history/daily/{key}` |
+| Historical monthly value (past) | On first request, then cached | monthly_values | API `/api/history/monthly/{key}` |
+| Historical monthly value (current) | Every poll cycle | Cache + monthly_values | API `/api/history/monthly/{key}` |
+| Historical yearly value (past) | On first request, then cached | yearly_values | API `/api/history/yearly/{key}` |
+| Historical yearly value (current) | Every poll cycle | Cache + yearly_values | API `/api/history/yearly/{key}` |
+| Total/lifetime value | Every poll cycle | Cache + total_values | API `/api/history/total/{key}` |
+
+---
+
+### Configuration Impact
+
+The `poller.interval` setting controls how often virtual registers are recomputed:
+
+```yaml
+poller:
+  interval: 30s  # Virtual registers update every 30 seconds
+```
+
+**Note:** Virtual registers update at the same frequency as the poller interval. More frequent polling = more up-to-date virtual values, but higher Modbus load.
+
+---
+
+### Important Notes
+
+1. **Virtual registers have Address=0** in the register definition, which identifies them as computed
+2. **Scale=1** for all virtual registers (values are already in correct units)
+3. **Stability=dynamic** for all virtual registers (they change over time)
+4. **Database backfill**: When historical computed data is requested, it's calculated and stored for future efficiency
+5. **Current period always fresh**: For monthly/yearly queries, the current period is always recalculated, never used from cache
+6. **WebSocket independence**: Virtual registers are computed on every poll cycle regardless of whether WebSocket clients are connected
 
 ## Running
 
