@@ -2,7 +2,6 @@ FROM node:26-alpine AS frontend
 WORKDIR /frontend
 # Accept git commit hash as build argument with default value
 ARG VITE_GIT_COMMIT_HASH
-ENV VITE_GIT_COMMIT_HASH=$VITE_GIT_COMMIT_HASH
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm install
 COPY frontend/ .
