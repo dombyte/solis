@@ -100,6 +100,7 @@ dockers_v2:
       "org.opencontainers.image.source": "{{.GitURL}}"
     annotations:
       "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
-
+    build_args:
+      VITE_GIT_COMMIT_HASH: "{{.Version}}-{{.ShortCommit}}"
 checksum:
   name_template: "checksums.txt"
