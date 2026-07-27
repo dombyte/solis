@@ -75,14 +75,6 @@ export default defineConfig({
         theme_color: "#000000",
         background_color: "#000000",
         display: "standalone",
-        icons: [
-          {
-            src: "/favicon.svg",
-            sizes: "any",
-            type: "image/svg+xml",
-            purpose: "any maskable",
-          },
-        ],
       },
       includeAssets: ["favicon.svg"],
       workbox: {
@@ -100,7 +92,9 @@ export default defineConfig({
         ],
       },
       pwaAssets: {
-        disabled: true,
+        disabled: false,
+        preset: "minimal-2023",
+        image: "public/favicon.svg",
       },
     }),
   ],
