@@ -3,9 +3,9 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile_dev
+      dockerfile: Dockerfile
       args:
-        VITE_GIT_COMMIT_HASH: 1234
+        VITE_GIT_COMMIT_HASH: final
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
