@@ -71,6 +71,15 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 		r.Handle("/sw.js", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/vite.svg", http.FileServer(http.Dir(frontendDist)))
 
+		// Serve generated icon files
+		r.Handle("/favicon.ico", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/pwa-64x64.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/pwa-192x192.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/pwa-512x512.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/maskable-icon-512x512.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/apple-touch-icon-180x180.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/apple-touch-icon.png", http.FileServer(http.Dir(frontendDist)))
+
 		// Serve workbox files with wildcard hash - use custom handler
 		r.Get("/workbox-{hash}.js", func(w http.ResponseWriter, r *http.Request) {
 			http.ServeFile(w, r, filepath.Join(frontendDist, "workbox-"+chi.URLParam(r, "hash")+".js"))
