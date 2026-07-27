@@ -38,7 +38,5 @@ frontend/coverage/
 # Cache
 frontend/.cache/
 config.yaml
-frontend_dev/dist/
-frontend_dev/node_modules/
-frontend_dev/
-frontend_dev/dev-dist/
+
+frontend/dev-dist/
