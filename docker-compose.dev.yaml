@@ -3,14 +3,16 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile_dev
+      args:
+        VITE_GIT_COMMIT_HASH: 1234
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Europe/Berlin
     ports:
-      - "8080:8080"
+      - "4174:8080"
     deploy:
       resources:
         limits:

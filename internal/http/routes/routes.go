@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/dombyte/solis/docs"
 	"github.com/dombyte/solis/internal/http/handlers"
@@ -60,6 +61,20 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 
 		// Serve favicon from root
 		r.Handle("/favicon.svg", http.FileServer(http.Dir(frontendDist)))
+
+		// Serve data directory (licenses.json, etc.)
+		r.Handle("/data/*", http.StripPrefix("/data/", http.FileServer(http.Dir(filepath.Join(frontendDist, "data")))))
+
+		// Serve PWA and other root static files
+		r.Handle("/registerSW.js", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/manifest.webmanifest", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/sw.js", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/vite.svg", http.FileServer(http.Dir(frontendDist)))
+
+		// Serve workbox files with wildcard hash - use custom handler
+		r.Get("/workbox-{hash}.js", func(w http.ResponseWriter, r *http.Request) {
+			http.ServeFile(w, r, filepath.Join(frontendDist, "workbox-"+chi.URLParam(r, "hash")+".js"))
+		})
 
 		// For all other root-level requests, serve index.html
 		// This allows the frontend router to handle client-side routing
@@ -121,14 +136,26 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 	})
 
 	// Frontend catch-all handler for client-side routing (SPA support)
-	// Serve index.html for all unmatched GET requests
+	// Serve index.html only for frontend routes (not API, docs, health, etc.)
 	if _, err := os.Stat(frontendDist); err == nil {
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			// Only serve index.html for GET requests
+			// Only serve index.html for GET requests to frontend routes
 			if r.Method != http.MethodGet {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
+
+			// Check if this is a backend route that shouldn't serve index.html
+			path := r.URL.Path
+			backendPrefixes := []string{"/api/", "/docs", "/health", "/metrics", "/ws"}
+			for _, prefix := range backendPrefixes {
+				if strings.HasPrefix(path, prefix) {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+			}
+
+			// This is a frontend route, serve index.html for SPA routing
 			http.ServeFile(w, r, filepath.Join(frontendDist, "index.html"))
 		})
 	}
