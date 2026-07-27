@@ -78,13 +78,15 @@ export default defineConfig({
       },
       includeAssets: ["favicon.svg"],
       strategies: "generateSW",
-      injectRegister: false,
+      injectRegister: "auto",
       pwaAssets: {
         disabled: false,
         preset: "minimal-2023",
         image: "public/favicon.svg",
       },
       workbox: {
+        clientsClaim: true,
+        skipWaiting: false,
         globPatterns: [
           "**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2,ttf,eot,json,ico}"
         ],
