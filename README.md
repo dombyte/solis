@@ -755,3 +755,11 @@ cd frontend
 npm install
 npm run dev
 ```
+
+## License 
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+## Dependency Licenses
+
+This project uses various open source dependencies. All license information is automatically tracked and maintained through GitHub's dependency graph.
+
+https://github.com/dombyte/solis/network/dependencies
