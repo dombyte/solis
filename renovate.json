@@ -4,7 +4,8 @@
     "gomod",
     "dockerfile",
     "docker-compose",
-    "github-actions"
+    "github-actions",
+    "npm"
   ],
   "extends": [
     "config:recommended",
@@ -37,6 +38,10 @@
     {
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
+    },
+    {
+      "matchManagers": ["npm"],
+      "groupName": "npm dependencies"
     }
   ],
   "vulnerabilityAlerts": {
