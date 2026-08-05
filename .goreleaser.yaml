@@ -59,8 +59,12 @@ release:
     {{- if .Prerelease }}
     > [!WARNING]
     > **This is a pre-release version. Use with caution and report any issues you encounter.**
+
+    **{{.TagContents}}**
     {{ else }}
     {{.ProjectName}} v{{.Version}} is available!
+
+    **{{.TagContents}}**
     {{- end }}
 
   footer: |
