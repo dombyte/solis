@@ -57,11 +57,10 @@ storage:
   synchronous: NORMAL
   temp_store: MEMORY
 
-registers:
-  disabled_keys: []
-  # Example: disable specific registers
-  # disabled_keys:
-  #   - meter_total_active_power
+# Aggregator settings for background computation of derived values
+aggregator:
+  interval: 60s
+
 ```
 
 ### App Settings
@@ -85,7 +84,7 @@ Serve-only mode allows running the Solis Monitor **without** connecting to the i
 **How it works:**
 - HTTP API and WebSocket all function normally
 - Historical data (daily, monthly, yearly, total energy) is served from SQLite
-- Current register values (PV voltage, battery SOC, power, etc.) are served from cache
+- Current register values (energy values, status, etc.) are served from cache
 - Modbus connection and background polling are completely disabled
 
 **Important limitation:** Current register values are stored in memory (cache) only. In serve-only mode, the cache starts empty. To have current values available:
@@ -150,6 +149,12 @@ SOLIS_APP_SERVE_ONLY=true ./solis
 | `enable_backup` | bool | true | Enable database backup functionality |
 | `max_backups` | int | 3 | Maximum number of backup files to keep (0 = unlimited) |
 | `backup_interval` | duration | 24h | Interval for periodic backups |
+
+### Aggregator Settings
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `interval` | duration | 60s | Interval for recomputing monthly/yearly/net values |
 
 ### Database Maintenance
 
@@ -245,184 +250,111 @@ Backup files can be manually managed:
 - Complex migrations may take time; this is normal for large databases
 - Check logs for migration progress
 
-### Registers Settings
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `disabled_keys` | []string | [] | Register keys to disable (exclude from polling, storage, API) |
-
 ## Available Registers
 
-All registers are polled by default. Disable specific ones via `registers.disabled_keys` in config.
+In v2, the register set has been streamlined to focus on **energy values and status registers**. Many voltage, current, power, temperature, and meter registers have been removed to reduce Modbus polling load and improve performance.
 
-### Information Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| solis_model_no | Solis Model No | 33000 | Uint16 | 1.0 | | stable |
-| solis_dsp_version | Solis DSP Version | 33001 | Uint16 | 1.0 | | stable |
-| solis_hmi_version | Solis HMI Version | 33002 | Uint16 | 1.0 | | stable |
-| solis_protocol_version | Solis Protocol Version | 33003 | Uint16 | 1.0 | | stable |
-| solis_serial_number | Solis Serial Number | 33004 | String | 1.0 | | stable |
+All energy and status registers are polled by default. The register set is now fixed and cannot be disabled via configuration (the `registers.disabled_keys` setting has been removed).
 
 ### Energy Registers
 
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| pv_today_energy | Solis PV Today Energy Generation | 33035 | Uint16 | 0.1 | kWh | dynamic |
-| pv_month_energy | Solis PV Current Month Energy Generation | 33031 | Uint32 | 1 | kWh | dynamic |
-| pv_year_energy | Solis PV This Year Energy Generation | 33037 | Uint32 | 1 | kWh | dynamic |
-| pv_total_energy | Solis PV Total Energy Generation | 33029 | Uint32 | 1 | kWh | dynamic |
+These registers track energy production, consumption, and flow in various time periods.
 
-### PV Voltage/Current Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| pv_voltage_1 | Solis PV Voltage 1 | 33049 | Uint16 | 0.1 | V | dynamic |
-| pv_current_1 | Solis PV Current 1 | 33050 | Uint16 | 0.1 | A | dynamic |
-| pv_voltage_2 | Solis PV Voltage 2 | 33051 | Uint16 | 0.1 | V | dynamic |
-| pv_current_2 | Solis PV Current 2 | 33052 | Uint16 | 0.1 | A | dynamic |
-| pv_voltage_3 | Solis PV Voltage 3 | 33053 | Uint16 | 0.1 | V | dynamic |
-| pv_current_3 | Solis PV Current 3 | 33054 | Uint16 | 0.1 | A | dynamic |
-| pv_voltage_4 | Solis PV Voltage 4 | 33055 | Uint16 | 0.1 | V | dynamic |
-| pv_current_4 | Solis PV Current 4 | 33056 | Uint16 | 0.1 | A | dynamic |
-
-### PV Power and Bus Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| total_pv_power | Solis Total PV Power | 33057 | Uint32 | 1 | W | dynamic |
-
-### Grid Voltage/Current Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| a_phase_voltage | Solis A Phase Voltage | 33073 | Uint16 | 0.1 | V | dynamic |
-| b_phase_voltage | Solis B Phase Voltage | 33074 | Uint16 | 0.1 | V | dynamic |
-| c_phase_voltage | Solis C Phase Voltage | 33075 | Uint16 | 0.1 | V | dynamic |
-| a_phase_current | Solis A Phase Current | 33076 | Uint16 | 0.1 | A | dynamic |
-| b_phase_current | Solis B Phase Current | 33077 | Uint16 | 0.1 | A | dynamic |
-| c_phase_current | Solis C Phase Current | 33078 | Uint16 | 0.1 | A | dynamic |
-| active_power | Solis Active Power | 33079 | Uint32 | 1 | W | dynamic |
-| reactive_power | Solis Reactive Power | 33081 | Int32 | 0.1 | VAR | dynamic |
-| apparent_power | Solis Apparent Power | 33083 | Uint32 | 0.1 | VA | dynamic |
-| grid_frequency | Solis Grid Frequency | 33094 | Uint16 | 0.01 | HZ | dynamic |
-
-### Temperature and Status Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| temperature | Solis Temperature | 33093 | Int16 | 0.1 | C | dynamic |
-| solis_status | Solis Status | 33095 | Uint16 | 1.0 | | dynamic |
-
-### Fault Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| grid_fault_status_01 | Solis Grid Fault Status 01 (Bitmask) | 33116 | Uint16 | 1.0 | | dynamic |
-| backup_load_fault_status_02 | Solis Backup Load Fault Status 02 (Bitmask) | 33117 | Uint16 | 1.0 | | dynamic |
-| battery_fault_status_03 | Solis Battery Fault Status 03 (Bitmask) | 33118 | Uint16 | 1.0 | | dynamic |
-| device_fault_status_04 | Solis Device Fault Status 04 (Bitmask) | 33119 | Uint16 | 1.0 | | dynamic |
-| device_fault_status_05 | Solis Device Fault Status 05 (Bitmask) | 33120 | Uint16 | 1.0 | | dynamic |
-| operating_status | Solis Operating Status (Bitmask) | 33121 | Uint16 | 1.0 | | dynamic |
-
-### Battery Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| battery_voltage | Solis Battery Voltage | 33133 | Uint16 | 0.1 | V | dynamic |
-| battery_current | Solis Battery Current | 33134 | Int16 | 0.1 | A | dynamic |
-| battery_current_direction | Solis Battery Current Direction | 33135 | Uint16 | 1.0 | | dynamic |
-| battery_soc | Solis Battery SOC | 33139 | Uint16 | 1.0 | % | dynamic |
-| battery_soh | Solis Battery SOH | 33140 | Uint16 | 1.0 | % | dynamic |
-| battery_voltage_bms | Solis Battery Voltage (BMS) | 33141 | Uint16 | 0.01 | V | dynamic |
-| battery_fault_status_1_bms | Solis Battery Fault Status 1 (BMS) | 33145 | Uint16 | 1.0 | | dynamic |
-| battery_fault_status_2_bms | Solis Battery Fault Status 2 (BMS) | 33146 | Uint16 | 1.0 | | dynamic |
-| battery_power | Solis Battery Power | 33149 | Int32 | 1 | W | dynamic |
-
-### Backup Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| backup_ac_voltage_phase_a | Solis Backup AC Voltage Phase A | 33137 | Uint16 | 0.1 | V | dynamic |
-| backup_ac_current_phase_a | Solis Backup AC Current Phase A | 33138 | Uint16 | 0.1 | A | dynamic |
-| household_load_power | Solis Household Load Power | 33147 | Uint16 | 1 | W | dynamic |
-| backup_load_power | Solis Backup Load Power | 33148 | Uint16 | 1 | W | dynamic |
-| ac_grid_port_power | Solis AC Grid Port Power | 33151 | Int32 | 0.1 | W | dynamic |
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `pv_energy_daily` | PV Energy Daily | 33035 | Uint16 | 0.1 | kWh | daily |
+| `pv_energy_monthly` | PV Energy Monthly | 33031 | Uint32 | 1 | kWh | monthly |
+| `pv_energy_yearly` | PV Energy Yearly | 33037 | Uint32 | 1 | kWh | yearly |
+| `pv_energy_total` | PV Energy Total | 33029 | Uint32 | 1 | kWh | total |
 
 ### Battery Energy Registers
 
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| today_battery_charge_energy | Solis Today Battery Charge Energy | 33163 | Uint16 | 0.1 | kWh | dynamic |
-| today_battery_discharge_energy | Solis Today Battery Discharge Energy | 33167 | Uint16 | 0.1 | kWh | dynamic |
-| total_battery_discharge_energy | Solis Total Battery Discharge Energy | 33165 | Uint32 | 1 | kWh | dynamic |
-| total_battery_charge_energy | Solis Total Battery Charge Energy | 33161 | Uint32 | 1 | kWh | dynamic |
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `battery_charge_daily` | Battery Charge Daily | 33163 | Uint16 | 0.1 | kWh | daily |
+| `battery_discharge_daily` | Battery Discharge Daily | 33167 | Uint16 | 0.1 | kWh | daily |
+| `battery_discharge_total` | Battery Discharge Total | 33165 | Uint32 | 1 | kWh | total |
+| `battery_charge_total` | Battery Charge Total | 33161 | Uint32 | 1 | kWh | total |
 
 ### Grid Energy Registers
 
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `grid_import_daily` | Grid Import Daily | 33171 | Uint16 | 0.1 | kWh | daily |
+| `grid_import_total` | Grid Import Total | 33169 | Uint32 | 1 | kWh | total |
+| `grid_export_daily` | Grid Export Daily | 33175 | Uint16 | 0.1 | kWh | daily |
+| `grid_export_total` | Grid Export Total | 33173 | Uint32 | 1 | kWh | total |
+
+### Consumption Registers
+
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `energy_consumption_daily` | Energy Consumption Daily | 33179 | Uint16 | 0.1 | kWh | daily |
+| `energy_consumption_total` | Energy Consumption Total | 33177 | Uint32 | 1 | kWh | total |
+
+### Household Energy Registers
+
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `household_energy_daily` | Household Energy Daily | 33586 | Uint16 | 0.1 | kWh | daily |
+| `household_energy_monthly` | Household Energy Monthly | 33584 | Uint32 | 1 | kWh | monthly |
+| `household_energy_yearly` | Household Energy Yearly | 33582 | Uint32 | 1 | kWh | yearly |
+| `household_energy_total` | Household Energy Total | 33580 | Uint32 | 1 | kWh | total |
+
+### Backup Energy Registers
+
+| Key | Name | Address | Type | Scale | Unit | Aggregation |
+|-----|------|---------|------|-------|------|-------------|
+| `backup_energy_daily` | Backup Energy Daily | 33596 | Uint16 | 0.1 | kWh | daily |
+| `backup_energy_total` | Backup Energy Total | 33590 | Uint32 | 1 | kWh | total |
+| `backup_energy_yearly` | Backup Energy Yearly | 33592 | Uint32 | 1 | kWh | yearly |
+| `backup_energy_monthly` | Backup Energy Monthly | 33594 | Uint32 | 1 | kWh | monthly |
+
+### Status Registers
+
+Status and fault registers provide operational state and error information.
+
 | Key | Name | Address | Type | Scale | Unit | Stability |
 |-----|------|---------|------|-------|------|-----------|
-| today_energy_imported_from_grid | Solis Today Energy Imported From Grid | 33171 | Uint16 | 0.1 | kWh | dynamic |
-| total_energy_imported_from_grid | Solis Total Energy Imported From Grid | 33169 | Uint32 | 0.1 | kWh | dynamic |
-| total_energy_fed_into_grid | Solis Total Energy Fed Into Grid | 33173 | Uint32 | 0.1 | kWh | dynamic |
-| today_energy_fed_into_grid | Solis Today Energy Fed Into Grid | 33175 | Uint16 | 0.1 | kWh | dynamic |
-| today_energy_consumption | Solis Today Energy Consumption | 33179 | Uint16 | 0.1 | kWh | dynamic |
-| total_energy_consumption | Solis Total Energy Consumption | 33177 | Uint32 | 1 | kWh | dynamic |
-
-### Household Load Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| household_load_today_energy | Solis Household Load Today Energy | 33586 | Uint16 | 0.1 | kWh | dynamic |
-| household_load_year_energy | Solis Household Load Year Energy | 33582 | Uint32 | 1 | kWh | dynamic |
-| household_load_month_energy | Solis Household Load Month Energy | 33584 | Uint32 | 1 | kWh | dynamic |
-| household_load_total_energy | Solis Household Load Total Energy | 33580 | Uint32 | 1 | kWh | dynamic |
-
-### Backup Load Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| backup_load_today_energy | Solis Backup Load Today Energy | 33596 | Uint16 | 0.1 | kWh | dynamic |
-| backup_load_total_energy | Solis Backup Load Total Energy | 33590 | Uint32 | 1 | kWh | dynamic |
-| backup_load_year_energy | Solis Backup Load Year Energy | 33592 | Uint32 | 1 | kWh | dynamic |
-| backup_load_month_energy | Solis Backup Load Month Energy | 33594 | Uint32 | 1 | kWh | dynamic |
-
-### Meter Registers
-
-| Key | Name | Address | Type | Scale | Unit | Stability |
-|-----|------|---------|------|-------|------|-----------|
-| meter_ac_voltage_a | Solis Meter AC Voltage A | 33251 | Uint16 | 0.1 | V | dynamic |
-| meter_ac_current_a | Solis Meter AC Current A | 33252 | Uint16 | 0.1 | A | dynamic |
-| meter_ac_voltage_b | Solis Meter AC Voltage B | 33253 | Uint16 | 0.1 | V | dynamic |
-| meter_ac_current_b | Solis Meter AC Current B | 33254 | Uint16 | 0.1 | A | dynamic |
-| meter_ac_voltage_c | Solis Meter AC Voltage C | 33255 | Uint16 | 0.1 | V | dynamic |
-| meter_ac_current_c | Solis Meter AC Current C | 33256 | Uint16 | 0.1 | A | dynamic |
-| meter_active_power_a | Solis Meter Active Power A | 33257 | Int32 | 0.1 | W | dynamic |
-| meter_active_power_b | Solis Meter Active Power B | 33259 | Int32 | 0.1 | W | dynamic |
-| meter_active_power_c | Solis Meter Active Power C | 33261 | Int32 | 0.1 | W | dynamic |
-| meter_total_active_power | Solis Meter Total Active Power | 33263 | Int32 | 1.0 | W | dynamic |
+| `solis_status` | Solis Status | 33095 | Uint16 | 1.0 | | dynamic |
+| `grid_fault_1` | Grid Fault 1 (Bitmask) | 33116 | Uint16 | 1.0 | | dynamic |
+| `backup_fault_2` | Backup Fault 2 (Bitmask) | 33117 | Uint16 | 1.0 | | dynamic |
+| `battery_fault_3` | Battery Fault 3 (Bitmask) | 33118 | Uint16 | 1.0 | | dynamic |
+| `device_fault_4` | Device Fault 4 (Bitmask) | 33119 | Uint16 | 1.0 | | dynamic |
+| `device_fault_5` | Device Fault 5 (Bitmask) | 33120 | Uint16 | 1.0 | | dynamic |
+| `operating_status` | Solis Operating Status (Bitmask) | 33121 | Uint16 | 1.0 | | dynamic |
+| `battery_fault_1_bms` | Battery Fault 1 (BMS) | 33145 | Uint16 | 1.0 | | dynamic |
+| `battery_fault_2_bms` | Battery Fault 2 (BMS) | 33146 | Uint16 | 1.0 | | dynamic |
 
 ### Computed Registers
 
-**Note:** These registers are **computed/virtual** (Address = 0) and do not exist in the inverter's Modbus interface. They are calculated from other registers. Values may be inaccurate if source registers are incorrect or if the calculation logic has changed.
+These are **virtual/computed** registers (Address = 0) that are calculated from other registers. They are computed by the aggregator on a regular interval.
 
-| Key | Name | Source | Scale | Unit | Stability |
-|-----|------|--------|-------|------|-----------|
-| today_grid_energy | Today Grid Energy (Net) | today_energy_fed_into_grid - today_energy_imported_from_grid | 1 | kWh | dynamic |
-| total_grid_energy | Total Grid Energy (Net) | total_energy_fed_into_grid - total_energy_imported_from_grid | 1 | kWh | dynamic |
-| energy_consumption_month_energy | Energy Consumption Month Energy (Computed) | Sum of today_energy_consumption daily values | 1 | kWh | dynamic |
-| energy_fed_into_grid_month_energy | Energy Fed Into Grid Month Energy (Computed) | Sum of today_energy_fed_into_grid daily values | 1 | kWh | dynamic |
-| energy_imported_from_grid_month_energy | Energy Imported From Grid Month Energy (Computed) | Sum of today_energy_imported_from_grid daily values | 1 | kWh | dynamic |
-| battery_discharge_month_energy | Battery Discharge Month Energy (Computed) | Sum of today_battery_discharge_energy daily values | 1 | kWh | dynamic |
-| battery_charge_month_energy | Battery Charge Month Energy (Computed) | Sum of today_battery_charge_energy daily values | 1 | kWh | dynamic |
-| month_grid_energy | Month Grid Energy (Net, Computed) | energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy | 1 | kWh | dynamic |
-| energy_consumption_year_energy | Energy Consumption Year Energy (Computed) | Sum of today_energy_consumption daily values | 1 | kWh | dynamic |
-| energy_fed_into_grid_year_energy | Energy Fed Into Grid Year Energy (Computed) | Sum of today_energy_fed_into_grid daily values | 1 | kWh | dynamic |
-| energy_imported_from_grid_year_energy | Energy Imported From Grid Year Energy (Computed) | Sum of today_energy_imported_from_grid daily values | 1 | kWh | dynamic |
-| battery_discharge_year_energy | Battery Discharge Year Energy (Computed) | Sum of today_battery_discharge_energy daily values | 1 | kWh | dynamic |
-| battery_charge_year_energy | Battery Charge Year Energy (Computed) | Sum of today_battery_charge_energy daily values | 1 | kWh | dynamic |
-| year_grid_energy | Year Grid Energy (Net, Computed) | energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy | 1 | kWh | dynamic |
+| Key | Name | Source | Scale | Unit | Aggregation |
+|-----|------|--------|-------|------|-------------|
+| `grid_energy_total` | Grid Energy Total (Net) | grid_export_total - grid_import_total | 1 | kWh | total |
+| `grid_energy_daily` | Grid Energy Daily (Net) | grid_export_daily - grid_import_daily | 1 | kWh | daily |
+| `energy_consumption_monthly` | Energy Consumption Monthly (Computed) | Sum of energy_consumption_daily daily values | 1 | kWh | monthly |
+| `grid_export_monthly` | Grid Export Monthly (Computed) | Sum of grid_export_daily daily values | 1 | kWh | monthly |
+| `grid_import_monthly` | Grid Import Monthly (Computed) | Sum of grid_import_daily daily values | 1 | kWh | monthly |
+| `battery_discharge_monthly` | Battery Discharge Monthly (Computed) | Sum of battery_discharge_daily daily values | 1 | kWh | monthly |
+| `battery_charge_monthly` | Battery Charge Monthly (Computed) | Sum of battery_charge_daily daily values | 1 | kWh | monthly |
+| `grid_energy_monthly` | Grid Energy Monthly (Net, Computed) | grid_export_monthly - grid_import_monthly | 1 | kWh | monthly |
+| `energy_consumption_yearly` | Energy Consumption Yearly (Computed) | Sum of energy_consumption_daily daily values | 1 | kWh | yearly |
+| `grid_export_yearly` | Grid Export Yearly (Computed) | Sum of grid_export_daily daily values | 1 | kWh | yearly |
+| `grid_import_yearly` | Grid Import Yearly (Computed) | Sum of grid_import_daily daily values | 1 | kWh | yearly |
+| `battery_discharge_yearly` | Battery Discharge Yearly (Computed) | Sum of battery_discharge_daily daily values | 1 | kWh | yearly |
+| `battery_charge_yearly` | Battery Charge Yearly (Computed) | Sum of battery_charge_daily daily values | 1 | kWh | yearly |
+| `grid_energy_yearly` | Grid Energy Yearly (Net, Computed) | grid_export_yearly - grid_import_yearly | 1 | kWh | yearly |
+
+### Register Aggregation Types
+
+| Type | Description | Query Support |
+|------|-------------|---------------|
+| **daily** | Resets at midnight, stores per-day values | Supports `?start=` and `?end=` for date range queries |
+| **monthly** | Aggregated from daily values at month end | Supports `?start=` and `?end=` for month range queries (YYYY-MM format) |
+| **yearly** | Aggregated from daily values at year end | Supports `?start=` and `?end=` for year range queries (YYYY format) |
+| **total** | Lifetime accumulation, never resets | Returns single lifetime value |
 
 ---
 
@@ -430,84 +362,24 @@ All registers are polled by default. Disable specific ones via `registers.disabl
 
 The Solis Monitor provides **virtual registers** that are computed from real Modbus registers. These derived metrics enable powerful energy analysis. This section explains exactly **when**, **where**, and **how** each type of computed register is calculated, stored, and retrieved.
 
-### Register Categories
-
-Virtual registers fall into **4 categories** based on their computation method and storage pattern:
-
-| Category | Computation | Storage | Examples |
-|----------|------------|---------|----------|
-| **Real-time Net** | Simple subtraction in poller | Cache + total_values/daily_values tables | `total_grid_energy`, `today_grid_energy` |
-| **Aggregated Monthly** | Sum of daily values | Cache + monthly_values table | `energy_consumption_month_energy`, `battery_discharge_month_energy` |
-| **Aggregated Yearly** | Sum of daily values | Cache + yearly_values table | `energy_consumption_year_energy`, `battery_discharge_year_energy` |
-| **Net Monthly/Yearly** | Subtraction of aggregated values | Cache + monthly_values/yearly_values tables | `month_grid_energy`, `year_grid_energy` |
-
----
-
 ### When Are Virtual Registers Computed?
 
-#### 1. Poller Cycle (Every `poller.interval`, e.g., 30-60 seconds)
+#### 1. Aggregator Cycle (Every `aggregator.interval`, default: 60 seconds)
 
-On **every poll cycle**, the poller:
+On **every aggregator cycle**, the system:
+- Computes daily sums from storage for monthly registers
+- Computes daily sums from storage for yearly registers  
+- Computes net values (grid_energy_*) from component values
+- Updates cache with all computed values
+- Stores computed values in database tables (monthly_values, yearly_values, total_values)
 
-```
-Timer triggers (e.g., every 60 seconds)
-  ↓
-Read real registers from Modbus (4 contiguous blocks)
-  ↓
-Compute virtual registers:
-  ├─ total_grid_energy = total_energy_fed_into_grid - total_energy_imported_from_grid
-  ├─ today_grid_energy = today_energy_fed_into_grid - today_energy_imported_from_grid
-  ├─ energy_consumption_month_energy = SUM(today_energy_consumption for current month)
-  ├─ energy_fed_into_grid_month_energy = SUM(today_energy_fed_into_grid for current month)
-  ├─ energy_imported_from_grid_month_energy = SUM(today_energy_imported_from_grid for current month)
-  ├─ battery_discharge_month_energy = SUM(today_battery_discharge_energy for current month)
-  ├─ battery_charge_month_energy = SUM(today_battery_charge_energy for current month)
-  ├─ month_grid_energy = energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy
-  ├─ energy_consumption_year_energy = SUM(today_energy_consumption for current year)
-  ├─ energy_fed_into_grid_year_energy = SUM(today_energy_fed_into_grid for current year)
-  ├─ energy_imported_from_grid_year_energy = SUM(today_energy_imported_from_grid for current year)
-  ├─ battery_discharge_year_energy = SUM(today_battery_discharge_energy for current year)
-  ├─ battery_charge_year_energy = SUM(today_battery_charge_energy for current year)
-  └─ year_grid_energy = energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy
-  ↓
-Update cache with ALL values (real + virtual)
-  ↓
-Store in database:
-  ├─ daily_values table ← today_* registers + today_grid_energy
-  ├─ total_values table ← total_* registers + total_grid_energy
-  ├─ monthly_values table ← month_* registers (computed)
-  └─ yearly_values table ← year_* registers (computed)
-  ↓
-IF WebSocket clients connected:
-  ↓
-Broadcast cache update to all clients
-```
-
-**Key point:** All virtual registers are recomputed on every poll cycle, **regardless of WebSocket connections**. The poller's timer runs independently.
+**Key point:** All virtual registers are recomputed on every aggregator cycle, **regardless of API requests**. The aggregator runs independently.
 
 #### 2. On-Demand Historical Queries (When API is Called)
 
-When you request historical data via the API (e.g., `GET /api/history/monthly/energy_consumption_month_energy?start=2024-01&end=2024-12`):
-
-```
-API Request received
-  ↓
-Check if key is a computed register
-  ↓
-Retrieve stored data from database (for past periods)
-  ↓
-For current period (current month/year):
-  ↓
-  Recalculate from source daily registers
-  ↓
-  Store computed values back to database (backfill)
-  ↓
-Return complete dataset
-```
-
-This ensures:
+When you request historical data via the API:
 - **Past periods** use cached/stored values (fast response)
-- **Current period** is always fresh (accurate)
+- **Current period** is always fresh (accurate) - recalculated from source daily registers
 - **Missing data** gets backfilled automatically
 
 ---
@@ -516,20 +388,20 @@ This ensures:
 
 | Register | In Memory (Cache) | Database Table | Persistence |
 |----------|------------------|----------------|-------------|
-| `today_grid_energy` | ✅ Yes | `daily_values` | ✅ Permanent |
-| `total_grid_energy` | ✅ Yes | `total_values` | ✅ Permanent |
-| `energy_consumption_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `energy_fed_into_grid_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `energy_imported_from_grid_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `battery_discharge_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `battery_charge_month_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `month_grid_energy` | ✅ Yes | `monthly_values` | ✅ Permanent |
-| `energy_consumption_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
-| `energy_fed_into_grid_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
-| `energy_imported_from_grid_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
-| `battery_discharge_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
-| `battery_charge_year_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
-| `year_grid_energy` | ✅ Yes | `yearly_values` | ✅ Permanent |
+| `grid_energy_total` | Yes | `total_values` | Permanent |
+| `grid_energy_daily` | Yes | `daily_values` | Permanent |
+| `energy_consumption_monthly` | Yes | `monthly_values` | Permanent |
+| `grid_export_monthly` | Yes | `monthly_values` | Permanent |
+| `grid_import_monthly` | Yes | `monthly_values` | Permanent |
+| `battery_discharge_monthly` | Yes | `monthly_values` | Permanent |
+| `battery_charge_monthly` | Yes | `monthly_values` | Permanent |
+| `grid_energy_monthly` | Yes | `monthly_values` | Permanent |
+| `energy_consumption_yearly` | Yes | `yearly_values` | Permanent |
+| `grid_export_yearly` | Yes | `yearly_values` | Permanent |
+| `grid_import_yearly` | Yes | `yearly_values` | Permanent |
+| `battery_discharge_yearly` | Yes | `yearly_values` | Permanent |
+| `battery_charge_yearly` | Yes | `yearly_values` | Permanent |
+| `grid_energy_yearly` | Yes | `yearly_values` | Permanent |
 
 ---
 
@@ -538,20 +410,20 @@ This ensures:
 #### Method 1: HTTP API - Current Values
 
 ```bash
-# Get all current register values (includes virtual registers)
+# Get all current register keys with metadata
 GET /api/keys
 
 # Get specific current value (real or virtual)
-GET /api/data/total_grid_energy
-GET /api/data/month_grid_energy
+GET /api/data/grid_energy_total
+GET /api/data/grid_energy_monthly
 ```
 
-**Response:** Current value from cache (computed during last poll)
+**Response:** Current value from cache (computed during last aggregator cycle)
 
 ```json
 {
-  "key": "total_grid_energy",
-  "name": "Total Grid Energy (Net)",
+  "key": "grid_energy_total",
+  "name": "Grid Energy Total (Net)",
   "value": 15000.5,
   "unit": "kWh",
   "timestamp": "2024-01-15T10:30:00+01:00"
@@ -561,18 +433,18 @@ GET /api/data/month_grid_energy
 #### Method 2: HTTP API - Historical Values
 
 ```bash
-# Get daily history (computed daily net grid energy)
-GET /api/history/daily/today_grid_energy?start=2024-01-01&end=2024-01-31
+# Get daily history
+GET /api/data/energy_consumption_daily?start=2024-01-01&end=2024-01-31
 
 # Get monthly history (computed monthly aggregations)
-GET /api/history/monthly/energy_consumption_month_energy?start=2024-01&end=2024-12
-GET /api/history/monthly/month_grid_energy?start=2024-01&end=2024-12
+GET /api/data/energy_consumption_monthly?start=2024-01&end=2024-12
+GET /api/data/grid_energy_monthly?start=2024-01&end=2024-12
 
 # Get yearly history
-GET /api/history/yearly/year_grid_energy?start=2023&end=2024
+GET /api/data/grid_energy_yearly?start=2023&end=2024
 
 # Get total (lifetime) value
-GET /api/history/total/total_grid_energy
+GET /api/data/grid_energy_total
 ```
 
 
@@ -583,12 +455,12 @@ GET /api/history/total/total_grid_energy
 #### Example 1: Net Grid Energy (Simple Subtraction)
 
 ```
-# At time T (poll cycle):
-total_energy_fed_into_grid    = 15,000 kWh  (from Modbus register 33173)
-total_energy_imported_from_grid = 5,000 kWh  (from Modbus register 33169)
+# At time T (aggregator cycle):
+grid_export_total    = 15,000 kWh  (from Modbus register 33173)
+grid_import_total = 5,000 kWh  (from Modbus register 33169)
 
-# Computation in poller:
-total_grid_energy = 15,000 - 5,000 = 10,000 kWh
+# Computation in aggregator:
+grid_energy_total = 15,000 - 5,000 = 10,000 kWh
 
 # Stored in:
 - Cache: available immediately for API/WebSocket
@@ -599,7 +471,7 @@ total_grid_energy = 15,000 - 5,000 = 10,000 kWh
 
 ```
 # In database (daily_values table):
-Date          | today_energy_consumption |
+Date          | energy_consumption_daily |
 -------------|--------------------------|
 2024-01-01   | 25.5 kWh                 |
 2024-01-02   | 30.2 kWh                 |
@@ -607,9 +479,9 @@ Date          | today_energy_consumption |
 ...           | ...                      |
 2024-01-31   | 22.1 kWh                 |
 
-# At poll cycle on 2024-01-31:
-# Computation in poller:
-energy_consumption_month_energy = SUM(25.5 + 30.2 + 28.7 + ... + 22.1) = 850.0 kWh
+# At aggregator cycle on 2024-01-31:
+# Computation in aggregator:
+energy_consumption_monthly = SUM(25.5 + 30.2 + 28.7 + ... + 22.1) = 850.0 kWh
 
 # Stored in:
 - Cache: available immediately
@@ -620,11 +492,11 @@ energy_consumption_month_energy = SUM(25.5 + 30.2 + 28.7 + ... + 22.1) = 850.0 k
 
 ```
 # From monthly_values table (or computed on demand):
-energy_fed_into_grid_month_energy      = 600 kWh  (Jan 2024)
-energy_imported_from_grid_month_energy = 250 kWh  (Jan 2024)
+grid_export_monthly      = 600 kWh  (Jan 2024)
+grid_import_monthly = 250 kWh  (Jan 2024)
 
-# Computation in poller/service:
-month_grid_energy = 600 - 250 = 350 kWh
+# Computation in aggregator:
+grid_energy_monthly = 600 - 250 = 350 kWh
 
 # Stored in:
 - Cache: available immediately
@@ -638,25 +510,25 @@ month_grid_energy = 600 - 250 = 350 kWh
 | Scenario | When Computed | Where Stored | How Retrieved |
 |----------|---------------|--------------|---------------|
 | Current real-time value | Every poll cycle (30-60s) | Cache + DB | API `/api/data/{key}`, WebSocket |
-| Historical daily value | On first request, then cached | daily_values | API `/api/history/daily/{key}` |
-| Historical monthly value (past) | On first request, then cached | monthly_values | API `/api/history/monthly/{key}` |
-| Historical monthly value (current) | Every poll cycle | Cache + monthly_values | API `/api/history/monthly/{key}` |
-| Historical yearly value (past) | On first request, then cached | yearly_values | API `/api/history/yearly/{key}` |
-| Historical yearly value (current) | Every poll cycle | Cache + yearly_values | API `/api/history/yearly/{key}` |
-| Total/lifetime value | Every poll cycle | Cache + total_values | API `/api/history/total/{key}` |
+| Historical daily value | On first request, then cached | daily_values | API `/api/data/{key}` with `?start=` and `?end=` |
+| Historical monthly value (past) | On first request, then cached | monthly_values | API `/api/data/{key}` with `?start=` and `?end=` |
+| Historical monthly value (current) | Every aggregator cycle | Cache + monthly_values | API `/api/data/{key}` with `?start=` and `?end=` |
+| Historical yearly value (past) | On first request, then cached | yearly_values | API `/api/data/{key}` with `?start=` and `?end=` |
+| Historical yearly value (current) | Every aggregator cycle | Cache + yearly_values | API `/api/data/{key}` with `?start=` and `?end=` |
+| Total/lifetime value | Every aggregator cycle | Cache + total_values | API `/api/data/{key}` |
 
 ---
 
 ### Configuration Impact
 
-The `poller.interval` setting controls how often virtual registers are recomputed:
+The `aggregator.interval` setting controls how often virtual registers are recomputed:
 
 ```yaml
-poller:
-  interval: 30s  # Virtual registers update every 30 seconds
+aggregator:
+  interval: 60s  # Virtual registers update every 60 seconds
 ```
 
-**Note:** Virtual registers update at the same frequency as the poller interval. More frequent polling = more up-to-date virtual values, but higher Modbus load.
+**Note:** Virtual registers update at the same frequency as the aggregator interval. More frequent computation = more up-to-date virtual values, but higher computation load.
 
 ---
 
@@ -664,10 +536,9 @@ poller:
 
 1. **Virtual registers have Address=0** in the register definition, which identifies them as computed
 2. **Scale=1** for all virtual registers (values are already in correct units)
-3. **Stability=dynamic** for all virtual registers (they change over time)
+3. **Aggregation types** (daily, monthly, yearly, total) determine query support
 4. **Database backfill**: When historical computed data is requested, it's calculated and stored for future efficiency
 5. **Current period always fresh**: For monthly/yearly queries, the current period is always recalculated, never used from cache
-6. **WebSocket independence**: Virtual registers are computed on every poll cycle regardless of whether WebSocket clients are connected
 
 ## Running
 
@@ -734,6 +605,33 @@ cd frontend
 npm install
 npm run dev
 ```
+## Migration from v1
+
+Version 2 introduced significant changes to the register set and architecture:
+
+### Removed Features
+- **Register filtering**: The `registers.disabled_keys` configuration has been removed. All energy and status registers are always enabled.
+- **Old API endpoints**: The `/api/registers` endpoint has been removed.
+
+### Removed Registers
+The following categories of registers have been removed to reduce Modbus load:
+- Information registers (model, serial number, versions)
+- PV voltage and current registers (pv_voltage_1-4, pv_current_1-4)
+- Grid voltage, current, power, and frequency registers
+- Temperature registers
+- Battery voltage, current, SOC, SOH registers
+- Power registers (household_power, backup_power, battery_power, ac_grid_power)
+- Backup AC registers
+- Meter registers
+
+See `removed_registers_v2.md` for a complete list of removed registers.
+
+### New Features
+- **Aggregator service**: Background computation of derived values (monthly, yearly, net) on a configurable interval
+- **Simplified API**: Cleaner endpoints at `/api/keys` and `/api/data/{key}`
+- **Improved performance**: Reduced Modbus polling load by focusing on energy-only registers
+- **Better historical queries**: Support for daily, monthly, and yearly historical data directly from the API
+
 
 ## License 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
