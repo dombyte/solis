@@ -47,9 +47,6 @@ func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *Bac
 	registry.Register(migrations.GetV1Migration())
 	registry.Register(migrations.GetV2Migration())
 
-	// Register the V2 migration from the migrations package
-	registry.Register(migrations.GetV2Migration())
-
 	return &DatabaseManager{
 		config:        storageConfig,
 		backupConfig:  backupConfig,

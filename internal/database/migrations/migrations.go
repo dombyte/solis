@@ -101,7 +101,6 @@ var TablesToMigrate = []string{
 	"yearly_values",
 	"total_values",
 	"error_data",
-	"raw_data",
 }
 
 // V2Migration implements the Migration interface for V2 schema (register key renaming).
@@ -140,31 +139,16 @@ func migrateTable(tx *sql.Tx, tableName string) error {
 		}
 
 		// Check if the table has the register_key column
-		var columnExists bool
+		var columnCount int
 		err := tx.QueryRow(
 			fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = 'register_key'", tableName),
-		).Scan(&columnExists)
+		).Scan(&columnCount)
 		if err != nil {
 			return fmt.Errorf("failed to check for register_key column in %s: %w", tableName, err)
 		}
 
-		if !columnExists {
-			// Some tables might not have register_key (like raw_data uses register_key)
-			// Actually, let's check the actual column name for raw_data
-			if tableName == "raw_data" {
-				var colName string
-				err := tx.QueryRow(
-					fmt.Sprintf("SELECT name FROM pragma_table_info('%s') WHERE name LIKE '%%register%%'", tableName),
-				).Scan(&colName)
-				if err == nil {
-					// Update using the actual column name
-					updateSQL := fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s = ?", tableName, colName, colName)
-					_, err = tx.Exec(updateSQL, newKey, oldKey)
-					if err != nil {
-						return fmt.Errorf("failed to update key from %s to %s in %s: %w", oldKey, newKey, tableName, err)
-					}
-				}
-			}
+		if columnCount == 0 {
+			// Table doesn't have register_key column, skip it
 			continue
 		}
 
@@ -191,20 +175,21 @@ func (m *V2Migration) Down(tx *sql.Tx) error {
 	}
 
 	for _, table := range TablesToMigrate {
+		// Check if the table has the register_key column
+		var columnCount int
+		err := tx.QueryRow(
+			fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = 'register_key'", table),
+		).Scan(&columnCount)
+		if err != nil {
+			return fmt.Errorf("failed to check for register_key column in %s: %w", table, err)
+		}
+
+		if columnCount == 0 {
+			// Table doesn't have register_key column, skip it
+			continue
+		}
+
 		for newKey, oldKey := range reverseMapping {
-			// Check if the table has the register_key column
-			var columnExists bool
-			err := tx.QueryRow(
-				fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = 'register_key'", table),
-			).Scan(&columnExists)
-			if err != nil {
-				return fmt.Errorf("failed to check for register_key column in %s: %w", table, err)
-			}
-
-			if !columnExists {
-				continue
-			}
-
 			// Perform the rollback update for this table
 			updateSQL := fmt.Sprintf("UPDATE %s SET register_key = ? WHERE register_key = ?", table)
 			_, err = tx.Exec(updateSQL, oldKey, newKey)
