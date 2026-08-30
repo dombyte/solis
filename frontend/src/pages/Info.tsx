@@ -8,9 +8,8 @@ import { useState, useEffect, useCallback } from 'react';
 export function Info() {
   const isMobile = useMobile();
 
-  // Get git commit hash from import.meta.env if available
-  const commitHash = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
-  const shortHash = typeof commitHash === 'string' ? commitHash.substring(0, 7) : 'dev';
+  // Get version from import.meta.env if available
+  const version = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
 
   // Get WebSocket connection status (initialized at app level)
   const { isConnected } = useWebSocket({ autoConnect: false, requestInitialData: false });
@@ -137,7 +136,7 @@ export function Info() {
             <div>
               <h2 className="text-lg font-semibold mb-1">Version</h2>
               <p className="text-muted-foreground">
-                <code className="bg-muted px-2 py-1 rounded">v{shortHash}</code>
+                <code className="bg-muted px-2 py-1 rounded">v{version}</code>
               </p>
             </div>
             {'serviceWorker' in navigator && (
