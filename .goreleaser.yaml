@@ -95,6 +95,7 @@ dockers_v2:
     dockerfile: Dockerfile.goreleaser
     extra_files:
       - frontend/
+      - docs/
     labels:
       "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
       "org.opencontainers.image.created": "{{.Date}}"
