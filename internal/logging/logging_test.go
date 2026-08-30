@@ -69,7 +69,7 @@ func TestLevel_ToZerologLevel(t *testing.T) {
 func TestNewComponentLogger(t *testing.T) {
 	// Initialize the logger first
 	var buf bytes.Buffer
-	Init(false, &buf, false, "INFO")
+	Init(&buf, false, "INFO")
 
 	// Test that NewComponentLogger doesn't panic
 	logger := NewComponentLogger("test")
@@ -89,24 +89,23 @@ func TestInit(t *testing.T) {
 	// Test that Init doesn't panic with various configurations
 	tests := []struct {
 		name     string
-		debug    bool
 		pretty   bool
 		logLevel string
 	}{
-		{"debug true, pretty false, no level", true, false, ""},
-		{"debug false, pretty true, info", false, true, "INFO"},
-		{"debug false, pretty false, debug", false, false, "DEBUG"},
-		{"debug false, pretty false, warn", false, false, "WARN"},
-		{"debug false, pretty false, error", false, false, "ERROR"},
-		{"debug false, pretty false, fatal", false, false, "FATAL"},
-		{"all defaults", false, false, ""},
+		{"pretty false, no level", false, ""},
+		{"pretty true, info", true, "INFO"},
+		{"pretty false, debug", false, "DEBUG"},
+		{"pretty false, warn", false, "WARN"},
+		{"pretty false, error", false, "ERROR"},
+		{"pretty false, fatal", false, "FATAL"},
+		{"all defaults", false, ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			// Init should not panic
-			Init(tt.debug, &buf, tt.pretty, tt.logLevel)
+			Init(&buf, tt.pretty, tt.logLevel)
 		})
 	}
 }

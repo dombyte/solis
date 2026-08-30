@@ -27,7 +27,7 @@ export function DesktopNav() {
 
   if (isLoading) {
     return (
-      <aside className="hidden md:flex w-16 bg-muted/70 backdrop-blur-2xl border-r border-border/50 z-40 flex-col flex-shrink-0">
+      <aside className="w-16 bg-muted/70 backdrop-blur-2xl border-r border-border/50 z-40 flex-col flex-shrink-0">
         <div className="p-3 w-full">
           <span className="text-xs text-muted-foreground">Loading...</span>
         </div>
@@ -40,7 +40,7 @@ export function DesktopNav() {
       {/* Modern Sidebar Navigation - Glassy transparent like mobile menu */}
       <aside 
         className={cn(
-          "hidden md:flex flex-col z-40 transition-width duration-300 ease-in-out flex-shrink-0",
+          "flex flex-col z-40 transition-width duration-300 ease-in-out flex-shrink-0",
           isCollapsed ? "w-16" : "w-64"
         )}
       >

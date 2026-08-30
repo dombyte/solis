@@ -1,0 +1,595 @@
+openapi: 3.0.4
+info:
+  title: Solis Inverter API
+  description: |
+    REST API for monitoring and reading data from Solis solar inverters via Modbus.
+
+    This API provides access to real-time and historical data from Solis inverters.
+    
+    **API Base URL:** The API is served from the root of the application. All API endpoints are under `/api/`.
+    
+    **Documentation URL:** API documentation (Swagger UI) is available at `/docs/`.
+  version: 2.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: ""
+    description: Local server
+  - url: http://{host}:{port}
+    description: HTTP API server
+    variables:
+      host:
+        default: localhost
+        description: Server hostname or IP address
+      port:
+        default: "8080"
+        description: Server port
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns the current health status of the service, modbus connection, and database
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "ok"
+                timestamp: "2026-08-03T10:00:00Z"
+                modbus: "connected"
+
+  /api/keys:
+    get:
+      tags:
+        - Registers
+      summary: List all register keys
+      description: Returns metadata for all enabled registers including their address, data type, unit, count, and stability classification
+      operationId: getKeys
+      responses:
+        '200':
+          description: Array of register metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RegisterInfo'
+              example:
+                - key: "pv_energy_daily"
+                  name: "PV Energy Daily"
+                  address: 33035
+                  count: 1
+                  data_type: "Uint16"
+                  unit: "kWh"
+                  stability: "dynamic"
+                  description: "PV Energy Daily (kWh)"
+                - key: "pv_energy_total"
+                  name: "PV Energy Total"
+                  address: 33029
+                  count: 2
+                  data_type: "Uint32"
+                  unit: "kWh"
+                  stability: "dynamic"
+                  description: "PV Energy Total (kWh)"
+                - key: "solis_status"
+                  name: "Solis Status"
+                  address: 33095
+                  count: 1
+                  data_type: "Uint16"
+                  unit: ""
+                  stability: "dynamic"
+                  description: "Solis Status"
+
+  /api/data/{key}:
+    get:
+      tags:
+        - Registers
+      summary: Get register data
+      description: |
+        Returns data for a specific register key.
+
+        **Behavior varies by register key type (not the stability field):**
+        - **Dynamic/Stable registers** (e.g., most energy registers): Returns latest cached value (no query params)
+        - **Daily registers** (keys ending in _daily): Returns historical daily data if `start` and `end` params provided, otherwise returns latest value
+        - **Monthly registers** (keys ending in _monthly): Returns historical monthly data if `start` and `end` params provided, otherwise returns latest value
+        - **Yearly registers** (keys ending in _yearly): Returns historical yearly data if `start` and `end` params provided, otherwise returns latest value
+        - **Total registers** (keys ending in _total): Always returns lifetime/total value (ignores query params)
+        - **Status registers** (e.g., solis_status, grid_fault_1): Returns all historical status entries with decoded information
+
+        **Time range formats:**
+        - Date: `YYYY-MM-DD` (e.g., `2026-08-01`)
+        - Month: `YYYY-MM` (e.g., `2026-08`)
+        - Year: `YYYY` (e.g., `2026`)
+        
+        **Note:** The `stability` field in the register metadata is either "stable" or "dynamic" and is separate from the functional key type classification.
+      operationId: getData
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: The register key to query
+          schema:
+            type: string
+          example: "pv_energy_daily"
+        - name: start
+          in: query
+          required: false
+          description: Start of time range (YYYY, YYYY-MM, or YYYY-MM-DD). For daily/monthly/yearly registers only.
+          schema:
+            type: string
+          example: "2026-08-01"
+        - name: end
+          in: query
+          required: false
+          description: End of time range (YYYY, YYYY-MM, or YYYY-MM-DD). For daily/monthly/yearly registers only.
+          schema:
+            type: string
+          example: "2026-08-31"
+
+      responses:
+        '200':
+          description: Register data - can be a DataResponse, StatusResponse, DailyDataPoint array, MonthlyDataPoint array, YearlyDataPoint array, or TotalDataPoint
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DataResponse'
+                  - $ref: '#/components/schemas/StatusResponse'
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/DailyDataPoint'
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/MonthlyDataPoint'
+                  - type: array
+                    items:
+                      $ref: '#/components/schemas/YearlyDataPoint'
+                  - $ref: '#/components/schemas/TotalDataPoint'
+              examples:
+                current_register:
+                  summary: Current/dynamic register response
+                  value:
+                    key: "pv_energy_total"
+                    name: "PV Energy Total"
+                    unit: "kWh"
+                    value: 15280.5
+                    raw_value: 152805
+                    timestamp: "2026-08-04T09:19:19+02:00"
+                status_register:
+                  summary: Status register history response
+                  value:
+                    key: "solis_status"
+                    name: "Solis Status"
+                    history:
+                      - timestamp: "2026-08-04T09:21:55+02:00"
+                        status_decoded:
+                          name: "Generating"
+                          description: "Initializing / Generating"
+                      - timestamp: "2026-07-31T11:27:45.783344473+02:00"
+                        status_decoded:
+                          name: "Generating"
+                          description: "Initializing / Generating"
+                      - timestamp: "2026-07-31T11:27:35.182599087+02:00"
+                        status_decoded:
+                          name: "StandbySynch"
+                          description: "Standby synchronize"
+                daily_history:
+                  summary: Daily historical data for energy registers
+                  value:
+                    - date: "2026-08-01"
+                      raw_value: 255
+                      value: 25.5
+                    - date: "2026-08-02"
+                      raw_value: 283
+                      value: 28.3
+                    - date: "2026-08-03"
+                      raw_value: 221
+                      value: 22.1
+                monthly_history:
+                  summary: Monthly historical data for energy registers
+                  value:
+                    - month: "2026-07"
+                      raw_value: 750
+                      value: 75.0
+                    - month: "2026-08"
+                      raw_value: 825
+                      value: 82.5
+                yearly_history:
+                  summary: Yearly historical data for energy registers
+                  value:
+                    - year: "2025"
+                      raw_value: 8760
+                      value: 876.0
+                    - year: "2026"
+                      raw_value: 4520
+                      value: 452.0
+                total_register:
+                  summary: Total/lifetime register response
+                  value:
+                    key: "pv_energy_total"
+                    name: "PV Energy Total"
+                    unit: "kWh"
+                    value: 15280.5
+                    raw_value: 152805
+                    timestamp: "2026-08-04T09:19:19+02:00"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /ws:
+    get:
+      tags:
+        - WebSocket
+      summary: WebSocket for real-time updates
+      description: |
+        Establishes a WebSocket connection for receiving real-time register value updates.
+
+        **To connect:** Use a WebSocket client with URL `ws://{host}:{port}/ws`
+
+        **Connection Protocol:**
+        1. Connect to the WebSocket endpoint
+        2. Optionally send `{"type": "request_initial_data"}` to receive all current register values
+        3. Receive `cache_update` messages whenever register values are polled and updated
+
+        **Message Format:**
+        - **Client to Server:** `{"type": "request_initial_data"}`
+        - **Server to Client:** `{"type": "cache_update", "timestamp": "...", "data": {...}}`
+
+        The `data` field contains a map of register keys to their current values, matching the SolisValue schema.
+
+        **Note:** This endpoint cannot be tested directly through Swagger UI. Use a dedicated WebSocket client.
+      operationId: connectWebSocket
+      responses:
+        '101':
+          description: WebSocket connection established - Switching Protocols
+          headers:
+            Upgrade:
+              schema:
+                type: string
+                enum: [websocket]
+            Connection:
+              schema:
+                type: string
+                enum: [Upgrade]
+
+components:
+  schemas:
+    # Health Check
+    HealthResponse:
+      type: object
+      description: Health check response containing service status information
+      additionalProperties:
+        type: string
+      example:
+        status: "ok"
+        timestamp: "2026-08-03T10:00:00Z"
+        modbus: "connected"
+
+    # Register Metadata
+    RegisterInfo:
+      type: object
+      required:
+        - key
+        - name
+        - address
+        - count
+        - data_type
+        - unit
+        - stability
+        - description
+      properties:
+        key:
+          type: string
+          description: Unique identifier for this register
+          example: "pv_energy_daily"
+        name:
+          type: string
+          description: Human-readable name
+          example: "PV Energy Daily"
+        address:
+          type: integer
+          format: uint16
+          minimum: 0
+          description: Modbus register address
+          example: 33057
+        count:
+          type: integer
+          format: uint16
+          minimum: 1
+          description: Number of consecutive registers this value occupies (1 for Uint16/Int16/Bool, 2 for Uint32/Int32/Float32, N for String)
+          example: 2
+        data_type:
+          type: string
+          enum: [Uint16, Int16, Uint32, Int32, Float32, String, Bool]
+          description: Type of value stored in this register
+          example: "Uint32"
+        unit:
+          type: string
+          description: Unit of measurement
+          example: "W"
+        stability:
+          type: string
+          enum: [stable, dynamic]
+          description: How often this value changes (stable = rarely changes, dynamic = changes frequently)
+          example: "dynamic"
+        description:
+          type: string
+          description: Combined name and unit for display
+          example: "PV Power Total (W)"
+
+    # Data Responses
+    DataResponse:
+      type: object
+      description: Response for current/dynamic/total register requests. Only fields with data are included (nullable fields are omitted).
+      properties:
+        key:
+          type: string
+          description: Register key
+          example: "pv_energy_total"
+        name:
+          type: string
+          description: Register name
+          example: "PV Energy Total"
+        unit:
+          type: string
+          description: Unit of measurement
+          example: "kWh"
+        value:
+          type: number
+          description: Decoded/scaled value, rounded to 2 decimal places
+          example: 15280.5
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 152805
+        timestamp:
+          type: string
+          format: date-time
+          description: When the value was last updated (RFC3339 format)
+          example: "2026-08-03T10:00:00+02:00"
+        status_decoded:
+          type: object
+          description: For status/fault registers - decoded status bits. Can be a map with name/description or an array of strings.
+          additionalProperties: true
+          example:
+            name: "Generating"
+            description: "Initializing / Generating"
+
+    # Status Response
+    StatusHistoryEntry:
+      type: object
+      description: A single status/fault entry with timestamp and decoded status
+      required:
+        - timestamp
+        - status_decoded
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: When this status was recorded
+          example: "2026-08-04T09:21:55+02:00"
+        status_decoded:
+          type: object
+          description: Decoded status information - for solis_status is a map with name and description, for bitmask faults is an array of active fault names
+          additionalProperties: true
+          example:
+            name: "Generating"
+            description: "Initializing / Generating"
+
+    StatusResponse:
+      type: object
+      description: Response for status register requests - returns ALL historical status entries
+      required:
+        - key
+        - name
+        - history
+      properties:
+        key:
+          type: string
+          description: Register key
+          example: "solis_status"
+        name:
+          type: string
+          description: Register name
+          example: "Solis Status"
+        history:
+          type: array
+          description: Array of all historical status entries sorted by timestamp (latest first)
+          items:
+            $ref: '#/components/schemas/StatusHistoryEntry'
+
+    # Historical Data Points
+    DailyDataPoint:
+      type: object
+      required:
+        - date
+        - value
+        - raw_value
+      properties:
+        date:
+          type: string
+          format: date
+          description: Date of the data point (YYYY-MM-DD format)
+          example: "2026-08-03"
+        value:
+          type: number
+          description: Decoded/scaled value for this date, rounded to 2 decimal places
+          example: 25.5
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 255
+
+    MonthlyDataPoint:
+      type: object
+      required:
+        - month
+        - value
+        - raw_value
+      properties:
+        month:
+          type: string
+          description: Month of the data point (YYYY-MM format)
+          example: "2026-08"
+        value:
+          type: number
+          description: Decoded/scaled value for this month, rounded to 2 decimal places
+          example: 825.0
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 8250
+
+    YearlyDataPoint:
+      type: object
+      required:
+        - year
+        - value
+        - raw_value
+      properties:
+        year:
+          type: string
+          description: Year of the data point (YYYY format)
+          example: "2026"
+        value:
+          type: number
+          description: Decoded/scaled value for this year, rounded to 2 decimal places
+          example: 4520.0
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 45200
+
+    TotalDataPoint:
+      type: object
+      required:
+        - value
+        - raw_value
+        - timestamp
+      properties:
+        value:
+          type: number
+          description: Decoded/scaled lifetime/total value, rounded to 2 decimal places
+          example: 15280.5
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 152805
+        timestamp:
+          type: string
+          format: date-time
+          description: When the value was last updated (RFC3339 format)
+          example: "2026-08-04T09:19:19+02:00"
+
+    # WebSocket Messages
+    SolisValue:
+      type: object
+      description: Represents a decoded register value as sent via WebSocket. Only fields with data are included.
+      properties:
+        key:
+          type: string
+          description: Register key
+          example: "pv_energy_total"
+        name:
+          type: string
+          description: Human-readable register name
+          example: "PV Energy Total"
+        unit:
+          type: string
+          description: Unit of measurement
+          example: "kWh"
+        value:
+          type: number
+          description: Decoded/scaled value, rounded to 2 decimal places
+          example: 15280.5
+        raw_value:
+          type: number
+          description: Raw value from the device before scaling
+          example: 152805
+        timestamp:
+          type: string
+          format: date-time
+          description: When the value was last updated
+          example: "2026-08-04T09:19:19+02:00"
+        status_decoded:
+          type: object
+          description: For status/fault registers - decoded status bits
+          additionalProperties: true
+          example:
+            name: "Generating"
+            description: "Initializing / Generating"
+
+    WebSocketCacheUpdate:
+      type: object
+      description: WebSocket message sent by server on cache updates
+      required:
+        - type
+        - timestamp
+        - data
+      properties:
+        type:
+          type: string
+          description: Message type
+          example: "cache_update"
+        timestamp:
+          type: string
+          format: date-time
+          description: When the cache was last updated
+          example: "2026-08-03T10:00:00.000000+00:00"
+        data:
+          type: object
+          description: Map of register keys to their current SolisValue objects
+          additionalProperties:
+            $ref: '#/components/schemas/SolisValue'
+
+    # Error Responses
+    Error:
+      type: object
+      required:
+        - error
+        - message
+        - code
+      properties:
+        error:
+          type: string
+          description: Error type
+          example: "Bad Request"
+        message:
+          type: string
+          description: Error message
+          example: "historical queries are not supported for register pv_energy_daily"
+        code:
+          type: integer
+          description: HTTP status code
+          example: 400
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Bad Request"
+            message: "historical queries are not supported for register pv_energy_daily"
+            code: 400
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: "Not Found"
+            message: "register 'nonexistent_key' not found"
+            code: 404

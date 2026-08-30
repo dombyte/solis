@@ -383,8 +383,8 @@ func TestStorage_GetMonthlySum(t *testing.T) {
 	// Insert some test daily data
 	timestamp := time.Now()
 	dailyValues := map[string]*solis.Value{
-		"today_energy_consumption": {
-			Key:          "today_energy_consumption",
+		"energy_consumption_daily": {
+			Key:          "energy_consumption_daily",
 			Name:         "Today Energy Consumption",
 			RawValue:     100,
 			DecodedValue: 10.0,
@@ -406,7 +406,7 @@ func TestStorage_GetMonthlySum(t *testing.T) {
 
 	// Get monthly sum for current month
 	currentMonth := timestamp.Format("2006-01")
-	sumValue, sumRawValue, err := st.GetMonthlySum("today_energy_consumption", currentMonth)
+	sumValue, sumRawValue, err := st.GetMonthlySum("energy_consumption_daily", currentMonth)
 	if err != nil {
 		t.Fatalf("GetMonthlySum() error = %v", err)
 	}
@@ -414,7 +414,7 @@ func TestStorage_GetMonthlySum(t *testing.T) {
 	// Since we just inserted one value, the sum should be that value
 	// Note: the value stored in daily_values is scaled, so sumValue should be 10.0 (not 100)
 	// But GetMonthlySum returns the sum of the 'value' column which is decodedValue * scale
-	// In our test, scale is 0.1 for today_energy_consumption, so decodedValue = 100 * 0.1 = 10.0
+	// In our test, scale is 0.1 for energy_consumption_daily, so decodedValue = 100 * 0.1 = 10.0
 	if sumValue < 0 {
 		t.Errorf("GetMonthlySum() sumValue = %v, want >= 0", sumValue)
 	}
@@ -441,7 +441,7 @@ func TestStorage_GetMonthlySum_NoData(t *testing.T) {
 	}()
 
 	// Get monthly sum for a register with no data
-	sumValue, sumRawValue, err := st.GetMonthlySum("today_energy_consumption", "2024-01")
+	sumValue, sumRawValue, err := st.GetMonthlySum("energy_consumption_daily", "2024-01")
 	if err != nil {
 		t.Fatalf("GetMonthlySum() with no data error = %v", err)
 	}
@@ -477,8 +477,8 @@ func TestStorage_GetYearlySum(t *testing.T) {
 	// Insert some test daily data
 	timestamp := time.Now()
 	dailyValues := map[string]*solis.Value{
-		"today_energy_consumption": {
-			Key:          "today_energy_consumption",
+		"energy_consumption_daily": {
+			Key:          "energy_consumption_daily",
 			Name:         "Today Energy Consumption",
 			RawValue:     150,
 			DecodedValue: 15.0,
@@ -500,7 +500,7 @@ func TestStorage_GetYearlySum(t *testing.T) {
 
 	// Get yearly sum for current year
 	currentYear := timestamp.Format("2006")
-	sumValue, sumRawValue, err := st.GetYearlySum("today_energy_consumption", currentYear)
+	sumValue, sumRawValue, err := st.GetYearlySum("energy_consumption_daily", currentYear)
 	if err != nil {
 		t.Fatalf("GetYearlySum() error = %v", err)
 	}
@@ -532,7 +532,7 @@ func TestStorage_GetYearlySum_NoData(t *testing.T) {
 	}()
 
 	// Get yearly sum for a register with no data
-	sumValue, sumRawValue, err := st.GetYearlySum("today_energy_consumption", "2024")
+	sumValue, sumRawValue, err := st.GetYearlySum("energy_consumption_daily", "2024")
 	if err != nil {
 		t.Fatalf("GetYearlySum() with no data error = %v", err)
 	}
@@ -572,13 +572,13 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 	}
 
 	// Store it for a valid register key
-	err = st.StoreMonthlyDataPoint("energy_consumption_month_energy", dp)
+	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", dp)
 	if err != nil {
 		t.Fatalf("StoreMonthlyDataPoint() error = %v", err)
 	}
 
 	// Verify it was stored by retrieving it
-	retrieved, err := st.GetMonthlyHistory("energy_consumption_month_energy",
+	retrieved, err := st.GetMonthlyHistory("energy_consumption_monthly",
 		time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC))
 	if err != nil {
@@ -662,13 +662,13 @@ func TestStorage_StoreYearlyDataPoint(t *testing.T) {
 	}
 
 	// Store it for a valid register key
-	err = st.StoreYearlyDataPoint("energy_consumption_year_energy", dp)
+	err = st.StoreYearlyDataPoint("energy_consumption_yearly", dp)
 	if err != nil {
 		t.Fatalf("StoreYearlyDataPoint() error = %v", err)
 	}
 
 	// Verify it was stored by retrieving it
-	retrieved, err := st.GetYearlyHistory("energy_consumption_year_energy",
+	retrieved, err := st.GetYearlyHistory("energy_consumption_yearly",
 		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
 	if err != nil {
@@ -744,8 +744,8 @@ func TestStorage_GetTotalHistory(t *testing.T) {
 	// Insert some test total data by storing a total register value
 	timestamp := time.Now()
 	totalValues := map[string]*solis.Value{
-		"total_energy_fed_into_grid": {
-			Key:          "total_energy_fed_into_grid",
+		"grid_export_total": {
+			Key:          "grid_export_total",
 			Name:         "Total Energy Fed Into Grid",
 			RawValue:     5000,
 			DecodedValue: 500.0,
@@ -765,7 +765,7 @@ func TestStorage_GetTotalHistory(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Get total history
-	dp, err := st.GetTotalHistory("total_energy_fed_into_grid")
+	dp, err := st.GetTotalHistory("grid_export_total")
 	if err != nil {
 		t.Fatalf("GetTotalHistory() error = %v", err)
 	}
@@ -802,7 +802,7 @@ func TestStorage_GetTotalHistory_NoData(t *testing.T) {
 	}()
 
 	// Get total history for a register with no data
-	dp, err := st.GetTotalHistory("total_energy_fed_into_grid")
+	dp, err := st.GetTotalHistory("grid_export_total")
 	if err != nil {
 		t.Fatalf("GetTotalHistory() with no data error = %v", err)
 	}
@@ -905,5 +905,152 @@ func TestStorage_TotalDataPoint(t *testing.T) {
 
 	if dp.Timestamp != "2024-06-26T00:00:00Z" {
 		t.Errorf("TotalDataPoint.Timestamp = %v, want 2024-06-26T00:00:00Z", dp.Timestamp)
+	}
+}
+
+// TestCleanupAll tests the unified cleanup function
+func TestCleanupAll(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_cleanup_all.db")
+
+	// Use very short retention periods for testing
+	cfg := &config.StorageSettings{
+		Path:             dbPath,
+		DailyRetention:   time.Hour, // 1 hour
+		MonthlyRetention: time.Hour, // 1 hour
+		YearlyRetention:  time.Hour, // 1 hour
+		ErrorRetention:   time.Hour, // 1 hour
+	}
+
+	st, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() {
+		st.Close()
+		os.Remove(dbPath)
+	}()
+
+	// Insert old data that should be cleaned up
+	// Use dates far enough in the past to ensure they're cleaned up
+	oldDailyDate := time.Now().Add(-2 * 24 * time.Hour).Format("2006-01-02")
+	oldMonthlyDate := time.Now().Add(-2 * 30 * 24 * time.Hour).Format("2006-01")
+	oldYearlyDate := "2020" // Far in the past
+	oldErrorTime := time.Now().Add(-2 * time.Hour)
+
+	// Insert old daily data
+	_, err = st.db.Exec("INSERT INTO daily_values (register_key, date, value, raw_value) VALUES (?, ?, ?, ?)",
+		"test_daily", oldDailyDate, 100.0, 1000)
+	if err != nil {
+		t.Fatalf("Failed to insert test daily data: %v", err)
+	}
+
+	// Insert old monthly data
+	_, err = st.db.Exec("INSERT INTO monthly_values (register_key, month, value, raw_value) VALUES (?, ?, ?, ?)",
+		"test_monthly", oldMonthlyDate, 200.0, 2000)
+	if err != nil {
+		t.Fatalf("Failed to insert test monthly data: %v", err)
+	}
+
+	// Insert old yearly data
+	_, err = st.db.Exec("INSERT INTO yearly_values (register_key, year, value, raw_value) VALUES (?, ?, ?, ?)",
+		"test_yearly", oldYearlyDate, 300.0, 3000)
+	if err != nil {
+		t.Fatalf("Failed to insert test yearly data: %v", err)
+	}
+
+	// Insert old error data
+	_, err = st.db.Exec("INSERT INTO error_data (register_key, timestamp, raw_value, string_value) VALUES (?, ?, ?, ?)",
+		"test_error", oldErrorTime, 400.0, "test error")
+	if err != nil {
+		t.Fatalf("Failed to insert test error data: %v", err)
+	}
+
+	// Verify data was inserted
+	var count int
+	err = st.db.QueryRow("SELECT COUNT(*) FROM daily_values").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count daily data: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("Expected 1 daily data row, got %d", count)
+	}
+
+	// Run cleanup - should remove all old data
+	err = st.CleanupAll()
+	if err != nil {
+		t.Fatalf("CleanupAll() error = %v", err)
+	}
+
+	// Verify data was cleaned up
+	err = st.db.QueryRow("SELECT COUNT(*) FROM daily_values").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count daily data after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 daily data rows after cleanup, got %d", count)
+	}
+
+	err = st.db.QueryRow("SELECT COUNT(*) FROM monthly_values").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count monthly data after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 monthly data rows after cleanup, got %d", count)
+	}
+
+	err = st.db.QueryRow("SELECT COUNT(*) FROM yearly_values").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count yearly data after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 yearly data rows after cleanup, got %d", count)
+	}
+
+	err = st.db.QueryRow("SELECT COUNT(*) FROM error_data").Scan(&count)
+	if err != nil {
+		t.Fatalf("Failed to count error data after cleanup: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("Expected 0 error data rows after cleanup, got %d", count)
+	}
+
+	// Verify last cleanup time was set
+	if st.GetLastCleanupTime().IsZero() {
+		t.Error("Expected last cleanup time to be set after CleanupAll()")
+	}
+}
+
+// TestCleanupAll_NoData tests CleanupAll when there's no data to clean
+func TestCleanupAll_NoData(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_cleanup_all_nodata.db")
+
+	cfg := &config.StorageSettings{
+		Path:             dbPath,
+		DailyRetention:   24 * time.Hour,
+		MonthlyRetention: 24 * time.Hour,
+		YearlyRetention:  24 * time.Hour,
+		ErrorRetention:   24 * time.Hour,
+	}
+
+	st, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer func() {
+		st.Close()
+		os.Remove(dbPath)
+	}()
+
+	// Run cleanup on empty database - should not error
+	err = st.CleanupAll()
+	if err != nil {
+		t.Fatalf("CleanupAll() on empty database error = %v", err)
+	}
+
+	// Verify last cleanup time was set
+	if st.GetLastCleanupTime().IsZero() {
+		t.Error("Expected last cleanup time to be set even with no data")
 	}
 }

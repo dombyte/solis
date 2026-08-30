@@ -26,7 +26,7 @@ export function formatValue(
     console.warn('formatValue received non-numeric value:', value);
     return '-';
   }
-  const prec = precision ?? (unit === '%' || unit === '°C' ? 1 : unit === 'kWh' || unit === 'Wh' ? 2 : 2);
+  const prec = precision ?? (unit === '%' ? 1 : unit === 'kWh' || unit === 'Wh' ? 2 : 2);
 
   // Handle percentage
   if (unit === '%') {
@@ -66,11 +66,6 @@ export function formatValue(
 
   // Handle current
   if (unit === 'A') {
-    return numValue.toFixed(prec);
-  }
-
-  // Handle temperature
-  if (unit === '°C') {
     return numValue.toFixed(prec);
   }
 
@@ -121,10 +116,4 @@ export function formatCurrent(value: number | null | undefined, precision: numbe
   return `${value.toFixed(precision)} A`;
 }
 
-/**
- * Format temperature value
- */
-export function formatTemperature(value: number | null | undefined, precision: number = 1): string {
-  if (value === null || value === undefined) return '-';
-  return `${value.toFixed(precision)}°C`;
-}
+

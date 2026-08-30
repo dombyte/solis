@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../theme-provider';
+import { useMobile } from '../../hooks/useMobile';
 import type { ChartData } from '../../types';
 
 // Register all Chart.js components
@@ -52,20 +53,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   };
   const { theme } = useTheme();
   
-  // State for mobile detection
-  const [isMobile, setIsMobile] = React.useState(false);
-
-  // Check mobile on mount and resize
-  useEffect(() => {
-    const checkMobile = () => {
-      const mobile = typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
-      setIsMobile(mobile);
-    };
-
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  // Use pointer-based mobile detection
+  const isMobile = useMobile();
   
   // Also track the actual class on the HTML element for system theme changes
   const [currentThemeClass, setCurrentThemeClass] = React.useState(() => {

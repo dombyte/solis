@@ -7,6 +7,13 @@ RUN npm install
 COPY frontend/ .
 RUN npm run build
 
+FROM node:26-alpine AS docs
+WORKDIR /docs
+COPY docs/package.json docs/package-lock.json ./
+RUN npm install
+COPY docs/ .
+RUN npm run build
+
 
 
 FROM golang:1.26.5-alpine AS builder
@@ -31,5 +38,6 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /app/solis /app
 COPY --from=frontend /frontend/dist /app/frontend/dist
+COPY --from=docs /docs/dist /app/docs/dist
 EXPOSE 8080
 ENTRYPOINT ["/app/solis"]

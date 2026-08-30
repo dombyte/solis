@@ -4,6 +4,7 @@ package websocket
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -31,6 +32,8 @@ type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
+	// closeOnce ensures the send channel is only closed once
+	closeOnce sync.Once
 }
 
 // Send sends a message to this client.
@@ -41,6 +44,14 @@ func (c *Client) Send(message []byte) bool {
 	default:
 		return false
 	}
+}
+
+// Close closes the client's send channel exactly once.
+// This should be called when the client disconnects or needs to be removed.
+func (c *Client) Close() {
+	c.closeOnce.Do(func() {
+		close(c.send)
+	})
 }
 
 // readPump pumps messages from the WebSocket connection to the hub.

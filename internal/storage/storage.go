@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/dombyte/solis/internal/config"
@@ -45,6 +46,10 @@ type Storage struct {
 	lastVacuumTime time.Time
 	// lastAggregatedCleanupTime tracks when the last aggregated data cleanup was performed.
 	lastAggregatedCleanupTime time.Time
+	// lastCleanupTime tracks when the last full retention cleanup was performed.
+	lastCleanupTime time.Time
+	// mu protects the cleanup time tracking.
+	mu sync.Mutex
 }
 
 // DB returns the underlying SQLite database connection.
@@ -52,69 +57,22 @@ func (s *Storage) DB() *sql.DB {
 	return s.db
 }
 
+// Config returns the storage configuration.
+func (s *Storage) Config() *config.StorageSettings {
+	return s.config
+}
+
 // New creates a new Storage instance and initializes the database.
 func New(cfg *config.StorageSettings) (*Storage, error) {
 	logger.Info().Msgf("Initializing storage at %s", cfg.Path)
 
-	// Create parent directories if they don't exist
-	dir := filepath.Dir(cfg.Path)
-	if dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			logger.Error().Msgf("Failed to create storage directory: %v", err)
-			return nil, fmt.Errorf("failed to create directory: %w", err)
-		}
-	}
-
-	// Build DSN with connection parameters
-	dsn := cfg.Path
-
-	// Open database connection
-	db, err := sql.Open("sqlite", dsn)
+	db, err := openAndConfigureDatabase(cfg)
 	if err != nil {
-		logger.Error().Msgf("Failed to open database: %v", err)
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, err
 	}
 
-	// Configure connection pool settings
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
+	st := createStorageInstance(cfg, db)
 
-	// Enable WAL mode and other SQLite settings via PRAGMA
-	if cfg.WalMode {
-		if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
-			logger.Warn().Msgf("Failed to set WAL mode: %v", err)
-		}
-	}
-
-	// Set synchronous mode
-	if cfg.Synchronous != "" {
-		if _, err := db.Exec(fmt.Sprintf("PRAGMA synchronous=%s;", cfg.Synchronous)); err != nil {
-			logger.Warn().Msgf("Failed to set synchronous mode: %v", err)
-		}
-	}
-
-	// Set temp store
-	if cfg.TempStore != "" {
-		if _, err := db.Exec(fmt.Sprintf("PRAGMA temp_store=%s;", cfg.TempStore)); err != nil {
-			logger.Warn().Msgf("Failed to set temp store: %v", err)
-		}
-	}
-
-	// Verify the connection
-	if err := db.Ping(); err != nil {
-		logger.Error().Msgf("Failed to ping database: %v", err)
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	st := &Storage{
-		db:                        db,
-		config:                    cfg,
-		path:                      cfg.Path,
-		lastAggregatedCleanupTime: time.Now(),
-	}
-
-	// Initialize schema
 	if err := st.initSchema(); err != nil {
 		logger.Error().Msgf("Failed to initialize schema: %v", err)
 		return nil, fmt.Errorf("failed to initialize schema: %w", err)
@@ -122,6 +80,80 @@ func New(cfg *config.StorageSettings) (*Storage, error) {
 
 	logger.Info().Msg("Storage initialized successfully")
 	return st, nil
+}
+
+// openAndConfigureDatabase opens the database and configures connection settings
+func openAndConfigureDatabase(cfg *config.StorageSettings) (*sql.DB, error) {
+	if err := createStorageDirectory(cfg.Path); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite", cfg.Path)
+	if err != nil {
+		logger.Error().Msgf("Failed to open database: %v", err)
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	configureConnectionPool(db)
+	configurePragmas(db, cfg)
+
+	if err := db.Ping(); err != nil {
+		logger.Error().Msgf("Failed to ping database: %v", err)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return db, nil
+}
+
+// createStorageDirectory creates parent directories for the database file
+func createStorageDirectory(dbPath string) error {
+	dir := filepath.Dir(dbPath)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			logger.Error().Msgf("Failed to create storage directory: %v", err)
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+	return nil
+}
+
+// configureConnectionPool configures the database connection pool
+func configureConnectionPool(db *sql.DB) {
+	db.SetMaxOpenConns(3)
+	db.SetMaxIdleConns(3)
+	db.SetConnMaxLifetime(0)
+}
+
+// configurePragmas configures SQLite PRAGMA settings
+func configurePragmas(db *sql.DB, cfg *config.StorageSettings) {
+	if cfg.WalMode {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+			logger.Warn().Msgf("Failed to set WAL mode: %v", err)
+		}
+	}
+
+	if cfg.Synchronous != "" {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA synchronous=%s;", cfg.Synchronous)); err != nil {
+			logger.Warn().Msgf("Failed to set synchronous mode: %v", err)
+		}
+	}
+
+	if cfg.TempStore != "" {
+		if _, err := db.Exec(fmt.Sprintf("PRAGMA temp_store=%s;", cfg.TempStore)); err != nil {
+			logger.Warn().Msgf("Failed to set temp store: %v", err)
+		}
+	}
+}
+
+// createStorageInstance creates a new Storage instance
+func createStorageInstance(cfg *config.StorageSettings, db *sql.DB) *Storage {
+	return &Storage{
+		db:                        db,
+		config:                    cfg,
+		path:                      cfg.Path,
+		lastAggregatedCleanupTime: time.Now(),
+		lastCleanupTime:           time.Time{},
+	}
 }
 
 // Close closes the database connection.
@@ -263,7 +295,7 @@ func (s *Storage) getLastErrorValue(tx *sql.Tx, key string) (*float64, error) {
 // Creates a new entry for the current date if none exists, or updates the existing one
 // with the maximum value seen so far that day.
 func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	date := timestamp.Format("2006-01-02")
+	date := timestamp.Format(solis.DateFormat)
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return nil
@@ -308,7 +340,7 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 // Creates a new entry for the current month if none exists, or updates the existing one
 // with the maximum value seen so far that month.
 func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	month := timestamp.Format("2006-01")
+	month := timestamp.Format(solis.MonthFormat)
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return nil
@@ -353,7 +385,7 @@ func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, 
 // Creates a new entry for the current year if none exists, or updates the existing one
 // with the maximum value seen so far that year.
 func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	year := timestamp.Format("2006")
+	year := timestamp.Format(solis.YearFormat)
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return nil
@@ -456,88 +488,9 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	defer tx.Rollback()
 
 	for key, value := range values {
-		// Look up the register definition
-		reg, ok := solis.RegisterMapByKey[key]
-		if !ok {
-			logger.Warn().Msgf("Unknown register key: %s", key)
-			continue
+		if err := s.storeSingleRegister(tx, key, value, timestamp); err != nil {
+			return err
 		}
-
-		// Stable registers: only cache, no DB storage
-		if reg.Stability == solis.Stable {
-			logger.Debug().Msgf("Skipping stable register %s (cache only)", key)
-			continue
-		}
-
-		// Status registers: store in error_data table
-		if reg.Status {
-			// Only store if value has changed
-			lastValue, err := s.getLastErrorValue(tx, key)
-			if err != nil {
-				logger.Warn().Msgf("Error getting last error value for %s: %v", key, err)
-				// Continue anyway, we'll store the new value
-			} else if lastValue != nil && *lastValue == value.RawValue {
-				logger.Debug().Msgf("Error value for %s unchanged (%.2f), skipping", key, value.RawValue)
-				continue
-			}
-
-			if _, err := tx.Exec(`
-				INSERT INTO error_data (timestamp, register_key, raw_value, string_value)
-				VALUES (?, ?, ?, ?)
-			`, timestamp, key, value.RawValue, value.StringValue); err != nil {
-				logger.Error().Msgf("Failed to insert error data for %s: %v", key, err)
-				return fmt.Errorf("failed to insert error data: %w", err)
-			}
-			logger.Debug().Msgf("Stored error data for %s", key)
-			continue
-		}
-
-		// Daily registers: update daily_values table
-		if solis.IsDailyRegister(key) {
-			if err := s.storeDailyValue(tx, key, value, timestamp); err != nil {
-				logger.Error().Msgf("Failed to store daily value for %s: %v", key, err)
-				return err
-			}
-			logger.Debug().Msgf("Stored/updated daily value for %s", key)
-			// Daily registers are NOT stored in raw_data (per user requirement: no backward compatibility)
-			continue
-		}
-
-		// Monthly registers: update monthly_values table
-		if solis.IsMonthlyRegister(key) {
-			if err := s.storeMonthlyValue(tx, key, value, timestamp); err != nil {
-				logger.Error().Msgf("Failed to store monthly value for %s: %v", key, err)
-				return err
-			}
-			logger.Debug().Msgf("Stored/updated monthly value for %s", key)
-			// Monthly registers are NOT stored in raw_data
-			continue
-		}
-
-		// Yearly registers: update yearly_values table
-		if solis.IsYearlyRegister(key) {
-			if err := s.storeYearlyValue(tx, key, value, timestamp); err != nil {
-				logger.Error().Msgf("Failed to store yearly value for %s: %v", key, err)
-				return err
-			}
-			logger.Debug().Msgf("Stored/updated yearly value for %s", key)
-			// Yearly registers are NOT stored in raw_data
-			continue
-		}
-
-		// Total registers: update total_values table
-		if solis.IsTotalRegister(key) {
-			if err := s.storeTotalValue(tx, key, value, timestamp); err != nil {
-				logger.Error().Msgf("Failed to store total value for %s: %v", key, err)
-				return err
-			}
-			logger.Debug().Msgf("Stored/updated total value for %s", key)
-			continue
-		}
-
-		// Dynamic registers (non-status, non-daily, non-monthly, non-yearly, non-total):
-		// No longer stored in database - only in cache
-		continue
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -548,12 +501,120 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	return nil
 }
 
+// storeSingleRegister stores a single register value
+func (s *Storage) storeSingleRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	// Look up the register definition
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
+		logger.Warn().Msgf("Unknown register key: %s", key)
+		return nil
+	}
+
+	// Stable registers: only cache, no DB storage
+	if reg.Stability == solis.Stable {
+		logger.Debug().Msgf("Skipping stable register %s (cache only)", key)
+		return nil
+	}
+
+	// Status registers: store in error_data table
+	if reg.Status {
+		return s.storeStatusRegister(tx, key, value, timestamp)
+	}
+
+	// Daily registers: update daily_values table
+	if solis.IsDailyRegister(key) {
+		return s.storeDailyRegister(tx, key, value, timestamp)
+	}
+
+	// Monthly registers: update monthly_values table
+	if solis.IsMonthlyRegister(key) {
+		return s.storeMonthlyRegister(tx, key, value, timestamp)
+	}
+
+	// Yearly registers: update yearly_values table
+	if solis.IsYearlyRegister(key) {
+		return s.storeYearlyRegister(tx, key, value, timestamp)
+	}
+
+	// Total registers: update total_values table
+	if solis.IsTotalRegister(key) {
+		return s.storeTotalRegister(tx, key, value, timestamp)
+	}
+
+	// Dynamic registers (non-status, non-daily, non-monthly, non-yearly, non-total):
+	// No longer stored in database - only in cache
+	return nil
+}
+
+// storeStatusRegister stores a status register value in error_data table
+func (s *Storage) storeStatusRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	// Only store if value has changed
+	lastValue, err := s.getLastErrorValue(tx, key)
+	if err != nil {
+		logger.Warn().Msgf("Error getting last error value for %s: %v", key, err)
+		// Continue anyway, we'll store the new value
+	} else if lastValue != nil && *lastValue == value.RawValue {
+		logger.Debug().Msgf("Error value for %s unchanged (%.2f), skipping", key, value.RawValue)
+		return nil
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO error_data (timestamp, register_key, raw_value, string_value)
+		VALUES (?, ?, ?, ?)
+	`, timestamp, key, value.RawValue, value.StringValue); err != nil {
+		logger.Error().Msgf("Failed to insert error data for %s: %v", key, err)
+		return fmt.Errorf("failed to insert error data: %w", err)
+	}
+	logger.Debug().Msgf("Stored error data for %s", key)
+	return nil
+}
+
+// storeDailyRegister stores a daily register value
+func (s *Storage) storeDailyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	if err := s.storeDailyValue(tx, key, value, timestamp); err != nil {
+		logger.Error().Msgf("Failed to store daily value for %s: %v", key, err)
+		return err
+	}
+	logger.Debug().Msgf("Stored/updated daily value for %s", key)
+	return nil
+}
+
+// storeMonthlyRegister stores a monthly register value
+func (s *Storage) storeMonthlyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	if err := s.storeMonthlyValue(tx, key, value, timestamp); err != nil {
+		logger.Error().Msgf("Failed to store monthly value for %s: %v", key, err)
+		return err
+	}
+	logger.Debug().Msgf("Stored/updated monthly value for %s", key)
+	return nil
+}
+
+// storeYearlyRegister stores a yearly register value
+func (s *Storage) storeYearlyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	if err := s.storeYearlyValue(tx, key, value, timestamp); err != nil {
+		logger.Error().Msgf("Failed to store yearly value for %s: %v", key, err)
+		return err
+	}
+	logger.Debug().Msgf("Stored/updated yearly value for %s", key)
+	return nil
+}
+
+// storeTotalRegister stores a total register value
+func (s *Storage) storeTotalRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	if err := s.storeTotalValue(tx, key, value, timestamp); err != nil {
+		logger.Error().Msgf("Failed to store total value for %s: %v", key, err)
+		return err
+	}
+	logger.Debug().Msgf("Stored/updated total value for %s", key)
+	return nil
+}
+
 // CleanupDailyData removes daily data older than the configured retention period.
 func (s *Storage) CleanupDailyData() error {
 	logger.Info().Msgf("Cleaning up daily data older than %s", s.config.DailyRetention)
 
 	cutoff := time.Now().Add(-s.config.DailyRetention)
-	cutoffDate := cutoff.Format("2006-01-02")
+	cutoffDate := cutoff.Format(solis.DateFormat)
 
 	result, err := s.db.Exec(`
 		DELETE FROM daily_values
@@ -570,16 +631,6 @@ func (s *Storage) CleanupDailyData() error {
 		logger.Info().Msgf("Deleted %d old daily data rows", rowsAffected)
 	}
 
-	// Run VACUUM every 72 hours to reclaim space from deleted rows
-	if s.lastVacuumTime.IsZero() || time.Since(s.lastVacuumTime) > 72*time.Hour {
-		if _, err := s.db.Exec("VACUUM;"); err != nil {
-			logger.Warn().Msgf("VACUUM failed: %v", err)
-		} else {
-			s.lastVacuumTime = time.Now()
-			logger.Info().Msg("Database VACUUM completed")
-		}
-	}
-
 	return nil
 }
 
@@ -588,7 +639,7 @@ func (s *Storage) CleanupMonthlyData() error {
 	logger.Info().Msgf("Cleaning up monthly data older than %s", s.config.MonthlyRetention)
 
 	cutoff := time.Now().Add(-s.config.MonthlyRetention)
-	cutoffMonth := cutoff.Format("2006-01")
+	cutoffMonth := cutoff.Format(solis.MonthFormat)
 
 	result, err := s.db.Exec(`
 		DELETE FROM monthly_values
@@ -613,7 +664,7 @@ func (s *Storage) CleanupYearlyData() error {
 	logger.Info().Msgf("Cleaning up yearly data older than %s", s.config.YearlyRetention)
 
 	cutoff := time.Now().Add(-s.config.YearlyRetention)
-	cutoffYear := cutoff.Format("2006")
+	cutoffYear := cutoff.Format(solis.YearFormat)
 
 	result, err := s.db.Exec(`
 		DELETE FROM yearly_values
@@ -654,16 +705,152 @@ func (s *Storage) CleanupErrorData() error {
 		logger.Info().Msgf("Deleted %d old error data rows", rowsAffected)
 	}
 
-	// Run VACUUM every 72 hours to reclaim space from deleted rows
-	if s.lastVacuumTime.IsZero() || time.Since(s.lastVacuumTime) > 72*time.Hour {
-		if _, err := s.db.Exec("VACUUM;"); err != nil {
-			logger.Warn().Msgf("VACUUM failed: %v", err)
-		} else {
-			s.lastVacuumTime = time.Now()
-			logger.Info().Msg("Database VACUUM completed")
+	return nil
+}
+
+// GetLastCleanupTime returns the time when the last full retention cleanup was performed.
+func (s *Storage) GetLastCleanupTime() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastCleanupTime
+}
+
+// CleanupAll runs all retention cleanup operations (daily, monthly, yearly, error).
+// It should be called periodically (e.g., once per 24 hours).
+// This function:
+// - Removes old data from all aggregated tables
+// - Runs VACUUM to reclaim space if any data was deleted and it's been >72h since last VACUUM
+// - Tracks when the cleanup was last performed
+// - Provides comprehensive logging
+func (s *Storage) CleanupAll() error {
+	cleanupStart := s.startCleanup()
+
+	var totalRowsDeleted int64
+	var errs []error
+
+	s.cleanupWithQuery("daily_values", "date", s.config.DailyRetention,
+		"DELETE FROM daily_values WHERE date < ?", &totalRowsDeleted, &errs)
+	s.cleanupWithQuery("monthly_values", "month", s.config.MonthlyRetention,
+		"DELETE FROM monthly_values WHERE month < ?", &totalRowsDeleted, &errs)
+	s.cleanupWithQuery("yearly_values", "year", s.config.YearlyRetention,
+		"DELETE FROM yearly_values WHERE year < ?", &totalRowsDeleted, &errs)
+	s.cleanupWithQuery("error_data", "timestamp", s.config.ErrorRetention,
+		"DELETE FROM error_data WHERE timestamp < ?", &totalRowsDeleted, &errs)
+
+	s.runVacuumIfNeeded(totalRowsDeleted)
+
+	return s.completeCleanup(cleanupStart, totalRowsDeleted, errs)
+}
+
+// startCleanup starts the cleanup process and logs the start
+func (s *Storage) startCleanup() time.Time {
+	s.mu.Lock()
+	cleanupStart := time.Now()
+	s.mu.Unlock()
+	logger.Info().Msg("Starting full retention cleanup")
+	return cleanupStart
+}
+
+// cleanupWithQuery cleans up a table with a specific query
+func (s *Storage) cleanupWithQuery(table, column string, retention time.Duration, query string, totalRowsDeleted *int64, errs *[]error) {
+	if err := s.cleanupTable(table, column, retention,
+		func(cutoff string) (sql.Result, error) {
+			return s.db.Exec(query, cutoff)
+		}, totalRowsDeleted); err != nil {
+		*errs = append(*errs, err)
+	}
+}
+
+// runVacuumIfNeeded runs VACUUM if conditions are met
+func (s *Storage) runVacuumIfNeeded(totalRowsDeleted int64) {
+	if totalRowsDeleted > 0 {
+		if s.lastVacuumTime.IsZero() || time.Since(s.lastVacuumTime) > 72*time.Hour {
+			if _, err := s.db.Exec("VACUUM;"); err != nil {
+				logger.Warn().Msgf("VACUUM failed: %v", err)
+			} else {
+				s.lastVacuumTime = time.Now()
+				logger.Info().Msgf("Database VACUUM completed, reclaimed space from %d deleted rows", totalRowsDeleted)
+			}
 		}
 	}
+}
 
+// completeCleanup completes the cleanup process
+func (s *Storage) completeCleanup(cleanupStart time.Time, totalRowsDeleted int64, errs []error) error {
+	s.mu.Lock()
+	s.lastCleanupTime = cleanupStart
+	s.mu.Unlock()
+
+	if len(errs) > 0 {
+		logger.Error().Msgf("Retention cleanup completed with %d errors, total rows deleted: %d",
+			len(errs), totalRowsDeleted)
+		return fmt.Errorf("%d cleanup errors occurred", len(errs))
+	}
+
+	logger.Info().Msgf("Retention cleanup completed successfully, total rows deleted: %d", totalRowsDeleted)
+	return nil
+}
+
+// cleanupTable is a helper function for CleanupAll that handles the common cleanup pattern.
+func (s *Storage) cleanupTable(tableName, dateColumn string, retention time.Duration,
+	deleteFunc func(cutoff string) (sql.Result, error), totalDeleted *int64) error {
+
+	cutoff := time.Now().Add(-retention)
+	var cutoffStr string
+
+	// Format the cutoff based on the date column type
+	switch dateColumn {
+	case "date":
+		cutoffStr = cutoff.Format(solis.DateFormat)
+	case "month":
+		cutoffStr = cutoff.Format(solis.MonthFormat)
+	case "year":
+		cutoffStr = cutoff.Format(solis.YearFormat)
+	case "timestamp":
+		// For timestamp columns, use the time directly in the query
+		return s.cleanupWithTimestamp(tableName, dateColumn, retention, totalDeleted)
+	default:
+		cutoffStr = cutoff.Format(solis.DateFormat)
+	}
+
+	logger.Info().Msgf("Cleaning up %s data older than %s (cutoff: %s)", tableName, retention, cutoffStr)
+
+	result, err := deleteFunc(cutoffStr)
+	if err != nil {
+		logger.Error().Msgf("Failed to cleanup %s data: %v", tableName, err)
+		return fmt.Errorf("failed to cleanup %s data: %w", tableName, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		logger.Warn().Msgf("Error getting rows affected for %s: %v", tableName, err)
+		return nil // Don't fail the whole cleanup for this
+	}
+
+	*totalDeleted += rowsAffected
+	logger.Info().Msgf("Deleted %d old %s rows", rowsAffected, tableName)
+	return nil
+}
+
+// cleanupWithTimestamp handles cleanup for tables with timestamp columns.
+func (s *Storage) cleanupWithTimestamp(tableName, dateColumn string, retention time.Duration, totalDeleted *int64) error {
+	cutoff := time.Now().Add(-retention)
+	logger.Info().Msgf("Cleaning up %s data older than %s (cutoff: %s)", tableName, retention, cutoff)
+
+	result, err := s.db.Exec(fmt.Sprintf("DELETE FROM %s WHERE %s < ?", tableName, dateColumn), cutoff)
+	if err != nil {
+		logger.Error().Msgf("Failed to cleanup %s data: %v", tableName, err)
+		return fmt.Errorf("failed to cleanup %s data: %w", tableName, err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		logger.Warn().Msgf("Error getting rows affected for %s: %v", tableName, err)
+		return nil
+	}
+
+	*totalDeleted += rowsAffected
+	logger.Info().Msgf("Deleted %d old %s rows", rowsAffected, tableName)
 	return nil
 }
 
@@ -836,16 +1023,6 @@ func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// internalDataPoint is used internally for aggregation with time.Time timestamp.
-// Kept for potential future use, though aggregation is currently removed.
-type internalDataPoint struct {
-	timestamp time.Time
-	value     float64
-	min       float64
-	max       float64
-	count     int
-}
-
 // GetErrorHistory retrieves historical error data for a specific register key.
 func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDataPoint, error) {
 	rows, err := s.db.Query(`
@@ -878,8 +1055,8 @@ func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDat
 
 // GetDailyHistory retrieves daily values for a specific register key.
 func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*DailyDataPoint, error) {
-	start := startDate.Format("2006-01-02")
-	end := endDate.Format("2006-01-02")
+	start := startDate.Format(solis.DateFormat)
+	end := endDate.Format(solis.DateFormat)
 
 	rows, err := s.db.Query(`
 		SELECT date, value, raw_value
@@ -911,8 +1088,8 @@ func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*
 
 // GetMonthlyHistory retrieves monthly values for a specific register key.
 func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) ([]*MonthlyDataPoint, error) {
-	start := startMonth.Format("2006-01")
-	end := endMonth.Format("2006-01")
+	start := startMonth.Format(solis.MonthFormat)
+	end := endMonth.Format(solis.MonthFormat)
 
 	rows, err := s.db.Query(`
 		SELECT month, value, raw_value
@@ -944,8 +1121,8 @@ func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) 
 
 // GetYearlyHistory retrieves yearly values for a specific register key.
 func (s *Storage) GetYearlyHistory(key string, startYear, endYear time.Time) ([]*YearlyDataPoint, error) {
-	start := startYear.Format("2006")
-	end := endYear.Format("2006")
+	start := startYear.Format(solis.YearFormat)
+	end := endYear.Format(solis.YearFormat)
 
 	rows, err := s.db.Query(`
 		SELECT year, value, raw_value
@@ -1006,7 +1183,7 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 
 	// For net energy registers, always update (they can be negative or decrease)
 	// For other monthly registers (energy totals), only update if value is higher
-	isNetRegister := key == "month_grid_energy"
+	isNetRegister := key == "grid_energy_monthly"
 
 	if err == sql.ErrNoRows {
 		// New month, insert new record
@@ -1052,7 +1229,7 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 
 	// For net energy registers, always update (they can be negative or decrease)
 	// For other yearly registers (energy totals), only update if value is higher
-	isNetRegister := key == "year_grid_energy"
+	isNetRegister := key == "grid_energy_yearly"
 
 	// Get existing value for this year
 	var existingValue float64

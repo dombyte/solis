@@ -3,13 +3,12 @@ package database
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/dombyte/solis/internal/config"
+	"github.com/dombyte/solis/internal/database/migrations"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/storage"
 	_ "modernc.org/sqlite"
@@ -44,9 +43,12 @@ func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *Bac
 	// Create migration registry
 	registry := NewMigrationRegistry()
 
-	// Register V1 migration directly to avoid circular imports
-	// In the future, we can use a better registration mechanism
-	registry.Register(V1MigrationForManager())
+	// Register migrations from the migrations package
+	registry.Register(migrations.GetV1Migration())
+	registry.Register(migrations.GetV2Migration())
+
+	// Register the V2 migration from the migrations package
+	registry.Register(migrations.GetV2Migration())
 
 	return &DatabaseManager{
 		config:        storageConfig,
@@ -72,91 +74,131 @@ func (m *DatabaseManager) Initialize() (*storage.Storage, error) {
 
 	managerLogger.Info().Msgf("Starting database initialization (path: %s)", m.dbPath)
 
-	// Step 1: Check if database file exists
-	dbFileExists := false
-	if _, err := os.Stat(m.dbPath); err == nil {
-		dbFileExists = true
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("error checking database file: %w", err)
-	}
+	dbFileExists := m.checkDatabaseFileExists()
 
-	// Step 2: Open database connection
-	db, err := sql.Open("sqlite", m.dbPath)
+	db, err := m.openAndVerifyDatabase()
 	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
+		return nil, err
 	}
 	defer db.Close()
 
-	// Configure connection pool
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	db.SetConnMaxLifetime(0)
-
-	// Verify connection
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	// Step 3: Check current schema version
 	currentVersion, err := m.getCurrentSchemaVersion(db)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current schema version: %w", err)
 	}
-
 	managerLogger.Info().Msgf("Current schema version: %d", currentVersion)
 
-	// Step 4: Always create a backup if database file exists
 	if dbFileExists {
-		backupPath, err := CreateBackup(m.dbPath, m.backupConfig)
-		if err != nil {
-			managerLogger.Error().Msgf("Failed to create backup: %v", err)
-			// Continue without backup - this is a warning, not a failure
-			managerLogger.Warn().Msg("Proceeding without backup - data may be at risk")
-		} else {
-			managerLogger.Info().Msgf("Backup created: %s", backupPath)
-		}
+		m.createBackupIfNeeded()
 	}
 
-	// Step 5: If this is a legacy database (version 0) or version mismatch, migrate
+	if err := m.applyPendingMigrations(db, currentVersion); err != nil {
+		return nil, err
+	}
+
+	m.cleanupOldBackups()
+
+	st, err := m.createStorageInstance()
+	if err != nil {
+		return nil, err
+	}
+
+	m.runStartupCleanup(st)
+
+	managerLogger.Info().Msg("Database initialization completed successfully")
+	return st, nil
+}
+
+// checkDatabaseFileExists checks if the database file exists
+func (m *DatabaseManager) checkDatabaseFileExists() bool {
+	_, statErr := os.Stat(m.dbPath)
+	if statErr == nil {
+		return true
+	}
+	if !os.IsNotExist(statErr) {
+		managerLogger.Error().Msgf("Error checking database file: %v", statErr)
+	}
+	return false
+}
+
+// openAndVerifyDatabase opens the database and verifies the connection
+func (m *DatabaseManager) openAndVerifyDatabase() (*sql.DB, error) {
+	db, err := sql.Open("sqlite", m.dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return db, nil
+}
+
+// createBackupIfNeeded creates a backup if the database file exists
+func (m *DatabaseManager) createBackupIfNeeded() {
+	backupPath, err := CreateBackup(m.dbPath, m.backupConfig)
+	if err != nil {
+		managerLogger.Error().Msgf("Failed to create backup: %v", err)
+		managerLogger.Warn().Msg("Proceeding without backup - data may be at risk")
+	} else {
+		managerLogger.Info().Msgf("Backup created: %s", backupPath)
+	}
+}
+
+// applyPendingMigrations applies any pending migrations
+func (m *DatabaseManager) applyPendingMigrations(db *sql.DB, currentVersion int) error {
 	if currentVersion < CurrentSchemaVersion {
 		managerLogger.Info().Msgf("Database needs migration (current: %d, target: %d)", currentVersion, CurrentSchemaVersion)
 
-		// Apply pending migrations
 		appliedCount, err := m.applyMigrations(db, currentVersion)
 		if err != nil {
-			return nil, fmt.Errorf("migration failed: %w", err)
+			return fmt.Errorf("migration failed: %w", err)
 		}
 		managerLogger.Info().Msgf("Migrations applied: %d", appliedCount)
 	} else {
 		managerLogger.Info().Msgf("Database is up to date (version: %d)", currentVersion)
 	}
+	return nil
+}
 
-	// Step 5: Cleanup old backups
+// cleanupOldBackups cleans up old backup files
+func (m *DatabaseManager) cleanupOldBackups() {
 	if m.backupConfig.Enabled && m.backupConfig.MaxBackups > 0 {
 		if err := CleanupBackups(m.dbPath, m.backupConfig.MaxBackups); err != nil {
 			managerLogger.Warn().Msgf("Failed to cleanup old backups: %v", err)
-			// Continue - this is not a failure
 		}
 	}
+}
 
-	// Step 6: Initialize Storage instance with the database connection
-	// We need to create a new Storage instance with the database
+// createStorageInstance creates a new Storage instance
+func (m *DatabaseManager) createStorageInstance() (*storage.Storage, error) {
 	managerLogger.Info().Msg("Creating Storage instance")
 
-	// Since we can't reuse the db connection (Storage creates its own),
-	// we'll let Storage handle the connection
 	st, err := storage.New(m.config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Storage: %w", err)
 	}
 
 	m.storage = st
-	m.db = st.DB() // Store reference to the connection
+	m.db = st.DB()
 	m.isInitialized = true
 
-	managerLogger.Info().Msg("Database initialization completed successfully")
-
 	return st, nil
+}
+
+// runStartupCleanup runs retention cleanup on startup
+func (m *DatabaseManager) runStartupCleanup(st *storage.Storage) {
+	managerLogger.Info().Msg("Running retention cleanup on startup")
+	if err := st.CleanupAll(); err != nil {
+		managerLogger.Warn().Msgf("Startup retention cleanup failed (will retry later via poller): %v", err)
+	} else {
+		managerLogger.Info().Msg("Startup retention cleanup completed")
+	}
 }
 
 // getCurrentSchemaVersion retrieves the current schema version from the database.
@@ -247,112 +289,51 @@ func (m *DatabaseManager) createOnlineBackup() {
 	managerLogger.Info().Msgf("Online backup created successfully: %s", backupPath)
 }
 
-// CreateBackup creates a backup of the database.
-func (m *DatabaseManager) CreateBackup() (string, error) {
-	if !m.isInitialized {
-		return "", errors.New("DatabaseManager not initialized")
-	}
-	return CreateBackup(m.dbPath, m.backupConfig)
-}
-
-// CleanupBackups performs cleanup of old backup files.
-func (m *DatabaseManager) CleanupBackups() error {
-	if !m.isInitialized {
-		return errors.New("DatabaseManager not initialized")
-	}
-	return CleanupBackups(m.dbPath, m.backupConfig.MaxBackups)
-}
-
-// GetBackupList returns a list of all backup files.
-func (m *DatabaseManager) GetBackupList() ([]BackupInfo, error) {
-	if !m.isInitialized {
-		return nil, errors.New("DatabaseManager not initialized")
-	}
-	return ListBackups(m.dbPath)
-}
-
-// GetCurrentVersion returns the current schema version.
-func (m *DatabaseManager) GetCurrentVersion() (int, error) {
-	if !m.isInitialized || m.db == nil {
-		return 0, errors.New("DatabaseManager not initialized")
-	}
-	return m.executor.GetCurrentVersion(m.db)
-}
-
-// RegisterMigrations registers additional migrations with the manager.
-// This can be used by other packages to add their own migrations.
-func (m *DatabaseManager) RegisterMigrations(migrations ...Migration) {
-	for _, migration := range migrations {
-		m.registry.Register(migration)
-	}
-}
-
-// RegisterAllMigrations registers all known migrations from the migrations package.
-func (m *DatabaseManager) RegisterAllMigrations() {
-	// Import the migrations package and register all migrations
-	// Since we can't import it directly (circular dependency), we'll use a function
-	// that can be called to register migrations
-	// For now, we'll register the V1 migration directly
-	m.registry.Register(V1MigrationForManager())
-}
-
-// V1MigrationForManager returns the V1 migration that can be registered with the manager.
-// This is a temporary solution until we resolve the circular import issue.
-func V1MigrationForManager() Migration {
-	// We'll create a simple migration here to avoid import issues
-	return &v1MigrationImpl{}
-}
-
-// v1MigrationImpl implements the Migration interface for V1 schema.
-type v1MigrationImpl struct{}
-
-func (m *v1MigrationImpl) Version() int {
-	return 1
-}
-
-func (m *v1MigrationImpl) Description() string {
-	return "Initial schema"
-}
-
-func (m *v1MigrationImpl) Up(tx *sql.Tx) error {
-	// This is the same SQL as in the migrations package
-	tables := []string{
-		`CREATE TABLE IF NOT EXISTS daily_values (id INTEGER PRIMARY KEY AUTOINCREMENT, date DATE NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL, raw_value REAL NOT NULL, UNIQUE(register_key, date));`,
-		`CREATE INDEX IF NOT EXISTS idx_daily_key_date ON daily_values(register_key, date);`,
-		`CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_values(date);`,
-		`CREATE TABLE IF NOT EXISTS monthly_values (id INTEGER PRIMARY KEY AUTOINCREMENT, month TEXT NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL, raw_value REAL NOT NULL, UNIQUE(register_key, month));`,
-		`CREATE INDEX IF NOT EXISTS idx_monthly_key_month ON monthly_values(register_key, month);`,
-		`CREATE INDEX IF NOT EXISTS idx_monthly_month ON monthly_values(month);`,
-		`CREATE TABLE IF NOT EXISTS yearly_values (id INTEGER PRIMARY KEY AUTOINCREMENT, year TEXT NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL, raw_value REAL NOT NULL, UNIQUE(register_key, year));`,
-		`CREATE INDEX IF NOT EXISTS idx_yearly_key_year ON yearly_values(register_key, year);`,
-		`CREATE INDEX IF NOT EXISTS idx_yearly_year ON yearly_values(year);`,
-		`CREATE TABLE IF NOT EXISTS total_values (id INTEGER PRIMARY KEY AUTOINCREMENT, register_key TEXT NOT NULL UNIQUE, value REAL NOT NULL, raw_value REAL NOT NULL, timestamp DATETIME NOT NULL);`,
-		`CREATE INDEX IF NOT EXISTS idx_total_key ON total_values(register_key);`,
-		`CREATE TABLE IF NOT EXISTS error_data (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME NOT NULL, register_key TEXT NOT NULL, raw_value REAL NOT NULL, string_value TEXT, UNIQUE(register_key, timestamp));`,
-		`CREATE INDEX IF NOT EXISTS idx_error_key_timestamp ON error_data(register_key, timestamp);`,
-		`CREATE INDEX IF NOT EXISTS idx_error_timestamp ON error_data(timestamp);`,
-		SchemaVersionTableSQL,
+// StartPeriodicCleanup starts a background goroutine that runs retention cleanup
+// at the configured interval. It should be called if the poller is not running (serve-only mode).
+func (m *DatabaseManager) StartPeriodicCleanup(ctx context.Context) error {
+	if m.storage == nil || m.storage.Config() == nil || m.storage.Config().CleanupInterval <= 0 {
+		managerLogger.Debug().Msg("Periodic cleanup disabled or not configured")
+		return nil
 	}
 
-	for _, sql := range tables {
-		if _, err := tx.Exec(sql); err != nil {
-			return err
+	cleanupInterval := m.storage.Config().CleanupInterval
+	managerLogger.Info().Msgf("Starting periodic retention cleanup (interval: %s)", cleanupInterval)
+
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	// Run cleanup immediately on startup
+	m.runCleanup()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				managerLogger.Info().Msg("Periodic retention cleanup stopped")
+				return
+			case <-ticker.C:
+				m.runCleanup()
+			}
 		}
+	}()
+
+	return nil
+}
+
+// runCleanup executes the retention cleanup.
+func (m *DatabaseManager) runCleanup() {
+	if m.storage == nil {
+		managerLogger.Warn().Msg("Cannot run cleanup: storage not configured")
+		return
 	}
 
-	// Insert version record
-	insertSQL := `INSERT OR IGNORE INTO schema_version (version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
-	_, err := tx.Exec(insertSQL, 1, "Initial schema")
-	return err
-}
-
-func (m *v1MigrationImpl) Down(tx *sql.Tx) error {
-	return ErrNotImplemented
-}
-
-// GetStorage returns the initialized Storage instance.
-func (m *DatabaseManager) GetStorage() *storage.Storage {
-	return m.storage
+	managerLogger.Debug().Msg("Running retention cleanup...")
+	if err := m.storage.CleanupAll(); err != nil {
+		managerLogger.Error().Msgf("Retention cleanup failed: %v", err)
+	} else {
+		managerLogger.Info().Msg("Retention cleanup completed successfully")
+	}
 }
 
 // Close closes the database connection and cleans up resources.
@@ -360,19 +341,5 @@ func (m *DatabaseManager) Close() error {
 	if m.storage != nil {
 		return m.storage.Close()
 	}
-	return nil
-}
-
-// VerifyDatabasePath ensures the database directory exists.
-func VerifyDatabasePath(dbPath string) error {
-	dir := filepath.Dir(dbPath)
-	if dir == "" || dir == "." {
-		return nil
-	}
-
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return fmt.Errorf("failed to create database directory: %w", err)
-	}
-
 	return nil
 }

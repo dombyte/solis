@@ -122,22 +122,10 @@ func DecodeDeviceFaultStatus05(value uint16) []string {
 
 // DecodeBatteryFaultStatus1Bms decodes the battery_fault_status_1_bms register (33145).
 func DecodeBatteryFaultStatus1Bms(value uint16) []string {
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			faults = append(faults, fmt.Sprintf("BMS fault bit %d", i))
-		}
-	}
-	return faults
+	return DecodeFaultBits(33145, value)
 }
 
 // DecodeBatteryFaultStatus2Bms decodes the battery_fault_status_2_bms register (33146).
 func DecodeBatteryFaultStatus2Bms(value uint16) []string {
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			faults = append(faults, fmt.Sprintf("BMS fault bit %d", i))
-		}
-	}
-	return faults
+	return DecodeFaultBits(33146, value)
 }

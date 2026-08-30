@@ -86,19 +86,15 @@ func ParseLogLevel(levelStr string) Level {
 // Init initializes the global logger with the specified configuration.
 // It should be called once at application startup.
 // Parameters:
-//   - debug: if true, enables debug-level logging (deprecated, use logLevel)
 //   - output: the io.Writer to write logs to (defaults to os.Stderr)
 //   - pretty: if true, uses human-readable console output (for development)
 //   - logLevel: the logging level to use (DEBUG, INFO, WARN, ERROR, FATAL)
-func Init(debug bool, output io.Writer, pretty bool, logLevel ...string) {
+func Init(output io.Writer, pretty bool, logLevel ...string) {
 	globalLoggerMu.Lock()
 	defer globalLoggerMu.Unlock()
 
 	// Determine the log level
 	level := LevelInfo
-	if debug {
-		level = LevelDebug
-	}
 	if len(logLevel) > 0 && logLevel[0] != "" {
 		level = ParseLogLevel(logLevel[0])
 	}

@@ -1,4 +1,4 @@
-type FormatType = 'number' | 'percentage' | 'power' | 'energy' | 'voltage' | 'current' | 'temperature';
+type FormatType = 'number' | 'percentage' | 'power' | 'energy' | 'voltage' | 'current';
 
 type TemplateString = string;
 
@@ -9,7 +9,7 @@ export interface ApiDataObject {
   name: string | TemplateString;
   description?: string | TemplateString;
   unit?: string | TemplateString;
-  source: string;    // Full API path (e.g., '/api/data/temperature')
+  source: string;    // Full API path (e.g., '/api/data/solis_status')
   category?: string;
   group?: string;
   precision?: number;

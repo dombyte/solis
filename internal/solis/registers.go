@@ -113,30 +113,50 @@ var AllRegisters = allRegisters()
 // RegisterMapByKey provides O(1) lookup of registers by their key.
 var RegisterMapByKey = buildRegisterMapByKey()
 
+// DailyToMonthlyMap maps daily register keys to their corresponding monthly register keys.
+// Used by the aggregator to compute monthly values from daily storage.
+var DailyToMonthlyMap = map[string]string{
+	"energy_consumption_daily": "energy_consumption_monthly",
+	"grid_export_daily":        "grid_export_monthly",
+	"grid_import_daily":        "grid_import_monthly",
+	"battery_discharge_daily":  "battery_discharge_monthly",
+	"battery_charge_daily":     "battery_charge_monthly",
+}
+
+// DailyToYearlyMap maps daily register keys to their corresponding yearly register keys.
+// Used by the aggregator to compute yearly values from daily storage.
+var DailyToYearlyMap = map[string]string{
+	"energy_consumption_daily": "energy_consumption_yearly",
+	"grid_export_daily":        "grid_export_yearly",
+	"grid_import_daily":        "grid_import_yearly",
+	"battery_discharge_daily":  "battery_discharge_yearly",
+	"battery_charge_daily":     "battery_charge_yearly",
+}
+
 // DailyRegisterKeys are the register keys that should have daily aggregation.
 // These are energy registers that accumulate during the day and reset at midnight.
 var DailyRegisterKeys = []string{
-	"household_load_today_energy",
-	"today_energy_consumption",
-	"today_energy_fed_into_grid",
-	"today_energy_imported_from_grid",
-	"today_battery_discharge_energy",
-	"today_battery_charge_energy",
-	"pv_today_energy",
-	"backup_load_today_energy",
+	"household_energy_daily",
+	"energy_consumption_daily",
+	"grid_export_daily",
+	"grid_import_daily",
+	"battery_discharge_daily",
+	"battery_charge_daily",
+	"pv_energy_daily",
+	"backup_energy_daily",
 }
 
 // dailyRegisterSet provides O(1) lookup for daily registers.
 var dailyRegisterSet = map[string]bool{
-	"household_load_today_energy":     true,
-	"today_energy_consumption":        true,
-	"today_energy_fed_into_grid":      true,
-	"today_energy_imported_from_grid": true,
-	"today_battery_discharge_energy":  true,
-	"today_battery_charge_energy":     true,
-	"today_grid_energy":               true,
-	"pv_today_energy":                 true,
-	"backup_load_today_energy":        true,
+	"household_energy_daily":   true,
+	"energy_consumption_daily": true,
+	"grid_export_daily":        true,
+	"grid_import_daily":        true,
+	"battery_discharge_daily":  true,
+	"battery_charge_daily":     true,
+	"grid_energy_daily":        true,
+	"pv_energy_daily":          true,
+	"backup_energy_daily":      true,
 }
 
 // IsDailyRegister returns true if the key is a daily energy register.
@@ -147,30 +167,30 @@ func IsDailyRegister(key string) bool {
 // MonthlyRegisterKeys are the register keys that should have monthly aggregation.
 // These are energy registers that accumulate during the month and reset at the start of a new month.
 var MonthlyRegisterKeys = []string{
-	"pv_month_energy",
-	"household_load_month_energy",
-	"backup_load_month_energy",
+	"pv_energy_monthly",
+	"household_energy_monthly",
+	"backup_energy_monthly",
 	// Computed monthly registers
-	"energy_consumption_month_energy",
-	"energy_fed_into_grid_month_energy",
-	"energy_imported_from_grid_month_energy",
-	"battery_discharge_month_energy",
-	"battery_charge_month_energy",
-	"month_grid_energy",
+	"energy_consumption_monthly",
+	"grid_export_monthly",
+	"grid_import_monthly",
+	"battery_discharge_monthly",
+	"battery_charge_monthly",
+	"grid_energy_monthly",
 }
 
 // monthlyRegisterSet provides O(1) lookup for monthly registers.
 var monthlyRegisterSet = map[string]bool{
-	"pv_month_energy":             true,
-	"household_load_month_energy": true,
-	"backup_load_month_energy":    true,
+	"pv_energy_monthly":        true,
+	"household_energy_monthly": true,
+	"backup_energy_monthly":    true,
 	// Computed monthly registers
-	"energy_consumption_month_energy":        true,
-	"energy_fed_into_grid_month_energy":      true,
-	"energy_imported_from_grid_month_energy": true,
-	"battery_discharge_month_energy":         true,
-	"battery_charge_month_energy":            true,
-	"month_grid_energy":                      true,
+	"energy_consumption_monthly": true,
+	"grid_export_monthly":        true,
+	"grid_import_monthly":        true,
+	"battery_discharge_monthly":  true,
+	"battery_charge_monthly":     true,
+	"grid_energy_monthly":        true,
 }
 
 // IsMonthlyRegister returns true if the key is a monthly energy register.
@@ -181,30 +201,30 @@ func IsMonthlyRegister(key string) bool {
 // YearlyRegisterKeys are the register keys that should have yearly aggregation.
 // These are energy registers that accumulate during the year and reset at the start of a new year.
 var YearlyRegisterKeys = []string{
-	"pv_year_energy",
-	"household_load_year_energy",
-	"backup_load_year_energy",
+	"pv_energy_yearly",
+	"household_energy_yearly",
+	"backup_energy_yearly",
 	// Computed yearly registers
-	"energy_consumption_year_energy",
-	"energy_fed_into_grid_year_energy",
-	"energy_imported_from_grid_year_energy",
-	"battery_discharge_year_energy",
-	"battery_charge_year_energy",
-	"year_grid_energy",
+	"energy_consumption_yearly",
+	"grid_export_yearly",
+	"grid_import_yearly",
+	"battery_discharge_yearly",
+	"battery_charge_yearly",
+	"grid_energy_yearly",
 }
 
 // yearlyRegisterSet provides O(1) lookup for yearly registers.
 var yearlyRegisterSet = map[string]bool{
-	"pv_year_energy":             true,
-	"household_load_year_energy": true,
-	"backup_load_year_energy":    true,
+	"pv_energy_yearly":        true,
+	"household_energy_yearly": true,
+	"backup_energy_yearly":    true,
 	// Computed yearly registers
-	"energy_consumption_year_energy":        true,
-	"energy_fed_into_grid_year_energy":      true,
-	"energy_imported_from_grid_year_energy": true,
-	"battery_discharge_year_energy":         true,
-	"battery_charge_year_energy":            true,
-	"year_grid_energy":                      true,
+	"energy_consumption_yearly": true,
+	"grid_export_yearly":        true,
+	"grid_import_yearly":        true,
+	"battery_discharge_yearly":  true,
+	"battery_charge_yearly":     true,
+	"grid_energy_yearly":        true,
 }
 
 // IsYearlyRegister returns true if the key is a yearly energy register.
@@ -212,30 +232,59 @@ func IsYearlyRegister(key string) bool {
 	return yearlyRegisterSet[key]
 }
 
+// ComputedRegisterSet provides O(1) lookup for registers whose values are
+// computed by the aggregator (monthly, yearly, net values).
+// These registers should NOT be updated by the poller from Modbus reads.
+var ComputedRegisterSet = map[string]bool{
+	// Monthly registers (computed from daily storage)
+	"energy_consumption_monthly": true,
+	"grid_export_monthly":        true,
+	"grid_import_monthly":        true,
+	"battery_discharge_monthly":  true,
+	"battery_charge_monthly":     true,
+	// Yearly registers (computed from daily storage)
+	"energy_consumption_yearly": true,
+	"grid_export_yearly":        true,
+	"grid_import_yearly":        true,
+	"battery_discharge_yearly":  true,
+	"battery_charge_yearly":     true,
+	// Net grid energy values (computed from totals)
+	"grid_energy_total":   true,
+	"grid_energy_daily":   true,
+	"grid_energy_monthly": true,
+	"grid_energy_yearly":  true,
+}
+
+// IsComputedRegister returns true if the key is a computed register
+// (monthly, yearly, or net values that are computed by the aggregator).
+func IsComputedRegister(key string) bool {
+	return ComputedRegisterSet[key]
+}
+
 // TotalRegisterKeys are the register keys that should have total aggregation.
 // These are energy registers that accumulate indefinitely (lifetime totals).
 var TotalRegisterKeys = []string{
-	"pv_total_energy",
-	"total_battery_discharge_energy",
-	"total_battery_charge_energy",
-	"total_energy_imported_from_grid",
-	"total_energy_fed_into_grid",
-	"total_energy_consumption",
-	"household_load_total_energy",
-	"backup_load_total_energy",
+	"pv_energy_total",
+	"battery_discharge_total",
+	"battery_charge_total",
+	"grid_import_total",
+	"grid_export_total",
+	"energy_consumption_total",
+	"household_energy_total",
+	"backup_energy_total",
 }
 
 // totalRegisterSet provides O(1) lookup for total registers.
 var totalRegisterSet = map[string]bool{
-	"pv_total_energy":                 true,
-	"total_battery_discharge_energy":  true,
-	"total_battery_charge_energy":     true,
-	"total_energy_imported_from_grid": true,
-	"total_energy_fed_into_grid":      true,
-	"total_energy_consumption":        true,
-	"total_grid_energy":               true,
-	"household_load_total_energy":     true,
-	"backup_load_total_energy":        true,
+	"pv_energy_total":          true,
+	"battery_discharge_total":  true,
+	"battery_charge_total":     true,
+	"grid_import_total":        true,
+	"grid_export_total":        true,
+	"energy_consumption_total": true,
+	"grid_energy_total":        true,
+	"household_energy_total":   true,
+	"backup_energy_total":      true,
 }
 
 // IsTotalRegister returns true if the key is a total energy register.
@@ -267,67 +316,16 @@ func allRegisters() []Register {
 	return []Register{
 		// =====================================================================
 		// INFORMATION REGISTERS (33000-33048)
-		// Stable: Written once at startup
+		// Removed per v2 plan - these were stable registers that are no longer polled
 		// =====================================================================
-
-		{
-			Key:       "solis_model_no",
-			Name:      "Solis Model No",
-			Address:   33000,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Stable,
-		},
-		{
-			Key:       "solis_dsp_version",
-			Name:      "Solis DSP Version",
-			Address:   33001,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Stable,
-		},
-		{
-			Key:       "solis_hmi_version",
-			Name:      "Solis HMI Version",
-			Address:   33002,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Stable,
-		},
-		{
-			Key:       "solis_protocol_version",
-			Name:      "Solis Protocol Version",
-			Address:   33003,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Stable,
-		},
-		{
-			Key:       "solis_serial_number",
-			Name:      "Solis Serial Number",
-			Address:   33004,
-			Count:     16, // 16 registers = 32 bytes for ASCII string
-			DataType:  String,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Stable,
-		},
 
 		// =====================================================================
 		// ENERGY REGISTERS (33029-33048)
 		// =====================================================================
 
 		{
-			Key:       "pv_today_energy",
-			Name:      "Solis PV Today Energy Generation",
+			Key:       "pv_energy_daily",
+			Name:      "PV Energy Daily",
 			Address:   33035,
 			Count:     1,
 			DataType:  Uint16,
@@ -337,8 +335,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "pv_month_energy",
-			Name:      "Solis PV Current Month Energy Generation",
+			Key:       "pv_energy_monthly",
+			Name:      "PV Energy Monthly",
 			Address:   33031,
 			Count:     2,
 			DataType:  Uint32,
@@ -348,8 +346,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "pv_year_energy",
-			Name:      "Solis PV This Year Energy Generation",
+			Key:       "pv_energy_yearly",
+			Name:      "PV Energy Yearly",
 			Address:   33037,
 			Count:     2,
 			DataType:  Uint32,
@@ -359,8 +357,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "pv_total_energy",
-			Name:      "Solis PV Total Energy Generation",
+			Key:       "pv_energy_total",
+			Name:      "PV Energy Total",
 			Address:   33029,
 			Count:     2,
 			DataType:  Uint32,
@@ -370,224 +368,19 @@ func allRegisters() []Register {
 		},
 
 		// =====================================================================
-		// PV VOLTAGE/CURRENT REGISTERS (33049-33056)
+		// PV VOLTAGE/CURRENT/POWER REGISTERS (33049-33058)
+		// Removed per v2 plan - keeping only energy registers
 		// =====================================================================
 
-		{
-			Key:       "pv_voltage_1",
-			Name:      "Solis PV Voltage 1",
-			Address:   33049,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_current_1",
-			Name:      "Solis PV Current 1",
-			Address:   33050,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_voltage_2",
-			Name:      "Solis PV Voltage 2",
-			Address:   33051,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_current_2",
-			Name:      "Solis PV Current 2",
-			Address:   33052,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_voltage_3",
-			Name:      "Solis PV Voltage 3",
-			Address:   33053,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_current_3",
-			Name:      "Solis PV Current 3",
-			Address:   33054,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_voltage_4",
-			Name:      "Solis PV Voltage 4",
-			Address:   33055,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "pv_current_4",
-			Name:      "Solis PV Current 4",
-			Address:   33056,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-
 		// =====================================================================
-		// PV POWER AND BUS REGISTERS (33057-33072)
+		// GRID VOLTAGE/CURRENT/POWER/FREQUENCY REGISTERS (33073-33094)
+		// Removed per v2 plan - keeping only energy and status registers
 		// =====================================================================
 
-		{
-			Key:       "total_pv_power",
-			Name:      "Solis Total PV Power",
-			Address:   33057,
-			Count:     2,
-			DataType:  Uint32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-
 		// =====================================================================
-		// GRID VOLTAGE/CURRENT REGISTERS (33073-33084)
+		// STATUS REGISTERS (33093-33096)
 		// =====================================================================
 
-		{
-			Key:       "a_phase_voltage",
-			Name:      "Solis A Phase Voltage",
-			Address:   33073,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "b_phase_voltage",
-			Name:      "Solis B Phase Voltage",
-			Address:   33074,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "c_phase_voltage",
-			Name:      "Solis C Phase Voltage",
-			Address:   33075,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "a_phase_current",
-			Name:      "Solis A Phase Current",
-			Address:   33076,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "b_phase_current",
-			Name:      "Solis B Phase Current",
-			Address:   33077,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "c_phase_current",
-			Name:      "Solis C Phase Current",
-			Address:   33078,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "active_power",
-			Name:      "Solis Active Power",
-			Address:   33079,
-			Count:     2,
-			DataType:  Uint32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "reactive_power",
-			Name:      "Solis Reactive Power",
-			Address:   33081,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     0.1,
-			Unit:      "VAR",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "apparent_power",
-			Name:      "Solis Apparent Power",
-			Address:   33083,
-			Count:     2,
-			DataType:  Uint32,
-			Scale:     0.1,
-			Unit:      "VA",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "grid_frequency",
-			Name:      "Solis Grid Frequency",
-			Address:   33094,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.01,
-			Unit:      "HZ",
-			Stability: Dynamic,
-		},
-
-		// =====================================================================
-		// TEMPERATURE AND STATUS REGISTERS (33093-33096)
-		// =====================================================================
-
-		{
-			Key:       "temperature",
-			Name:      "Solis Temperature",
-			Address:   33093,
-			Count:     1,
-			DataType:  Int16,
-			Scale:     0.1,
-			Unit:      "C",
-			Stability: Dynamic,
-		},
 		{
 			Key:       "solis_status",
 			Name:      "Solis Status",
@@ -601,8 +394,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "grid_fault_status_01",
-			Name:      "Solis Grid Fault Status 01 (Bitmask)",
+			Key:       "grid_fault_1",
+			Name:      "Grid Fault 1 (Bitmask)",
 			Address:   33116,
 			Count:     1,
 			DataType:  Uint16,
@@ -612,8 +405,8 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 		{
-			Key:       "backup_load_fault_status_02",
-			Name:      "Solis Backup Load Fault Status 02 (Bitmask)",
+			Key:       "backup_fault_2",
+			Name:      "Backup Fault 2 (Bitmask)",
 			Address:   33117,
 			Count:     1,
 			DataType:  Uint16,
@@ -623,8 +416,8 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 		{
-			Key:       "battery_fault_status_03",
-			Name:      "Solis Battery Fault Status 03 (Bitmask)",
+			Key:       "battery_fault_3",
+			Name:      "Battery Fault 3 (Bitmask)",
 			Address:   33118,
 			Count:     1,
 			DataType:  Uint16,
@@ -634,8 +427,8 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 		{
-			Key:       "device_fault_status_04",
-			Name:      "Solis Device Fault Status 04 (Bitmask)",
+			Key:       "device_fault_4",
+			Name:      "Device Fault 4 (Bitmask)",
 			Address:   33119,
 			Count:     1,
 			DataType:  Uint16,
@@ -645,8 +438,8 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 		{
-			Key:       "device_fault_status_05",
-			Name:      "Solis Device Fault Status 05 (Bitmask)",
+			Key:       "device_fault_5",
+			Name:      "Device Fault 5 (Bitmask)",
 			Address:   33120,
 			Count:     1,
 			DataType:  Uint16,
@@ -667,91 +460,14 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 
-		{
-			Key:       "battery_voltage",
-			Name:      "Solis Battery Voltage",
-			Address:   33133,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_current",
-			Name:      "Solis Battery Current",
-			Address:   33134,
-			Count:     1,
-			DataType:  Int16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_current_direction",
-			Name:      "Solis Battery Current Direction",
-			Address:   33135,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "",
-			Stability: Dynamic,
-		},
+		// =====================================================================
+		// BATTERY/SOC/SOH REGISTERS (33133-33141)
+		// Removed per v2 plan - keeping only energy and status registers
+		// =====================================================================
 
 		{
-			Key:       "backup_ac_voltage_phase_a",
-			Name:      "Solis Backup AC Voltage Phase A",
-			Address:   33137,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "backup_ac_current_phase_a",
-			Name:      "Solis Backup AC Current Phase A",
-			Address:   33138,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_soc",
-			Name:      "Solis Battery SOC",
-			Address:   33139,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "%",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_soh",
-			Name:      "Solis Battery SOH",
-			Address:   33140,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1.0,
-			Unit:      "%",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_voltage_bms",
-			Name:      "Solis Battery Voltage (BMS)",
-			Address:   33141,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.01,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-
-		{
-			Key:       "battery_fault_status_1_bms",
-			Name:      "Solis Battery Fault Status 1 (BMS)",
+			Key:       "battery_fault_1_bms",
+			Name:      "Battery Fault 1 (BMS)",
 			Address:   33145,
 			Count:     1,
 			DataType:  Uint16,
@@ -761,8 +477,8 @@ func allRegisters() []Register {
 			Status:    true,
 		},
 		{
-			Key:       "battery_fault_status_2_bms",
-			Name:      "Solis Battery Fault Status 2 (BMS)",
+			Key:       "battery_fault_2_bms",
+			Name:      "Battery Fault 2 (BMS)",
 			Address:   33146,
 			Count:     1,
 			DataType:  Uint16,
@@ -771,50 +487,14 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 			Status:    true,
 		},
-		{
-			Key:       "household_load_power",
-			Name:      "Solis Household Load Power",
-			Address:   33147,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "backup_load_power",
-			Name:      "Solis Backup Load Power",
-			Address:   33148,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "battery_power",
-			Name:      "Solis Battery Power",
-			Address:   33149,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "ac_grid_port_power",
-			Name:      "Solis AC Grid Port Power",
-			Address:   33151,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     0.1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
+		// =====================================================================
+		// POWER REGISTERS (33147-33152)
+		// Removed per v2 plan - keeping only energy registers
+		// =====================================================================
 
 		{
-			Key:       "today_battery_charge_energy",
-			Name:      "Solis Today Battery Charge Energy",
+			Key:       "battery_charge_daily",
+			Name:      "Battery Charge Daily",
 			Address:   33163,
 			Count:     1,
 			DataType:  Uint16,
@@ -824,8 +504,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "today_battery_discharge_energy",
-			Name:      "Solis Today Battery Discharge Energy",
+			Key:       "battery_discharge_daily",
+			Name:      "Battery Discharge Daily",
 			Address:   33167,
 			Count:     1,
 			DataType:  Uint16,
@@ -835,8 +515,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "total_battery_discharge_energy",
-			Name:      "Solis Total Battery Discharge Energy",
+			Key:       "battery_discharge_total",
+			Name:      "Battery Discharge Total",
 			Address:   33165,
 			Count:     2,
 			DataType:  Uint32,
@@ -846,8 +526,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "total_battery_charge_energy",
-			Name:      "Solis Total Battery Charge Energy",
+			Key:       "battery_charge_total",
+			Name:      "Battery Charge Total",
 			Address:   33161,
 			Count:     2,
 			DataType:  Uint32,
@@ -857,8 +537,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "today_energy_imported_from_grid",
-			Name:      "Solis Today Energy Imported From Grid",
+			Key:       "grid_import_daily",
+			Name:      "Grid Import Daily",
 			Address:   33171,
 			Count:     1,
 			DataType:  Uint16,
@@ -868,8 +548,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "total_energy_imported_from_grid",
-			Name:      "Solis Total Energy Imported From Grid",
+			Key:       "grid_import_total",
+			Name:      "Grid Import Total",
 			Address:   33169,
 			Count:     2,
 			DataType:  Uint32,
@@ -879,8 +559,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "total_energy_fed_into_grid",
-			Name:      "Solis Total Energy Fed Into Grid",
+			Key:       "grid_export_total",
+			Name:      "Grid Export Total",
 			Address:   33173,
 			Count:     2,
 			DataType:  Uint32,
@@ -890,8 +570,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "today_energy_fed_into_grid",
-			Name:      "Solis Today Energy Fed Into Grid",
+			Key:       "grid_export_daily",
+			Name:      "Grid Export Daily",
 			Address:   33175,
 			Count:     1,
 			DataType:  Uint16,
@@ -901,8 +581,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "today_energy_consumption",
-			Name:      "Solis Today Energy Consumption",
+			Key:       "energy_consumption_daily",
+			Name:      "Energy Consumption Daily",
 			Address:   33179,
 			Count:     1,
 			DataType:  Uint16,
@@ -912,8 +592,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "total_energy_consumption",
-			Name:      "Solis Total Energy Consumption",
+			Key:       "energy_consumption_total",
+			Name:      "Energy Consumption Total",
 			Address:   33177,
 			Count:     2,
 			DataType:  Uint32,
@@ -924,8 +604,8 @@ func allRegisters() []Register {
 
 		// Computed net grid energy registers (virtual - no Modbus address)
 		{
-			Key:       "total_grid_energy",
-			Name:      "Total Grid Energy (Net)",
+			Key:       "grid_energy_total",
+			Name:      "Grid Energy Total (Net)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -934,8 +614,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "today_grid_energy",
-			Name:      "Today Grid Energy (Net)",
+			Key:       "grid_energy_daily",
+			Name:      "Grid Energy Daily (Net)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint16,
@@ -947,8 +627,8 @@ func allRegisters() []Register {
 		// Computed monthly and yearly energy registers (virtual - no Modbus address)
 		// These sum daily values from storage
 		{
-			Key:       "energy_consumption_month_energy",
-			Name:      "Energy Consumption Month Energy (Computed)",
+			Key:       "energy_consumption_monthly",
+			Name:      "Energy Consumption Monthly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -957,8 +637,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "energy_fed_into_grid_month_energy",
-			Name:      "Energy Fed Into Grid Month Energy (Computed)",
+			Key:       "grid_export_monthly",
+			Name:      "Grid Export Monthly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -967,8 +647,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "energy_imported_from_grid_month_energy",
-			Name:      "Energy Imported From Grid Month Energy (Computed)",
+			Key:       "grid_import_monthly",
+			Name:      "Grid Import Monthly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -977,8 +657,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "battery_discharge_month_energy",
-			Name:      "Battery Discharge Month Energy (Computed)",
+			Key:       "battery_discharge_monthly",
+			Name:      "Battery Discharge Monthly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -987,8 +667,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "battery_charge_month_energy",
-			Name:      "Battery Charge Month Energy (Computed)",
+			Key:       "battery_charge_monthly",
+			Name:      "Battery Charge Monthly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -997,8 +677,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "month_grid_energy",
-			Name:      "Month Grid Energy (Net, Computed)",
+			Key:       "grid_energy_monthly",
+			Name:      "Grid Energy Monthly (Net, Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1007,8 +687,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "energy_consumption_year_energy",
-			Name:      "Energy Consumption Year Energy (Computed)",
+			Key:       "energy_consumption_yearly",
+			Name:      "Energy Consumption Yearly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1017,8 +697,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "energy_fed_into_grid_year_energy",
-			Name:      "Energy Fed Into Grid Year Energy (Computed)",
+			Key:       "grid_export_yearly",
+			Name:      "Grid Export Yearly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1027,8 +707,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "energy_imported_from_grid_year_energy",
-			Name:      "Energy Imported From Grid Year Energy (Computed)",
+			Key:       "grid_import_yearly",
+			Name:      "Grid Import Yearly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1037,8 +717,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "battery_discharge_year_energy",
-			Name:      "Battery Discharge Year Energy (Computed)",
+			Key:       "battery_discharge_yearly",
+			Name:      "Battery Discharge Yearly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1047,8 +727,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "battery_charge_year_energy",
-			Name:      "Battery Charge Year Energy (Computed)",
+			Key:       "battery_charge_yearly",
+			Name:      "Battery Charge Yearly (Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1057,8 +737,8 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 		{
-			Key:       "year_grid_energy",
-			Name:      "Year Grid Energy (Net, Computed)",
+			Key:       "grid_energy_yearly",
+			Name:      "Grid Energy Yearly (Net, Computed)",
 			Address:   0,
 			Count:     0,
 			DataType:  Uint32,
@@ -1068,8 +748,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "household_load_today_energy",
-			Name:      "Solis Household Load Today Energy",
+			Key:       "household_energy_daily",
+			Name:      "Household Energy Daily",
 			Address:   33586,
 			Count:     1,
 			DataType:  Uint16,
@@ -1079,8 +759,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "household_load_year_energy",
-			Name:      "Solis Household Load Year Energy",
+			Key:       "household_energy_yearly",
+			Name:      "Household Energy Yearly",
 			Address:   33582,
 			Count:     2,
 			DataType:  Uint32,
@@ -1090,8 +770,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "household_load_month_energy",
-			Name:      "Solis Household Load Month Energy",
+			Key:       "household_energy_monthly",
+			Name:      "Household Energy Monthly",
 			Address:   33584,
 			Count:     2,
 			DataType:  Uint32,
@@ -1101,8 +781,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "household_load_total_energy",
-			Name:      "Solis Household Load Total Energy",
+			Key:       "household_energy_total",
+			Name:      "Household Energy Total",
 			Address:   33580,
 			Count:     2,
 			DataType:  Uint32,
@@ -1112,8 +792,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "backup_load_today_energy",
-			Name:      "Solis Backup Load Today Energy",
+			Key:       "backup_energy_daily",
+			Name:      "Backup Energy Daily",
 			Address:   33596,
 			Count:     1,
 			DataType:  Uint16,
@@ -1123,8 +803,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "backup_load_total_energy",
-			Name:      "Solis Backup Load Total Energy",
+			Key:       "backup_energy_total",
+			Name:      "Backup Energy Total",
 			Address:   33590,
 			Count:     2,
 			DataType:  Uint32,
@@ -1134,8 +814,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "backup_load_year_energy",
-			Name:      "Solis Backup Load Year Energy",
+			Key:       "backup_energy_yearly",
+			Name:      "Backup Energy Yearly",
 			Address:   33592,
 			Count:     2,
 			DataType:  Uint32,
@@ -1145,8 +825,8 @@ func allRegisters() []Register {
 		},
 
 		{
-			Key:       "backup_load_month_energy",
-			Name:      "Solis Backup Load Month Energy",
+			Key:       "backup_energy_monthly",
+			Name:      "Backup Energy Monthly",
 			Address:   33594,
 			Count:     2,
 			DataType:  Uint32,
@@ -1155,125 +835,33 @@ func allRegisters() []Register {
 			Stability: Dynamic,
 		},
 
-		{
-			Key:       "meter_ac_voltage_a",
-			Name:      "Solis Meter AC Voltage A",
-			Address:   33251,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_ac_current_a",
-			Name:      "Solis Meter AC Current A",
-			Address:   33252,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.01,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_ac_voltage_b",
-			Name:      "Solis Meter AC Voltage B",
-			Address:   33253,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_ac_current_b",
-			Name:      "Solis Meter AC Current B",
-			Address:   33254,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.01,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_ac_voltage_c",
-			Name:      "Solis Meter AC Voltage C",
-			Address:   33255,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.1,
-			Unit:      "V",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_ac_current_c",
-			Name:      "Solis Meter AC Current C",
-			Address:   33256,
-			Count:     1,
-			DataType:  Uint16,
-			Scale:     0.01,
-			Unit:      "A",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_active_power_a",
-			Name:      "Solis Meter Active Power A",
-			Address:   33257,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_active_power_b",
-			Name:      "Solis Meter Active Power B",
-			Address:   33259,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_active_power_c",
-			Name:      "Solis Meter Active Power C",
-			Address:   33261,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     1,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
-		{
-			Key:       "meter_total_active_power",
-			Name:      "Solis Meter Total Active Power",
-			Address:   33263,
-			Count:     2,
-			DataType:  Int32,
-			Scale:     1.0,
-			Unit:      "W",
-			Stability: Dynamic,
-		},
+		// =====================================================================
+		// METER REGISTERS (33251-33264)
+		// Removed per v2 plan - meter registers are no longer polled
+		// =====================================================================
 	}
 }
 
 // =============================================================================
 // READ RANGES
-// These are the 4 contiguous blocks we read from the inverter in one poll cycle.
+// These are the contiguous blocks we read from the inverter in one poll cycle.
 // Each range is read as a single Modbus ReadInputRegisters call.
+// Optimized to use 5 ranges (previously 7) by merging household groups and BMS/battery groups.
 // =============================================================================
 
-// ReadRanges defines the 4 ranges to read sequentially from the inverter.
+// ReadRanges defines the ranges to read sequentially from the inverter.
 // Each entry contains the starting address and number of registers to read.
-var ReadRanges = [4]struct {
+// Optimized to minimize both the number of read operations and extra registers read.
+// Merges: household groups (gap=3) and BMS/battery groups (gap=14).
+var ReadRanges = [5]struct {
 	StartAddr uint16
 	Count     uint16
 }{
-	{StartAddr: 33000, Count: 97}, // 33000-33096 (inclusive) - includes model, versions, serial
-	{StartAddr: 33116, Count: 65}, // 33116-33180 (inclusive)
-	{StartAddr: 33251, Count: 14}, // 33251-33264 (inclusive)
-	{StartAddr: 33580, Count: 17}, // 33580-33596 (inclusive)
+	{StartAddr: 33029, Count: 10}, // 33029-33038: PV energy registers (total, monthly, daily, yearly)
+	{StartAddr: 33095, Count: 1},  // 33095: Solis status
+	{StartAddr: 33116, Count: 6},  // 33116-33121: Fault/status registers
+	{StartAddr: 33145, Count: 35}, // 33145-33179: BMS fault and battery/grid/energy registers (merged)
+	{StartAddr: 33580, Count: 17}, // 33580-33596: Household and backup energy registers (merged)
 }
 
 // STATUS_MAP maps raw status code values (from register 33095) to short status names.
@@ -1514,6 +1102,30 @@ var FAULT_BIT_MAP = map[uint16][]string{
 		"CAN COM fail",                       // BIT14
 		"DSP COM fail",                       // BIT15
 	},
+	// Register 33145 - Battery fault status 1 (BMS)
+	33145: {
+		"Battery 1 overvoltage",           // BIT00
+		"Battery 1 undervoltage",          // BIT01
+		"Battery 1 overcurrent charge",    // BIT02
+		"Battery 1 overcurrent discharge", // BIT03
+		"Battery 1 overtemperature",       // BIT04
+		"Battery 1 undertemperature",      // BIT05
+		"Battery 1 communication fault",   // BIT06
+		"Battery 1 internal fault",        // BIT07
+		"", "", "", "", "", "", "", "",    // BIT08-15 reserved
+	},
+	// Register 33146 - Battery fault status 2 (BMS)
+	33146: {
+		"Battery 2 overvoltage",           // BIT00
+		"Battery 2 undervoltage",          // BIT01
+		"Battery 2 overcurrent charge",    // BIT02
+		"Battery 2 overcurrent discharge", // BIT03
+		"Battery 2 overtemperature",       // BIT04
+		"Battery 2 undertemperature",      // BIT05
+		"Battery 2 communication fault",   // BIT06
+		"Battery 2 internal fault",        // BIT07
+		"", "", "", "", "", "", "", "",    // BIT08-15 reserved
+	},
 }
 
 // OP_STATUS_BIT_MAP maps bit positions in the Operating Status register (33121)
@@ -1557,79 +1169,4 @@ func DecodeFaultBits(addr uint16, value uint16) []string {
 	return faults
 }
 
-// ==========================================================================================================================================================
-// REGISTER FILTER
-// Helper for filtering registers by disabled keys from configuration
-// =============================================================================
-
-// RegisterFilter provides helper functions for filtering registers by disabled keys.
-// It uses a map for O(1) lookup performance.
-type RegisterFilter struct {
-	// disabledSet is a map of disabled register keys for O(1) lookup
-	disabledSet map[string]bool
-}
-
-// NewRegisterFilter creates a new RegisterFilter with the given disabled keys.
-// If disabledKeys is nil or empty, all registers are considered enabled.
-func NewRegisterFilter(disabledKeys []string) *RegisterFilter {
-	disabledSet := make(map[string]bool, len(disabledKeys))
-	for _, k := range disabledKeys {
-		disabledSet[k] = true
-	}
-	return &RegisterFilter{disabledSet: disabledSet}
-}
-
-// IsEnabled returns true if the register key is not disabled.
-// Returns true if the filter has no disabled keys or if the key is not in the disabled set.
-func (rf *RegisterFilter) IsEnabled(key string) bool {
-	if rf == nil {
-		return true
-	}
-	return !rf.disabledSet[key]
-}
-
-// FilterRegisters returns a slice of registers with disabled keys removed.
-func (rf *RegisterFilter) FilterRegisters(registers []Register) []Register {
-	if rf == nil {
-		return registers
-	}
-	result := make([]Register, 0, len(registers))
-	for _, reg := range registers {
-		if rf.IsEnabled(reg.Key) {
-			result = append(result, reg)
-		}
-	}
-	return result
-}
-
-// FilterMapByKey returns a filtered copy of RegisterMapByKey with disabled keys removed.
-func (rf *RegisterFilter) FilterMapByKey() map[string]*Register {
-	if rf == nil {
-		return RegisterMapByKey
-	}
-	result := make(map[string]*Register)
-	for k, reg := range RegisterMapByKey {
-		if rf.IsEnabled(k) {
-			result[k] = reg
-		}
-	}
-	return result
-}
-
-// FilterKeys returns all register keys with disabled keys removed.
-func (rf *RegisterFilter) FilterKeys() []string {
-	if rf == nil {
-		keys := make([]string, 0, len(RegisterMapByKey))
-		for k := range RegisterMapByKey {
-			keys = append(keys, k)
-		}
-		return keys
-	}
-	keys := make([]string, 0, len(RegisterMapByKey))
-	for k := range RegisterMapByKey {
-		if rf.IsEnabled(k) {
-			keys = append(keys, k)
-		}
-	}
-	return keys
-}
+// Register filtering removed per v2 plan - all registers are always enabled

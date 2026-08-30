@@ -6,6 +6,7 @@ import { DatePickerWithRange } from '../components/ui/date-picker-range';
 import { Button } from '../components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { useHistory } from '../lib/hooks/useHistory';
+import { useMobile } from '../hooks/useMobile';
 import { getDateRangeForPeriod } from '../lib/utils/date';
 import { historyDataGroups } from '../lib/config/groups';
 import { Menu, RefreshCw } from 'lucide-react';
@@ -13,6 +14,8 @@ import type { Period } from '../types';
 import type { DateRange } from 'react-day-picker';
 
 export function History(): React.ReactElement {
+  const isMobile = useMobile();
+
   // Initialize with proper date range for daily period
   const initialRange = getDateRangeForPeriod('daily');
   const [period, setPeriod] = useState<Period>('daily');
@@ -121,9 +124,9 @@ export function History(): React.ReactElement {
       <div className="w-full overflow-x-hidden">
         <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 mb-4 sm:mb-6 px-2 overflow-x-hidden">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <h1 className="hidden md:block text-xl sm:text-2xl font-bold">History</h1>
-            {/* Desktop refresh button - top right */}
-            <div className="hidden sm:flex">
+            {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold">History</h1> : null}
+            {/* Desktop refresh button - top right, only on lg+ screens */}
+            <div className="hidden lg:flex">
                 <Button 
                   variant="ghost"
                   size="icon"
@@ -155,7 +158,7 @@ export function History(): React.ReactElement {
                 >
                   <RefreshCw className="h-4 w-4" />
                 </Button>
-                <SheetContent side="left" className="p-0 w-full max-w-xs max-w-[100vw]">
+                <SheetContent side="left" className="p-0 w-full max-w-xs max-w-[100vw] h-full">
                   <SheetHeader className="p-4 pb-2 border-b border-border">
                     <SheetTitle>History Filters</SheetTitle>
                   </SheetHeader>

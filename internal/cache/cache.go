@@ -162,6 +162,34 @@ func (c *Cache) Set(values map[string]*solis.Value) {
 	}
 }
 
+// Merge updates the cache with new values by merging them into the existing cache.
+// This is different from Set() which replaces the entire cache.
+// Use this when multiple sources (poller and aggregator) need to update the cache independently.
+func (c *Cache) Merge(values map[string]*solis.Value) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Merge new values into existing cache
+	for key, value := range values {
+		c.data[key] = value
+	}
+	c.lastUpdate = time.Now()
+
+	logger.Debug().Msgf("Cache merged with %d values", len(values))
+
+	// Notify WebSocket clients if hub is configured and has clients
+	// Use throttling to prevent unbounded goroutine creation
+	if c.wsHub != nil && c.wsHub.ClientCount() > 0 {
+		select {
+		case c.notifyChan <- struct{}{}:
+			go c.notifyWebSocketClients()
+		default:
+			// A notification is already in progress, skip this one
+			logger.Debug().Msg("Skipping WebSocket notification - previous notification still in progress")
+		}
+	}
+}
+
 // notifyWebSocketClients broadcasts the current cache state to all connected WebSocket clients.
 func (c *Cache) notifyWebSocketClients() {
 	// Release the notification slot when we're done

@@ -28,24 +28,21 @@ export function DataCard({ group, className = '' }: DataCardProps): React.ReactE
     return <SkeletonCard className={`w-full ${className}`} />;
   }
 
-  // Determine grid columns based on layout
-  const gridCols = group.layout === 'grid' && group.columns ? group.columns : 1;
-  
-  // Use responsive grid classes for 4 columns, otherwise use static
-  const gridClass = group.layout === 'grid' && gridCols === 4
-    ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4'
-    : group.layout === 'grid' 
-      ? `grid-cols-${gridCols}`
-      : 'grid-cols-1';
+  // Use auto-fit grid for dynamic column count with min width
+  // For grid layout, use responsive columns: 1-2-3-4 based on screen width
+  // 1 col: <640px, 2 cols: 640-999px, 3 cols: 1000-1899px, 4 cols: 1900px+ (custom CSS class)
+  const gridClass = group.layout === 'grid'
+    ? 'grid-cols-4-custom'
+    : 'grid-cols-1';
 
   // For status groups, use StatusDisplay component
   const isStatusGroup = group.category === 'status';
 
   return (
-    <Card className={`w-full ${className}`}>
+    <Card className={`w-full min-w-0 ${className}`}>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <CardTitle className="text-lg">{group.title}</CardTitle>
+          <CardTitle className="text-base sm:text-lg">{group.title}</CardTitle>
           {showTooltips && group.description && (
             <Popover>
               <PopoverTrigger asChild>

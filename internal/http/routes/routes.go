@@ -7,21 +7,17 @@ import (
 	"path/filepath"
 	"strings"
 
-	_ "github.com/dombyte/solis/docs"
 	"github.com/dombyte/solis/internal/http/handlers"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/websocket"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
 
 // HandlerDeps contains dependencies for HTTP handlers.
 type HandlerDeps struct {
 	// Service is the service layer for business logic.
 	Service *service.ReadService
-	// MetricsEnabled indicates whether Prometheus metrics are enabled.
-	MetricsEnabled bool
 	// WebSocketHub is the WebSocket hub for real-time updates.
 	WebSocketHub *websocket.Hub
 }
@@ -96,6 +92,15 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 		Service: deps.Service, // *service.ReadService implements handlers.ReadServiceInterface
 	}
 
+	// Serve static files from docs/dist directory
+	docsDist := "./docs/dist"
+	if _, err := os.Stat(docsDist); err == nil {
+		// Serve Swagger UI and documentation files
+		// Redirect /docs to /docs/ for consistency
+		r.Handle("/docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
+		r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir(docsDist))))
+	}
+
 	// WebSocket endpoint for real-time updates
 	if deps.WebSocketHub != nil {
 		r.Handle("/ws", websocket.Handler(deps.WebSocketHub))
@@ -105,23 +110,6 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 	// Health check endpoint
 	r.Get("/health", handlers.GetHealthHandler(handlerDeps))
 
-	// Prometheus metrics endpoint (only if enabled in config)
-	if deps.MetricsEnabled {
-		r.Get("/metrics", handlers.GetMetricsHandler(handlerDeps))
-	}
-
-	// Swagger UI at /docs
-	// The http-swagger handler serves the UI and JSON automatically
-	// It reads the registered docs from the swag library
-	// Redirect /docs to /docs/ for proper handler matching
-	r.Get("/docs", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/docs/", http.StatusMovedPermanently)
-	})
-	// Mount the Swagger handler at /docs/ to ensure the prefix is set correctly
-	r.HandleFunc("/docs/*", httpSwagger.Handler(
-		httpSwagger.URL("doc.json"),
-	))
-
 	// New API endpoints at /api/
 	r.Route("/api", func(r chi.Router) {
 
@@ -130,18 +118,6 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 
 		// Data for specific register key - supports historical queries with start/end
 		r.Get("/data/{key}", handlers.GetDataHandler(handlerDeps))
-
-		// History endpoints for aggregated data
-		r.Route("/history", func(r chi.Router) {
-			// Daily history
-			r.Get("/daily/{key}", handlers.GetDailyHandler(handlerDeps))
-			// Monthly history
-			r.Get("/monthly/{key}", handlers.GetMonthlyHandler(handlerDeps))
-			// Yearly history
-			r.Get("/yearly/{key}", handlers.GetYearlyHandler(handlerDeps))
-			// Total (lifetime) history
-			r.Get("/total/{key}", handlers.GetTotalHandler(handlerDeps))
-		})
 	})
 
 	// Frontend catch-all handler for client-side routing (SPA support)
@@ -156,7 +132,7 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 
 			// Check if this is a backend route that shouldn't serve index.html
 			path := r.URL.Path
-			backendPrefixes := []string{"/api/", "/docs", "/health", "/metrics", "/ws"}
+			backendPrefixes := []string{"/api/", "/health", "/ws", "/docs"}
 			for _, prefix := range backendPrefixes {
 				if strings.HasPrefix(path, prefix) {
 					w.WriteHeader(http.StatusNotFound)

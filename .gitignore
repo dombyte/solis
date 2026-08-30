@@ -40,3 +40,5 @@ frontend/.cache/
 config.yaml
 
 frontend/dev-dist/
+docs/dist/
+docs/node_modules/

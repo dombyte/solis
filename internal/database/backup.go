@@ -2,7 +2,9 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -33,17 +35,6 @@ type BackupInfo struct {
 	Filename  string
 	Timestamp time.Time
 	Size      int64
-	IsOnline  bool // Deprecated: all backups use the same format now
-	Version   int  // Deprecated: all backups are version 0 in simplified scheme
-}
-
-// DefaultBackupConfig returns a BackupConfig with sensible defaults.
-func DefaultBackupConfig() *BackupConfig {
-	return &BackupConfig{
-		Enabled:        true,
-		MaxBackups:     3,
-		BackupInterval: 24 * time.Hour,
-	}
 }
 
 // GenerateBackupFilename generates a backup filename with timestamp.
@@ -80,8 +71,6 @@ func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 
 	info := &BackupInfo{
 		Filename: filename,
-		Version:  0,     // All backups are version 0 in simplified scheme
-		IsOnline: false, // No distinction between online and migration backups
 	}
 
 	if t, err := time.Parse("20060102_150405", timestampStr); err == nil {
@@ -96,177 +85,141 @@ func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 // This matches the interface provided by modernc.org/sqlite driver connections.
 type backuper interface {
 	NewBackup(string) (*sqlite.Backup, error)
-	NewRestore(string) (*sqlite.Backup, error)
+}
+
+// calculateSHA256 calculates the SHA256 checksum of a file.
+func calculateSHA256(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file for checksum: %w", err)
+	}
+	defer file.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", fmt.Errorf("failed to read file for checksum: %w", err)
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 // createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API.
 // This provides better consistency and reliability compared to simple file copying.
+// It also verifies the backup integrity using SHA256 checksums.
 func createSQLiteBackup(sourcePath, destPath string) error {
-	// Open source database connection
-	srcDB, err := sql.Open("sqlite", sourcePath)
+	srcDB, err := openSourceDatabase(sourcePath)
 	if err != nil {
-		return fmt.Errorf("failed to open source database for backup: %w", err)
+		return err
 	}
 	defer srcDB.Close()
 
-	// Verify source database is accessible
-	if err := srcDB.Ping(); err != nil {
-		return fmt.Errorf("failed to ping source database: %w", err)
+	if err := ensureDestinationDirectory(destPath); err != nil {
+		return err
 	}
 
-	// Ensure parent directory exists for destination
+	conn, err := getDatabaseConnection(srcDB)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if err := performBackupCopy(conn, destPath); err != nil {
+		return err
+	}
+
+	if err := verifyBackupFile(destPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// openSourceDatabase opens the source database for backup
+func openSourceDatabase(sourcePath string) (*sql.DB, error) {
+	srcDB, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open source database for backup: %w", err)
+	}
+
+	if err := srcDB.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping source database: %w", err)
+	}
+
+	return srcDB, nil
+}
+
+// ensureDestinationDirectory ensures the destination directory exists
+func ensureDestinationDirectory(destPath string) error {
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
 		if err := os.MkdirAll(destDir, 0750); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Get a connection from the source database
-	conn, err := srcDB.Conn(context.Background())
+// getDatabaseConnection gets a connection from the database
+func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
+	conn, err := db.Conn(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to get database connection: %w", err)
+		return nil, fmt.Errorf("failed to get database connection: %w", err)
 	}
-	defer conn.Close()
+	return conn, nil
+}
 
-	// Use the raw connection to access SQLite backup functionality
-	err = conn.Raw(func(driverConn any) error {
-		// Type assert to get the backuper interface
+// performBackupCopy performs the actual backup copy using SQLite backup API
+func performBackupCopy(conn *sql.Conn, destPath string) error {
+	var backupErr error
+
+	conn.Raw(func(driverConn any) error {
 		bkp, err := driverConn.(backuper).NewBackup(destPath)
 		if err != nil {
-			return fmt.Errorf("failed to create backup object: %w", err)
+			backupErr = fmt.Errorf("failed to create backup object: %w", err)
+			return backupErr
 		}
 
-		// Copy all pages in one step (n = -1 means copy all remaining pages)
 		for more := true; more; {
 			more, err = bkp.Step(-1)
 			if err != nil {
-				return fmt.Errorf("failed during backup step: %w", err)
+				backupErr = fmt.Errorf("failed during backup step: %w", err)
+				return backupErr
 			}
 		}
 
-		// Finish the backup operation
 		if err := bkp.Finish(); err != nil {
-			return fmt.Errorf("failed to finish backup: %w", err)
+			backupErr = fmt.Errorf("failed to finish backup: %w", err)
+			return backupErr
 		}
 
 		return nil
 	})
 
-	if err != nil {
-		return fmt.Errorf("SQLite backup failed: %w", err)
+	if backupErr != nil {
+		return fmt.Errorf("SQLite backup failed: %w", backupErr)
 	}
 
-	// Verify the backup file was created and has content
+	return nil
+}
+
+// verifyBackupFile verifies the backup file exists, has content, and has a valid checksum
+func verifyBackupFile(destPath string) error {
+	backupChecksum, err := calculateSHA256(destPath)
+	if err != nil {
+		os.Remove(destPath)
+		return fmt.Errorf("failed to verify backup file: %w", err)
+	}
+
+	backupLogger.Debug().Msgf("Backup created with checksum: %s", backupChecksum)
+
 	backupInfo, err := os.Stat(destPath)
 	if err != nil {
 		return fmt.Errorf("backup file not found after creation: %w", err)
 	}
 
 	if backupInfo.Size() == 0 {
+		os.Remove(destPath)
 		return fmt.Errorf("backup file is empty")
-	}
-
-	return nil
-}
-
-// restoreSQLiteBackup restores a SQLite database from a backup file using the native SQLite restore API.
-// This provides better consistency and reliability compared to simple file copying.
-func restoreSQLiteBackup(sourcePath, destPath string) error {
-	// Ensure parent directory exists for destination
-	destDir := filepath.Dir(destPath)
-	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0750); err != nil {
-			return fmt.Errorf("failed to create destination directory: %w", err)
-		}
-	}
-
-	// Open destination database connection (this will create the file if it doesn't exist)
-	destDB, err := sql.Open("sqlite", destPath)
-	if err != nil {
-		return fmt.Errorf("failed to open destination database for restore: %w", err)
-	}
-	defer destDB.Close()
-
-	// Get a connection from the destination database
-	conn, err := destDB.Conn(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to get database connection: %w", err)
-	}
-	defer conn.Close()
-
-	// Use the raw connection to access SQLite restore functionality
-	err = conn.Raw(func(driverConn any) error {
-		// Type assert to get the backuper interface
-		rst, err := driverConn.(backuper).NewRestore(sourcePath)
-		if err != nil {
-			return fmt.Errorf("failed to create restore object: %w", err)
-		}
-
-		// Copy all pages in one step (n = -1 means copy all remaining pages)
-		for more := true; more; {
-			more, err = rst.Step(-1)
-			if err != nil {
-				return fmt.Errorf("failed during restore step: %w", err)
-			}
-		}
-
-		// Finish the restore operation
-		if err := rst.Finish(); err != nil {
-			return fmt.Errorf("failed to finish restore: %w", err)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("SQLite restore failed: %w", err)
-	}
-
-	// Verify the restored file exists and has content
-	destInfo, err := os.Stat(destPath)
-	if err != nil {
-		return fmt.Errorf("restored file not found: %w", err)
-	}
-
-	if destInfo.Size() == 0 {
-		return fmt.Errorf("restored file is empty")
-	}
-
-	return nil
-}
-
-// copyFile copies a file from src to dst using simple file copy.
-// This is kept as a fallback method if SQLite native backup fails.
-func copyFile(src, dst string) error {
-	source, err := os.Open(src) // #nosec G304
-	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
-	}
-	defer source.Close()
-
-	// Check if source file exists and get its info
-	sourceInfo, err := source.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to stat source file: %w", err)
-	}
-
-	// Create destination file
-	destination, err := os.Create(dst) // #nosec G304
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer destination.Close()
-
-	// Copy data
-	copied, err := io.Copy(destination, source)
-	if err != nil {
-		return fmt.Errorf("failed to copy file: %w", err)
-	}
-
-	// Verify size
-	if copied != sourceInfo.Size() {
-		return fmt.Errorf("incomplete copy: expected %d bytes, copied %d bytes", sourceInfo.Size(), copied)
 	}
 
 	return nil
@@ -303,65 +256,18 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 
 	// Create the backup using SQLite native backup API
 	if err := createSQLiteBackup(dbPath, backupPath); err != nil {
-		backupLogger.Warn().Msgf("SQLite native backup failed, falling back to file copy: %v", err)
-		// Fallback to file copy if SQLite backup fails
-		if err := copyFile(dbPath, backupPath); err != nil {
-			return "", fmt.Errorf("failed to create backup: %w", err)
-		}
+		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
 
-	// Verify backup file
+	// Get backup file info for logging
 	backupInfo, err := os.Stat(backupPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to verify backup file: %w", err)
-	}
-
-	if backupInfo.Size() == 0 {
-		return "", fmt.Errorf("backup file is empty")
+		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
 	backupLogger.Info().Msgf("Backup created successfully (file: %s, size: %d)", backupPath, backupInfo.Size())
 
 	return backupPath, nil
-}
-
-// RestoreBackup restores a database from a backup file.
-func RestoreBackup(backupPath string, targetPath string) error {
-	// Check if backup file exists
-	if _, err := os.Stat(backupPath); os.IsNotExist(err) {
-		return fmt.Errorf("backup file does not exist: %s", backupPath)
-	}
-
-	// Ensure target directory exists
-	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0750); err != nil {
-		return fmt.Errorf("failed to create target directory: %w", err)
-	}
-
-	backupLogger.Info().Msgf("Restoring backup (source: %s, target: %s)", backupPath, targetPath)
-
-	// Create the restore using SQLite native restore API
-	if err := restoreSQLiteBackup(backupPath, targetPath); err != nil {
-		backupLogger.Warn().Msgf("SQLite native restore failed, falling back to file copy: %v", err)
-		// Fallback to file copy if SQLite restore fails
-		if err := copyFile(backupPath, targetPath); err != nil {
-			return fmt.Errorf("failed to restore backup: %w", err)
-		}
-	}
-
-	// Verify restored file
-	targetInfo, err := os.Stat(targetPath)
-	if err != nil {
-		return fmt.Errorf("failed to verify restored file: %w", err)
-	}
-
-	if targetInfo.Size() == 0 {
-		return fmt.Errorf("restored file is empty")
-	}
-
-	backupLogger.Info().Msgf("Backup restored successfully (file: %s, size: %d)", targetPath, targetInfo.Size())
-
-	return nil
 }
 
 // ListBackups lists all backup files in the backups subdirectory of the database directory.

@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useWebSocket } from '../lib/hooks/useWebSocket';
+import { useMobile } from '../hooks/useMobile';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Clock, X } from 'lucide-react';
@@ -11,6 +12,8 @@ import { getSourceById, apiDataObjects } from '../lib/config/data';
 import type { RegisterValue, SolisStatusDecoded, FaultStatusDecoded } from '../types';
 
 export function Status(): React.ReactElement {
+  const isMobile = useMobile();
+
   // Use WebSocket connection (initialized at app level)
   // requestInitialData: true to fetch fresh data when page mounts
   useWebSocket({ autoConnect: false, requestInitialData: true });
@@ -21,7 +24,7 @@ export function Status(): React.ReactElement {
   // Get status register IDs from the system_status group, excluding inverter_temp
   const systemStatusGroup = dashboardGroups.find(g => g.id === 'system_status');
   // Fallback list in case dashboardGroups is not available
-  const fallbackStatusIds = ['solis_status', 'operating_status', 'grid_fault_status', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'];
+  const fallbackStatusIds = ['solis_status', 'operating_status', 'grid_fault_1', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'];
   const statusRegisterIds = systemStatusGroup?.dataIds.filter(id => id !== 'inverter_temp') || fallbackStatusIds;
   
   // Get register metadata for these IDs and add order from apiDataObjects
@@ -153,7 +156,7 @@ export function Status(): React.ReactElement {
     return (
       <div className="p-2 sm:p-4 md:p-6 lg:p-8 w-full overflow-x-hidden">
         <div className="w-full overflow-x-hidden">
-          <h1 className="hidden md:block text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status</h1>
+          {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status</h1> : null}
           <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
             {statusRegisterIds.map(id => (
               <SkeletonCard key={id} className="w-full" />
@@ -167,7 +170,7 @@ export function Status(): React.ReactElement {
   return (
     <div className="p-2 sm:p-4 md:p-6 lg:p-8 w-full overflow-x-hidden">
       <div className="w-full overflow-x-hidden">
-        <h1 className="hidden md:block text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status Overview</h1>
+        {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status Overview</h1> : null}
         
         {/* Status Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">

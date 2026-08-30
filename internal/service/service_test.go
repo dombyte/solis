@@ -342,8 +342,8 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 	// Insert test data for today_energy_fed_into_grid
 	timestamp := time.Now()
 	fedValues := map[string]*solis.Value{
-		"today_energy_fed_into_grid": {
-			Key:          "today_energy_fed_into_grid",
+		"grid_export_daily": {
+			Key:          "grid_export_daily",
 			Name:         "Today Energy Fed Into Grid",
 			RawValue:     150, // 15.0 kWh after scaling (0.1)
 			DecodedValue: 15.0,
@@ -361,8 +361,8 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 
 	// Insert test data for today_energy_imported_from_grid
 	importValues := map[string]*solis.Value{
-		"today_energy_imported_from_grid": {
-			Key:          "today_energy_imported_from_grid",
+		"grid_import_daily": {
+			Key:          "grid_import_daily",
 			Name:         "Today Energy Imported From Grid",
 			RawValue:     50, // 5.0 kWh after scaling (0.1)
 			DecodedValue: 5.0,
@@ -385,9 +385,9 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 	start := timestamp.Add(-24 * time.Hour)
 	end := timestamp.Add(24 * time.Hour)
 
-	result, err := service.GetDailyHistory("today_grid_energy", start, end)
+	result, err := service.GetDailyHistory("grid_energy_daily", start, end)
 	if err != nil {
-		t.Fatalf("GetDailyHistory for today_grid_energy error = %v", err)
+		t.Fatalf("GetDailyHistory for grid_energy_daily error = %v", err)
 	}
 
 	// Should return computed values: fed (15.0) - import (5.0) = 10.0
@@ -435,8 +435,8 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 	// Insert test data for total_energy_fed_into_grid
 	timestamp := time.Now()
 	fedValues := map[string]*solis.Value{
-		"total_energy_fed_into_grid": {
-			Key:          "total_energy_fed_into_grid",
+		"grid_export_total": {
+			Key:          "grid_export_total",
 			Name:         "Total Energy Fed Into Grid",
 			RawValue:     2000, // 2000 kWh (scale = 1)
 			DecodedValue: 2000.0,
@@ -454,8 +454,8 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 
 	// Insert test data for total_energy_imported_from_grid
 	importValues := map[string]*solis.Value{
-		"total_energy_imported_from_grid": {
-			Key:          "total_energy_imported_from_grid",
+		"grid_import_total": {
+			Key:          "grid_import_total",
 			Name:         "Total Energy Imported From Grid",
 			RawValue:     500, // 500 kWh (scale = 1)
 			DecodedValue: 500.0,
@@ -475,9 +475,9 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// Test getComputedTotalGridEnergy
-	result, err := service.GetTotalHistory("total_grid_energy")
+	result, err := service.GetTotalHistory("grid_energy_total")
 	if err != nil {
-		t.Fatalf("GetTotalHistory for total_grid_energy error = %v", err)
+		t.Fatalf("GetTotalHistory for grid_energy_total error = %v", err)
 	}
 
 	if result == nil {
@@ -523,8 +523,8 @@ func TestService_GetComputedMonthlyEnergy(t *testing.T) {
 	// Insert test daily data for today_energy_consumption
 	timestamp := time.Now()
 	values := map[string]*solis.Value{
-		"today_energy_consumption": {
-			Key:          "today_energy_consumption",
+		"energy_consumption_daily": {
+			Key:          "energy_consumption_daily",
 			Name:         "Today Energy Consumption",
 			RawValue:     100, // 10.0 kWh after scaling (0.1)
 			DecodedValue: 10.0,
@@ -547,9 +547,9 @@ func TestService_GetComputedMonthlyEnergy(t *testing.T) {
 	start := time.Date(timestamp.Year(), timestamp.Month(), 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(timestamp.Year(), timestamp.Month()+1, 0, 0, 0, 0, -1, time.UTC)
 
-	result, err := service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
+	result, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
 	if err != nil {
-		t.Fatalf("GetMonthlyHistory for energy_consumption_month_energy error = %v", err)
+		t.Fatalf("GetMonthlyHistory for energy_consumption_monthly error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -599,7 +599,7 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 		Value:    500.0, // This is the decoded value (already scaled)
 		RawValue: 500.0, // For scale=1 registers, RawValue equals Value
 	}
-	err = st.StoreMonthlyDataPoint("energy_fed_into_grid_month_energy", fedDp)
+	err = st.StoreMonthlyDataPoint("grid_export_monthly", fedDp)
 	if err != nil {
 		t.Fatalf("Failed to store fed monthly data: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 		Value:    200.0, // This is the decoded value (already scaled)
 		RawValue: 200.0, // For scale=1 registers, RawValue equals Value
 	}
-	err = st.StoreMonthlyDataPoint("energy_imported_from_grid_month_energy", importDp)
+	err = st.StoreMonthlyDataPoint("grid_import_monthly", importDp)
 	if err != nil {
 		t.Fatalf("Failed to store import monthly data: %v", err)
 	}
@@ -618,9 +618,9 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
 
-	result, err := service.GetMonthlyHistory("month_grid_energy", start, end)
+	result, err := service.GetMonthlyHistory("grid_energy_monthly", start, end)
 	if err != nil {
-		t.Fatalf("GetMonthlyHistory for month_grid_energy error = %v", err)
+		t.Fatalf("GetMonthlyHistory for grid_energy_monthly error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -666,8 +666,8 @@ func TestService_GetComputedYearlyEnergy(t *testing.T) {
 	// Insert test daily data for today_energy_consumption
 	timestamp := time.Now()
 	values := map[string]*solis.Value{
-		"today_energy_consumption": {
-			Key:          "today_energy_consumption",
+		"energy_consumption_daily": {
+			Key:          "energy_consumption_daily",
 			Name:         "Today Energy Consumption",
 			RawValue:     100, // 10.0 kWh after scaling (0.1)
 			DecodedValue: 10.0,
@@ -690,9 +690,9 @@ func TestService_GetComputedYearlyEnergy(t *testing.T) {
 	start := time.Date(timestamp.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(timestamp.Year(), time.December, 31, 23, 59, 59, 0, time.UTC)
 
-	result, err := service.GetYearlyHistory("energy_consumption_year_energy", start, end)
+	result, err := service.GetYearlyHistory("energy_consumption_yearly", start, end)
 	if err != nil {
-		t.Fatalf("GetYearlyHistory for energy_consumption_year_energy error = %v", err)
+		t.Fatalf("GetYearlyHistory for energy_consumption_yearly error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -740,7 +740,7 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 		Value:    3000.0, // This is the decoded value (already scaled)
 		RawValue: 3000.0, // For scale=1 registers, RawValue equals Value
 	}
-	err = st.StoreYearlyDataPoint("energy_fed_into_grid_year_energy", fedDp)
+	err = st.StoreYearlyDataPoint("grid_export_yearly", fedDp)
 	if err != nil {
 		t.Fatalf("Failed to store fed yearly data: %v", err)
 	}
@@ -750,7 +750,7 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 		Value:    1000.0, // This is the decoded value (already scaled)
 		RawValue: 1000.0, // For scale=1 registers, RawValue equals Value
 	}
-	err = st.StoreYearlyDataPoint("energy_imported_from_grid_year_energy", importDp)
+	err = st.StoreYearlyDataPoint("grid_import_yearly", importDp)
 	if err != nil {
 		t.Fatalf("Failed to store import yearly data: %v", err)
 	}
@@ -759,9 +759,9 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 	start := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, time.December, 31, 23, 59, 59, 0, time.UTC)
 
-	result, err := service.GetYearlyHistory("year_grid_energy", start, end)
+	result, err := service.GetYearlyHistory("grid_energy_yearly", start, end)
 	if err != nil {
-		t.Fatalf("GetYearlyHistory for year_grid_energy error = %v", err)
+		t.Fatalf("GetYearlyHistory for grid_energy_yearly error = %v", err)
 	}
 
 	if len(result) == 0 {
@@ -784,7 +784,7 @@ func TestService_ValidateRegisterType(t *testing.T) {
 	service := NewReadService(cfg, nil, nil, nil, nil, nil)
 
 	// Test with valid daily register
-	err := service.validateRegisterType("today_energy_consumption", solis.IsDailyRegister, "daily energy")
+	err := service.validateRegisterType("energy_consumption_daily", solis.IsDailyRegister, "daily energy")
 	if err != nil {
 		t.Errorf("validateRegisterType for valid daily register returned error: %v", err)
 	}
@@ -796,39 +796,39 @@ func TestService_ValidateRegisterType(t *testing.T) {
 	}
 
 	// Test with valid monthly register
-	err = service.validateRegisterType("pv_month_energy", solis.IsMonthlyRegister, "monthly energy")
+	err = service.validateRegisterType("pv_energy_monthly", solis.IsMonthlyRegister, "monthly energy")
 	if err != nil {
 		t.Errorf("validateRegisterType for valid monthly register returned error: %v", err)
 	}
 
 	// Test with valid yearly register
-	err = service.validateRegisterType("pv_year_energy", solis.IsYearlyRegister, "yearly energy")
+	err = service.validateRegisterType("pv_energy_yearly", solis.IsYearlyRegister, "yearly energy")
 	if err != nil {
 		t.Errorf("validateRegisterType for valid yearly register returned error: %v", err)
 	}
 
 	// Test with valid total register
-	err = service.validateRegisterType("pv_total_energy", solis.IsTotalRegister, "total energy")
+	err = service.validateRegisterType("pv_energy_total", solis.IsTotalRegister, "total energy")
 	if err != nil {
 		t.Errorf("validateRegisterType for valid total register returned error: %v", err)
 	}
 
 	// Test with computed net grid register (should be total)
-	err = service.validateRegisterType("total_grid_energy", solis.IsTotalRegister, "total energy")
+	err = service.validateRegisterType("grid_energy_total", solis.IsTotalRegister, "total energy")
 	if err != nil {
-		t.Errorf("validateRegisterType for total_grid_energy returned error: %v", err)
+		t.Errorf("validateRegisterType for grid_energy_total returned error: %v", err)
 	}
 
 	// Test with computed monthly net grid register (should be monthly)
-	err = service.validateRegisterType("month_grid_energy", solis.IsMonthlyRegister, "monthly energy")
+	err = service.validateRegisterType("grid_energy_monthly", solis.IsMonthlyRegister, "monthly energy")
 	if err != nil {
-		t.Errorf("validateRegisterType for month_grid_energy returned error: %v", err)
+		t.Errorf("validateRegisterType for grid_energy_monthly returned error: %v", err)
 	}
 
 	// Test with computed yearly net grid register (should be yearly)
-	err = service.validateRegisterType("year_grid_energy", solis.IsYearlyRegister, "yearly energy")
+	err = service.validateRegisterType("grid_energy_yearly", solis.IsYearlyRegister, "yearly energy")
 	if err != nil {
-		t.Errorf("validateRegisterType for year_grid_energy returned error: %v", err)
+		t.Errorf("validateRegisterType for grid_energy_yearly returned error: %v", err)
 	}
 }
 
@@ -872,7 +872,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "today_energy_consumption", dv.value, dv.raw,
+			dv.date, "energy_consumption_daily", dv.value, dv.raw,
 		)
 		if err != nil {
 			t.Fatalf("Failed to insert daily value: %v", err)
@@ -883,7 +883,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
 
-	monthly, err := service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
+	monthly, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
 	if err != nil {
 		t.Fatalf("GetMonthlyHistory for December error = %v", err)
 	}
@@ -941,7 +941,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "today_energy_consumption", dv.value, dv.raw,
+			dv.date, "energy_consumption_daily", dv.value, dv.raw,
 		)
 		if err != nil {
 			t.Fatalf("Failed to insert daily value: %v", err)
@@ -952,7 +952,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
 
-	yearly, err := service.GetYearlyHistory("energy_consumption_year_energy", start, end)
+	yearly, err := service.GetYearlyHistory("energy_consumption_yearly", start, end)
 	if err != nil {
 		t.Fatalf("GetYearlyHistory for 2024 error = %v", err)
 	}
@@ -995,7 +995,7 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 
 	service := NewReadService(cfg, nil, st, nil, nil, nil)
 
-	// First, store a higher value for year_grid_energy
+	// First, store a higher value for grid_energy_yearly
 	yearlyDp1 := &storage.YearlyDataPoint{
 		Year:     "2024",
 		Value:    1000.0,
@@ -1003,7 +1003,7 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 	}
 
 	// Store initial high value
-	err = st.StoreYearlyDataPoint("year_grid_energy", yearlyDp1)
+	err = st.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp1)
 	if err != nil {
 		t.Fatalf("Failed to store initial yearly grid energy: %v", err)
 	}
@@ -1015,14 +1015,14 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 		RawValue: 500.0,
 	}
 
-	// This should succeed because year_grid_energy is a net register
-	err = st.StoreYearlyDataPoint("year_grid_energy", yearlyDp2)
+	// This should succeed because grid_energy_yearly is a net register
+	err = st.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp2)
 	if err != nil {
 		t.Fatalf("Failed to store decreased yearly grid energy: %v", err)
 	}
 
 	// Verify the value was updated to the lower value
-	retrieved, err := service.GetYearlyHistory("year_grid_energy", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
+	retrieved, err := service.GetYearlyHistory("grid_energy_yearly", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("Failed to retrieve yearly grid energy: %v", err)
 	}
@@ -1077,7 +1077,7 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 	for _, dv := range fedValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "today_energy_fed_into_grid", dv.value, dv.raw,
+			dv.date, "grid_export_daily", dv.value, dv.raw,
 		)
 		if err != nil {
 			t.Fatalf("Failed to insert fed daily value: %v", err)
@@ -1088,9 +1088,9 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 2, 23, 59, 59, 0, time.UTC)
 
-	dailyGrid, err := service.GetDailyHistory("today_grid_energy", start, end)
+	dailyGrid, err := service.GetDailyHistory("grid_energy_daily", start, end)
 	if err != nil {
-		t.Fatalf("GetDailyHistory for today_grid_energy error = %v", err)
+		t.Fatalf("GetDailyHistory for grid_energy_daily error = %v", err)
 	}
 
 	if len(dailyGrid) == 0 {
@@ -1146,7 +1146,7 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 	for _, dv := range fedValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "today_energy_fed_into_grid", dv.value, dv.raw,
+			dv.date, "grid_export_daily", dv.value, dv.raw,
 		)
 		if err != nil {
 			t.Fatalf("Failed to insert fed daily value: %v", err)
@@ -1157,9 +1157,9 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
 
-	monthlyGrid, err := service.GetMonthlyHistory("month_grid_energy", start, end)
+	monthlyGrid, err := service.GetMonthlyHistory("grid_energy_monthly", start, end)
 	if err != nil {
-		t.Fatalf("GetMonthlyHistory for month_grid_energy error = %v", err)
+		t.Fatalf("GetMonthlyHistory for grid_energy_monthly error = %v", err)
 	}
 
 	if len(monthlyGrid) == 0 {
@@ -1214,7 +1214,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 	for _, dv := range dailyValues {
 		_, err := st.DB().Exec(
 			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "today_energy_consumption", dv.value, dv.raw,
+			dv.date, "energy_consumption_daily", dv.value, dv.raw,
 		)
 		if err != nil {
 			t.Fatalf("Failed to insert daily value: %v", err)
@@ -1225,7 +1225,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 2, 29, 23, 59, 59, 0, time.UTC)
 
-	monthly, err := service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
+	monthly, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
 	if err != nil {
 		t.Fatalf("GetMonthlyHistory for February 2024 error = %v", err)
 	}
@@ -1272,7 +1272,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) // end is before start
 
-	_, err = service.GetMonthlyHistory("energy_consumption_month_energy", start, end)
+	_, err = service.GetMonthlyHistory("energy_consumption_monthly", start, end)
 	if err == nil {
 		t.Error("Expected error for invalid date range (end before start), got nil")
 	} else {
@@ -1280,7 +1280,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 	}
 
 	// Test yearly with end before start
-	_, err = service.GetYearlyHistory("energy_consumption_year_energy", start, end)
+	_, err = service.GetYearlyHistory("energy_consumption_yearly", start, end)
 	if err == nil {
 		t.Error("Expected error for invalid yearly date range (end before start), got nil")
 	} else {
@@ -1289,7 +1289,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 
 	// Test daily with end before start - storage doesn't validate, just returns empty
 	// This is acceptable behavior
-	result, err := service.GetDailyHistory("today_energy_consumption", start, end)
+	result, err := service.GetDailyHistory("energy_consumption_daily", start, end)
 	if err != nil {
 		t.Logf("Daily history with invalid range returned error: %v", err)
 	} else if len(result) == 0 {

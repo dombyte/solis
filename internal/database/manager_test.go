@@ -2,12 +2,30 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
+
+// createTestDB creates a valid SQLite database file for testing
+func createTestDB(dbPath string) error {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// Create a simple table to make it a valid database
+	if _, err := db.Exec("CREATE TABLE IF NOT EXISTS test (id INTEGER)"); err != nil {
+		return err
+	}
+	return nil
+}
 
 func TestBackupFilenameForLegacyDatabase(t *testing.T) {
 	// Test that first run on legacy database creates migration backup (not online)
@@ -23,7 +41,7 @@ func TestBackupFilenameForLegacyDatabase(t *testing.T) {
 
 	// Create a database file (simulating existing legacy database)
 	dbPath := filepath.Join(tmpDir, "test.db")
-	if err := os.WriteFile(dbPath, []byte("legacy database"), 0644); err != nil {
+	if err := createTestDB(dbPath); err != nil {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
@@ -65,7 +83,7 @@ func TestBackupFilenameForMigration(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	if err := os.WriteFile(dbPath, []byte("database"), 0644); err != nil {
+	if err := createTestDB(dbPath); err != nil {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
@@ -105,7 +123,7 @@ func TestBackupFilenameConsistency(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	if err := os.WriteFile(dbPath, []byte("database"), 0644); err != nil {
+	if err := createTestDB(dbPath); err != nil {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
@@ -146,7 +164,7 @@ func TestBackupBeforeMigration(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	dbPath := filepath.Join(tmpDir, "test.db")
-	if err := os.WriteFile(dbPath, []byte("legacy database"), 0644); err != nil {
+	if err := createTestDB(dbPath); err != nil {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 
@@ -180,7 +198,7 @@ func TestStartPeriodicBackups(t *testing.T) {
 
 	// Create a database file
 	dbPath := filepath.Join(tmpDir, "test.db")
-	if err := os.WriteFile(dbPath, []byte("database"), 0644); err != nil {
+	if err := createTestDB(dbPath); err != nil {
 		t.Fatalf("Failed to create database file: %v", err)
 	}
 

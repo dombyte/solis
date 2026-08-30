@@ -24,10 +24,8 @@ type AppConfig struct {
 	Modbus ModbusSettings `mapstructure:"modbus"`
 	// Storage contains database settings.
 	Storage StorageSettings `mapstructure:"storage"`
-	// Metrics contains optional Prometheus settings.
-	Metrics MetricsSettings `mapstructure:"metrics"`
-	// Registers contains register-specific settings.
-	Registers RegistersSettings `mapstructure:"registers"`
+	// Aggregator contains background computation settings.
+	Aggregator AggregatorSettings `mapstructure:"aggregator"`
 }
 
 // AppSettings contains application-level configuration.
@@ -56,17 +54,14 @@ type PollerSettings struct {
 	BlockInterval time.Duration `mapstructure:"block_interval"`
 	// PollTimeout is the maximum duration for a full poll cycle before aborting.
 	PollTimeout time.Duration `mapstructure:"poll_timeout"`
-	// JitterMax is the maximum random delay added before each poll for RTU connections.
-	// This helps avoid collisions with other devices on the same RTU bus.
-	// Example: "500ms" for 0-500ms random delay.
-	JitterMax time.Duration `mapstructure:"jitter_max"`
 }
 
 // ModbusSettings contains Modbus connection configuration.
+// Only TCP is supported.
 type ModbusSettings struct {
-	// Type is the connection type: "tcp", "rtu", or "rtu_over_tcp".
+	// Type is the connection type: only "tcp" is supported.
 	Type string `mapstructure:"type"`
-	// Host is the Modbus server IP address or hostname (for TCP).
+	// Host is the Modbus server IP address or hostname.
 	Host string `mapstructure:"host"`
 	// Port is the Modbus server port (default: 502).
 	Port int `mapstructure:"port"`
@@ -74,16 +69,6 @@ type ModbusSettings struct {
 	Timeout time.Duration `mapstructure:"timeout"`
 	// UnitID is the Modbus unit/slave ID.
 	UnitID byte `mapstructure:"unit_id"`
-	// SerialPort is the serial port for RTU connections.
-	SerialPort string `mapstructure:"serial_port"`
-	// BaudRate is the baud rate for RTU connections.
-	BaudRate int `mapstructure:"baud_rate"`
-	// DataBits is the number of data bits for RTU connections.
-	DataBits int `mapstructure:"data_bits"`
-	// StopBits is the number of stop bits for RTU connections.
-	StopBits int `mapstructure:"stop_bits"`
-	// Parity is the parity setting for RTU connections: "none", "even", "odd".
-	Parity string `mapstructure:"parity"`
 }
 
 // StorageSettings contains SQLite database configuration.
@@ -116,19 +101,18 @@ type StorageSettings struct {
 	MaxBackups int `mapstructure:"max_backups"`
 	// BackupInterval is the interval for periodic online backups (e.g., "24h").
 	BackupInterval time.Duration `mapstructure:"backup_interval"`
+	// CleanupInterval is the interval for periodic retention cleanup (e.g., "24h").
+	// Default: 24h
+	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 }
 
-// MetricsSettings contains Prometheus metrics configuration.
-type MetricsSettings struct {
-	// Enabled enables the Prometheus metrics endpoint.
-	Enabled bool `mapstructure:"enabled"`
-}
-
-// RegistersSettings contains register-specific configuration.
-type RegistersSettings struct {
-	// DisabledKeys is a list of register keys to disable.
-	// Disabled registers will not be polled, stored, cached, or returned by the API.
-	DisabledKeys []string `mapstructure:"disabled_keys"`
+// AggregatorSettings contains configuration for the background aggregator service.
+type AggregatorSettings struct {
+	// Interval is the interval between computation cycles.
+	// This controls how often monthly/yearly/net values are recomputed.
+	// Example: "60s", "5m", "1h"
+	// Default: "60s"
+	Interval time.Duration `mapstructure:"interval"`
 }
 
 // setDefaults configures default values for Viper.
@@ -145,7 +129,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("poller.block_retry_delay", "1s")
 	v.SetDefault("poller.block_interval", "0s")
 	v.SetDefault("poller.poll_timeout", "30s")
-	v.SetDefault("poller.jitter_max", "500ms")
+
+	// Aggregator defaults
+	v.SetDefault("aggregator.interval", "60s")
 
 	// Modbus defaults
 	v.SetDefault("modbus.type", "tcp")
@@ -169,10 +155,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.enable_backup", true)
 	v.SetDefault("storage.max_backups", 3)
 	v.SetDefault("storage.backup_interval", "24h")
-
-	// Metrics and registers defaults
-	v.SetDefault("metrics.enabled", false)
-	v.SetDefault("registers.disabled_keys", []string{})
+	v.SetDefault("storage.cleanup_interval", "24h")
 }
 
 // LoadConfig loads configuration from a YAML file and environment variables.
@@ -215,83 +198,138 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 
 // validateConfig validates the loaded configuration values.
 func validateConfig(cfg *AppConfig) error {
-	// Validate Modbus settings
-	if cfg.Modbus.Type != "tcp" && cfg.Modbus.Type != "rtu" && cfg.Modbus.Type != "rtu_over_tcp" {
-		return fmt.Errorf("invalid modbus type: %s (must be tcp, rtu, or rtu_over_tcp)", cfg.Modbus.Type)
+	if err := validateModbusConfig(&cfg.Modbus); err != nil {
+		return err
 	}
-
-	if cfg.Modbus.Type == "tcp" || cfg.Modbus.Type == "rtu_over_tcp" {
-		if cfg.Modbus.Host == "" {
-			return fmt.Errorf("modbus host is required for tcp and rtu_over_tcp connections")
-		}
-		if cfg.Modbus.Port <= 0 || cfg.Modbus.Port > 65535 {
-			return fmt.Errorf("invalid modbus port: %d (must be 1-65535)", cfg.Modbus.Port)
-		}
+	if err := validateAppConfig(&cfg.App); err != nil {
+		return err
 	}
-
-	if cfg.Modbus.Type == "rtu" {
-		if cfg.Modbus.SerialPort == "" {
-			return fmt.Errorf("serial_port is required for rtu connections")
-		}
-		if cfg.Modbus.BaudRate <= 0 {
-			return fmt.Errorf("invalid baud rate: %d", cfg.Modbus.BaudRate)
-		}
+	if err := validatePollerConfig(&cfg.Poller); err != nil {
+		return err
 	}
-
-	// Validate App server settings
-	if cfg.App.Port <= 0 || cfg.App.Port > 65535 {
-		return fmt.Errorf("invalid server port: %d (must be 1-65535)", cfg.App.Port)
+	if err := validateStorageConfig(&cfg.Storage); err != nil {
+		return err
 	}
+	return nil
+}
 
-	// Validate Poller settings
-	if cfg.Poller.Interval <= 0 {
+// validateModbusConfig validates Modbus configuration
+func validateModbusConfig(cfg *ModbusSettings) error {
+	if cfg.Type != "tcp" {
+		return fmt.Errorf("invalid modbus type: %s (only tcp is supported)", cfg.Type)
+	}
+	if cfg.Host == "" {
+		return fmt.Errorf("modbus host is required for tcp connections")
+	}
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid modbus port: %d (must be 1-65535)", cfg.Port)
+	}
+	return nil
+}
+
+// validateAppConfig validates App configuration
+func validateAppConfig(cfg *AppSettings) error {
+	if cfg.Port <= 0 || cfg.Port > 65535 {
+		return fmt.Errorf("invalid server port: %d (must be 1-65535)", cfg.Port)
+	}
+	return nil
+}
+
+// validatePollerConfig validates Poller configuration
+func validatePollerConfig(cfg *PollerSettings) error {
+	if cfg.Interval <= 0 {
 		return fmt.Errorf("poller interval must be positive")
 	}
-	if cfg.Poller.BlockAttempts <= 0 {
+	if cfg.BlockAttempts <= 0 {
 		return fmt.Errorf("block_attempts must be at least 1")
 	}
-	if cfg.Poller.PollTimeout <= 0 {
+	if cfg.PollTimeout <= 0 {
 		return fmt.Errorf("poll_timeout must be positive")
 	}
+	return nil
+}
 
-	// Validate Storage settings - storage is always enabled
-	if cfg.Storage.Path == "" {
+// validateStorageConfig validates Storage configuration
+func validateStorageConfig(cfg *StorageSettings) error {
+	if err := validateStoragePath(cfg); err != nil {
+		return err
+	}
+	if err := validateStorageRetention(cfg); err != nil {
+		return err
+	}
+	logRetentionConfig(cfg)
+	if err := validateStorageSyncMode(cfg); err != nil {
+		return err
+	}
+	if err := validateStorageTempStore(cfg); err != nil {
+		return err
+	}
+	if err := validateStorageBackup(cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateStoragePath validates the storage path
+func validateStoragePath(cfg *StorageSettings) error {
+	if cfg.Path == "" {
 		return fmt.Errorf("storage path is required")
 	}
-	if cfg.Storage.DailyRetention <= 0 {
+	return nil
+}
+
+// validateStorageRetention validates retention settings
+func validateStorageRetention(cfg *StorageSettings) error {
+	if cfg.DailyRetention <= 0 {
 		return fmt.Errorf("daily_retention must be positive")
 	}
-	// Set defaults for monthly and yearly retention if not configured
-	if cfg.Storage.MonthlyRetention <= 0 {
-		cfg.Storage.MonthlyRetention = 365 * 24 * time.Hour
-		logger.Info().Msgf("Using default monthly_retention: %s", cfg.Storage.MonthlyRetention)
+	if cfg.MonthlyRetention <= 0 {
+		return fmt.Errorf("monthly_retention must be positive")
 	}
-	if cfg.Storage.YearlyRetention <= 0 {
-		cfg.Storage.YearlyRetention = 365 * 24 * time.Hour
-		logger.Info().Msgf("Using default yearly_retention: %s", cfg.Storage.YearlyRetention)
+	if cfg.YearlyRetention <= 0 {
+		return fmt.Errorf("yearly_retention must be positive")
 	}
-	if cfg.Storage.ErrorRetention <= 0 {
+	if cfg.ErrorRetention <= 0 {
 		return fmt.Errorf("error_retention must be positive")
 	}
+	if cfg.CleanupInterval <= 0 {
+		return fmt.Errorf("cleanup_interval must be positive")
+	}
+	return nil
+}
 
+// logRetentionConfig logs the retention configuration
+func logRetentionConfig(cfg *StorageSettings) {
+	logger.Info().Msgf("Retention configuration: daily=%s, monthly=%s, yearly=%s, error=%s, cleanup_interval=%s",
+		cfg.DailyRetention, cfg.MonthlyRetention,
+		cfg.YearlyRetention, cfg.ErrorRetention, cfg.CleanupInterval)
+}
+
+// validateStorageSyncMode validates the synchronous mode
+func validateStorageSyncMode(cfg *StorageSettings) error {
 	validSyncModes := map[string]bool{"OFF": true, "NORMAL": true, "FULL": true, "EXTRA": true}
-	if !validSyncModes[cfg.Storage.Synchronous] {
-		return fmt.Errorf("invalid synchronous mode: %s (must be OFF, NORMAL, FULL, or EXTRA)", cfg.Storage.Synchronous)
+	if !validSyncModes[cfg.Synchronous] {
+		return fmt.Errorf("invalid synchronous mode: %s (must be OFF, NORMAL, FULL, or EXTRA)", cfg.Synchronous)
 	}
+	return nil
+}
 
+// validateStorageTempStore validates the temp store setting
+func validateStorageTempStore(cfg *StorageSettings) error {
 	validTempStores := map[string]bool{"DEFAULT": true, "FILE": true, "MEMORY": true}
-	if !validTempStores[cfg.Storage.TempStore] {
-		return fmt.Errorf("invalid temp_store: %s (must be DEFAULT, FILE, or MEMORY)", cfg.Storage.TempStore)
+	if !validTempStores[cfg.TempStore] {
+		return fmt.Errorf("invalid temp_store: %s (must be DEFAULT, FILE, or MEMORY)", cfg.TempStore)
 	}
+	return nil
+}
 
-	// Validate database maintenance settings
-	if cfg.Storage.MaxBackups < 0 {
+// validateStorageBackup validates backup settings
+func validateStorageBackup(cfg *StorageSettings) error {
+	if cfg.MaxBackups < 0 {
 		return fmt.Errorf("max_backups must be >= 0")
 	}
-
-	if cfg.Storage.BackupInterval < 0 {
+	if cfg.BackupInterval < 0 {
 		return fmt.Errorf("backup_interval must be >= 0")
 	}
-
 	return nil
 }

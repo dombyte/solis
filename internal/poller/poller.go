@@ -1,11 +1,10 @@
-// Package poller provides a background polling service for reading Solis inverter
-// registers at regular intervals and storing the results.
+// Package poller provides a background service for reading Solis inverter registers
+// at regular intervals using a single Modbus TCP connection for sequential reads.
 package poller
 
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -20,11 +19,6 @@ import (
 // logger is the package-level logger for poller operations.
 var logger = logging.NewComponentLogger("poller")
 
-func init() {
-	// Seed random number generator for jitter
-	rand.Seed(time.Now().UnixNano())
-}
-
 // LastPollInfo contains information about the last completed poll cycle.
 type LastPollInfo struct {
 	Timestamp     time.Time
@@ -34,73 +28,37 @@ type LastPollInfo struct {
 }
 
 // Poller is the background service that polls the Solis inverter for register data.
+// It uses a single Modbus connection for sequential range reads.
 type Poller struct {
-	// config holds the poller configuration.
-	config *config.PollerSettings
-	// modbusClient is the Modbus client used for polling.
-	modbusClient *modbus.Client
-	// storage is the storage backend for persisting data.
+	config  *config.PollerSettings
+	modbus  *modbus.Client
 	storage *storage.Storage
-	// cache holds the latest register values for fast access.
-	cache *cache.Cache
-	// registerFilter holds the filter for disabled registers.
-	registerFilter *solis.RegisterFilter
-	// done is the channel used to signal the poller to stop.
-	done chan struct{}
-	// ctx is the context for the poller's lifetime.
-	ctx context.Context
-	// ctxCancel cancels the poller's context.
-	ctxCancel context.CancelFunc
-	// wg is used to wait for the polling goroutine to finish.
-	wg sync.WaitGroup
-	// isRunning tracks if the poller is currently running.
-	isRunning bool
-	// mu protects the running state.
-	mu sync.Mutex
-	// lastPollTime tracks when the last poll completed.
+	cache   *cache.Cache
+
+	// Lifecycle management
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	running bool
+	mu      sync.Mutex
+
+	// Stats
+	pollCount    int64
 	lastPollTime time.Time
-	// pollCount tracks the number of completed polls.
-	pollCount int64
-	// lastPollInfo stores the most recent poll metadata (replaces last_poll DB table).
 	lastPollInfo *LastPollInfo
-}
-
-// PollerOption is a function that configures a Poller.
-type PollerOption func(*Poller)
-
-// WithStorage sets the storage backend for the poller.
-func WithStorage(st *storage.Storage) PollerOption {
-	return func(p *Poller) {
-		p.storage = st
-	}
-}
-
-// WithCache sets the cache for the poller.
-func WithCache(ca *cache.Cache) PollerOption {
-	return func(p *Poller) {
-		p.cache = ca
-	}
-}
-
-// WithRegisterFilter sets the register filter for the poller.
-func WithRegisterFilter(rf *solis.RegisterFilter) PollerOption {
-	return func(p *Poller) {
-		p.registerFilter = rf
-	}
+	lastPollErr  error
 }
 
 // New creates a new Poller instance.
-func New(cfg *config.PollerSettings, modbusClient *modbus.Client, opts ...PollerOption) *Poller {
-	ctx, cancel := context.WithCancel(context.Background())
+func New(
+	cfg *config.PollerSettings,
+	modbusClient *modbus.Client,
+	opts ...Option,
+) *Poller {
 	p := &Poller{
-		config:       cfg,
-		modbusClient: modbusClient,
-		done:         make(chan struct{}),
-		ctx:          ctx,
-		ctxCancel:    cancel,
-		isRunning:    false,
-		lastPollTime: time.Time{},
-		pollCount:    0,
+		config:  cfg,
+		modbus:  modbusClient,
+		running: false,
 	}
 
 	for _, opt := range opts {
@@ -110,453 +68,257 @@ func New(cfg *config.PollerSettings, modbusClient *modbus.Client, opts ...Poller
 	return p
 }
 
+// Option is a function that configures a Poller.
+type Option func(*Poller)
+
+// WithStorage sets the storage backend for the poller.
+func WithStorage(st *storage.Storage) Option {
+	return func(p *Poller) {
+		p.storage = st
+	}
+}
+
+// WithCache sets the cache for the poller.
+func WithCache(ca *cache.Cache) Option {
+	return func(p *Poller) {
+		p.cache = ca
+	}
+}
+
 // Start starts the poller's background goroutine.
-func (p *Poller) Start() {
+func (p *Poller) Start() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.isRunning {
-		logger.Warn().Msg("Poller is already running")
-		return
+	if p.running {
+		return fmt.Errorf("poller is already running")
 	}
 
-	p.isRunning = true
+	p.ctx, p.cancel = context.WithCancel(context.Background())
+	p.running = true
 	p.wg.Add(1)
 
 	go p.run()
-	logger.Info().Msg("Poller started")
+
+	logger.Info().Msgf("Poller started (interval=%s, poll_timeout=%s)",
+		p.config.Interval, p.config.PollTimeout)
+
+	return nil
 }
 
 // Stop stops the poller's background goroutine.
-func (p *Poller) Stop() {
+func (p *Poller) Stop() error {
 	p.mu.Lock()
-	if !p.isRunning {
+	if !p.running {
 		p.mu.Unlock()
-		logger.Warn().Msg("Poller is not running")
-		return
+		return fmt.Errorf("poller is not running")
 	}
-	p.isRunning = false
+	p.running = false
 	p.mu.Unlock()
 
-	// Cancel the context to interrupt ongoing operations
-	p.ctxCancel()
-
-	close(p.done)
+	p.cancel()
 	p.wg.Wait()
 
 	logger.Info().Msg("Poller stopped")
+	return nil
 }
 
 // run is the main polling loop.
+// Implements non-overlapping poll intervals: if a poll takes 300ms and interval is 5s,
+// the next poll starts at 5s from the previous poll start, not immediately after completion.
 func (p *Poller) run() {
 	defer p.wg.Done()
 
-	// Initial delay before first poll
+	// Initial delay to let everything initialize
 	time.Sleep(1 * time.Second)
 
 	for {
 		select {
-		case <-p.done:
-			logger.Info().Msg("Poller received stop signal")
+		case <-p.ctx.Done():
+			logger.Info().Msg("Poll loop stopped: context cancelled")
 			return
 		default:
-			// Check if we should poll
-			p.mu.Lock()
-			isRunning := p.isRunning
-			p.mu.Unlock()
-
-			if !isRunning {
+			if !p.shouldContinue() {
 				return
 			}
 
-			// Recover from panics to keep poller running
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						logger.Error().Msgf("Poller recovered from panic: %v", r)
-					}
-				}()
+			// Calculate time until next poll for non-overlapping intervals
+			now := time.Now()
+			p.mu.Lock()
+			lastPollTime := p.lastPollTime
+			p.mu.Unlock()
 
-				// Calculate time until next poll
-				now := time.Now()
-				if !p.lastPollTime.IsZero() {
-					// Non-overlapping: next poll starts at max(interval, previous_poll_duration)
-					elapsed := now.Sub(p.lastPollTime)
-					if elapsed < p.config.Interval {
-						sleepTime := p.config.Interval - elapsed
-						logger.Debug().Msgf("Sleeping for %s until next poll", sleepTime)
-						select {
-						case <-p.ctx.Done():
-							return
-						case <-time.After(sleepTime):
-						}
-						return
-					}
-				}
-
-				// For RTU, add random jitter to avoid collision with other devices on the bus
-				if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.config.JitterMax > 0 {
-					jitter := time.Duration(rand.Int63n(int64(p.config.JitterMax))) // #nosec G404
-					logger.Debug().Msgf("Adding %s jitter before poll to avoid RTU bus collision", jitter)
+			if !lastPollTime.IsZero() {
+				elapsed := now.Sub(lastPollTime)
+				if elapsed < p.config.Interval {
+					sleepTime := p.config.Interval - elapsed
+					logger.Debug().Msgf("Sleeping for %s until next poll to maintain interval", sleepTime)
 					select {
 					case <-p.ctx.Done():
 						return
-					case <-time.After(jitter):
+					case <-time.After(sleepTime):
 					}
+					continue // Skip this iteration, check again
 				}
+			}
 
-				// Perform poll
-				pollStart := time.Now()
-				values, registersRead, err := p.pollOnce(pollStart)
-				pollDuration := time.Since(pollStart)
-
-				if err != nil {
-					logger.Error().Msgf("Poll failed: %v", err)
-					// Still update last poll time to prevent rapid retries
-					p.mu.Lock()
-					p.lastPollTime = time.Now()
-					p.mu.Unlock()
-					return
-				}
-
-				// Store values
-				if p.storage != nil {
-					if err := p.storage.StoreAllRegisters(values, pollStart); err != nil {
-						logger.Error().Msgf("Failed to store values: %v", err)
-					} else {
-						// Cleanup old daily data
-						if err := p.storage.CleanupDailyData(); err != nil {
-							logger.Error().Msgf("Failed to cleanup daily data: %v", err)
-						}
-
-						// Cleanup old error data
-						if err := p.storage.CleanupErrorData(); err != nil {
-							logger.Error().Msgf("Failed to cleanup error data: %v", err)
-						}
-
-						// Store poll info in memory (replaces last_poll DB table)
-						p.mu.Lock()
-						p.lastPollInfo = &LastPollInfo{
-							Timestamp:     time.Now(),
-							DurationMs:    pollDuration.Milliseconds(),
-							RegistersRead: registersRead,
-							ValuesStored:  len(values),
-						}
-						p.mu.Unlock()
-					}
-				}
-
-				// Update cache with latest values (non-blocking for reads) - always update cache
-				if p.cache != nil {
-					p.cache.Set(values)
-				}
-
-				// Update poll statistics
-				p.mu.Lock()
-				p.lastPollTime = time.Now()
-				p.pollCount++
-				count := p.pollCount
-				p.mu.Unlock()
-
-				logger.Info().Msgf("Poll %d completed in %s: read %d registers, stored %d values",
-					count, pollDuration, registersRead, len(values))
-				// For RTU, close connection after poll to allow other devices to use the serial port
-				if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && p.modbusClient.IsConnected() {
-					if err := p.modbusClient.Disconnect(); err != nil {
-						logger.Debug().Msgf("RTU disconnect after poll: %v", err)
-					} else {
-						logger.Debug().Msg("RTU connection closed after poll")
-					}
-				}
-			}()
+			p.executePollCycle()
 		}
 	}
 }
 
-// pollOnce performs a single poll cycle: reads all 4 ranges sequentially.
-// Returns the decoded values, total registers read, and any error.
-func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, error) {
-	logger.Debug().Msgf("Starting poll cycle at %s", startTime)
+// shouldContinue checks if the poller should continue running.
+func (p *Poller) shouldContinue() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.running
+}
 
-	// For RTU, ensure connection is open before polling
-	if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && !p.modbusClient.IsConnected() {
-		if err := p.modbusClient.Connect(context.Background()); err != nil {
-			return nil, 0, fmt.Errorf("failed to connect before poll: %w", err)
-		}
-		logger.Debug().Msg("RTU reconnected for poll")
+// executePollCycle executes a single poll cycle with panic recovery.
+func (p *Poller) executePollCycle() {
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error().Msgf("Poller recovered from panic: %v", r)
+			}
+		}()
+
+		p.performPollAndStore()
+	}()
+}
+
+// performPollAndStore performs a poll and stores the results.
+func (p *Poller) performPollAndStore() {
+	pollStart := time.Now()
+
+	// Use a context with timeout for the entire poll
+	pollCtx, pollCancel := context.WithTimeout(p.ctx, p.config.PollTimeout)
+	defer pollCancel()
+
+	values, registersRead, err := p.pollOnce(pollCtx, pollStart)
+	pollDuration := time.Since(pollStart)
+
+	if err != nil {
+		p.handlePollError(err, pollDuration)
+		return
 	}
 
-	// Track total registers read
+	// Filter out computed registers
+	rawValues := p.filterComputedRegisters(values)
+
+	// Store results
+	p.storePollResults(rawValues, pollStart, pollDuration, registersRead)
+
+	// Update cache
+	p.updateCache(rawValues)
+
+	// Update stats
+	p.updatePollStats(pollDuration, registersRead, len(values))
+}
+
+// handlePollError handles errors from poll operations.
+func (p *Poller) handlePollError(err error, pollDuration time.Duration) {
+	logger.Error().Msgf("Poll failed: %v", err)
+
+	p.mu.Lock()
+	p.lastPollErr = err
+	p.lastPollTime = time.Now()
+	p.mu.Unlock()
+
+	// Don't add extra sleep - the next poll will happen at the scheduled interval
+	// The modbus layer handles reconnection automatically
+}
+
+// filterComputedRegisters filters out computed registers from the results.
+func (p *Poller) filterComputedRegisters(values map[string]*solis.Value) map[string]*solis.Value {
+	rawValues := make(map[string]*solis.Value, len(values))
+	for key, value := range values {
+		if !solis.IsComputedRegister(key) {
+			rawValues[key] = value
+		}
+	}
+	return rawValues
+}
+
+// storePollResults stores poll results and updates poll info.
+func (p *Poller) storePollResults(rawValues map[string]*solis.Value, pollStart time.Time, pollDuration time.Duration, registersRead int) {
+	if p.storage != nil {
+		if err := p.storage.StoreAllRegisters(rawValues, pollStart); err != nil {
+			logger.Error().Msgf("Failed to store values: %v", err)
+			return
+		}
+
+		p.mu.Lock()
+		p.lastPollInfo = &LastPollInfo{
+			Timestamp:     time.Now(),
+			DurationMs:    pollDuration.Milliseconds(),
+			RegistersRead: registersRead,
+			ValuesStored:  len(rawValues),
+		}
+		p.mu.Unlock()
+	}
+}
+
+// updateCache updates the cache with the latest values.
+func (p *Poller) updateCache(rawValues map[string]*solis.Value) {
+	if p.cache != nil {
+		p.cache.Merge(rawValues)
+	}
+}
+
+// updatePollStats updates poll statistics.
+func (p *Poller) updatePollStats(pollDuration time.Duration, registersRead, valuesCount int) {
+	p.mu.Lock()
+	p.lastPollTime = time.Now()
+	p.pollCount++
+	count := p.pollCount
+	p.mu.Unlock()
+
+	logger.Info().Msgf("Poll %d completed in %s: read %d registers, stored %d values",
+		count, pollDuration, registersRead, valuesCount)
+}
+
+// pollOnce performs a single poll cycle: reads all ranges sequentially.
+// Uses a single Modbus connection for all reads.
+func (p *Poller) pollOnce(ctx context.Context, startTime time.Time) (map[string]*solis.Value, int, error) {
+	logger.Debug().Msgf("Starting poll cycle at %s", startTime)
+
+	if err := p.validateModbusConnection(); err != nil {
+		return nil, 0, err
+	}
+
+	values := make(map[string]*solis.Value, 120)
 	totalRegisters := 0
 
-	// Result map for all decoded values (pre-allocated for ~109 registers)
-	values := make(map[string]*solis.Value, 120)
-
-	// Create a context with timeout for the full poll, derived from poller's context
-	ctx, cancel := context.WithTimeout(p.ctx, p.config.PollTimeout)
-	defer cancel()
-
-	// Poll each range sequentially
+	// Read all ranges sequentially using the same connection
 	for i, rangeDef := range solis.ReadRanges {
+		if err := p.checkContextCancelled(ctx); err != nil {
+			return values, totalRegisters, err
+		}
+
+		if !p.modbus.IsConnected() {
+			return p.handleDisconnectionDuringPoll(i+1, values, totalRegisters)
+		}
+
 		logger.Debug().Msgf("Reading range %d: address=%d, count=%d",
 			i+1, rangeDef.StartAddr, rangeDef.Count)
 
-		// Retry logic for this block
-		var rawBytes []byte
-		var err error
-
-		for attempt := 0; attempt <= p.config.BlockAttempts; attempt++ {
-			if attempt > 0 {
-				// Wait before retry
-				logger.Warn().Msgf("Range %d read attempt %d/%d failed, retrying...",
-					i+1, attempt+1, p.config.BlockAttempts+1)
-				time.Sleep(p.config.BlockRetryDelay)
-			}
-
-			rawBytes, err = p.modbusClient.ReadRegisters(ctx, rangeDef.StartAddr, rangeDef.Count)
-			if err == nil {
-				break
-			}
-
-			logger.Warn().Msgf("Range %d read failed (attempt %d/%d): %v",
-				i+1, attempt+1, p.config.BlockAttempts+1, err)
-
-			if attempt >= p.config.BlockAttempts {
-				// All attempts exhausted
-				logger.Error().Msgf("Range %d failed after %d attempts: %v",
-					i+1, p.config.BlockAttempts+1, err)
-				// Return partial results if we have any
-				if len(values) > 0 {
-					return values, totalRegisters, fmt.Errorf("partial poll: range %d failed: %w", i+1, err)
-				}
-				return nil, totalRegisters, fmt.Errorf("poll failed at range %d: %w", i+1, err)
-			}
+		rawRegisters, err := p.readRangeWithRetry(ctx, rangeDef.StartAddr, rangeDef.Count)
+		if err != nil {
+			return p.handleRangeReadError(i+1, err, values, totalRegisters)
 		}
 
-		if rawBytes == nil {
+		if rawRegisters == nil {
 			logger.Error().Msgf("Range %d returned nil data", i+1)
 			continue
 		}
 
-		// Decode this range
-		rangeValues := solis.DecodeRange(rangeDef.StartAddr, rawBytes)
-		for key, value := range rangeValues {
-			// Create a new value with timestamp set
-			val := value
-			val.Timestamp = startTime
-			values[key] = &val
-		}
-
+		p.decodeRangeAndUpdateCount(rangeDef.StartAddr, rawRegisters, startTime, values)
 		totalRegisters += int(rangeDef.Count)
-		logger.Debug().Msgf("Decoded %d values from range %d", len(rangeValues), i+1)
 
-		// Wait between blocks if configured
 		if p.config.BlockInterval > 0 && i < len(solis.ReadRanges)-1 {
-			time.Sleep(p.config.BlockInterval)
-		}
-		// For RTU, add delay between ranges to prevent serial port overload
-		if p.modbusClient != nil && p.modbusClient.Config().Type == "rtu" && i < len(solis.ReadRanges)-1 {
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	// Apply battery current direction to battery_current and battery_power
-	// battery_current_direction: 1 = discharging (negative), 0 = charging (positive)
-	if dirVal, dirExists := values["battery_current_direction"]; dirExists {
-		// Determine sign based on direction
-		// 1 = discharging (negative), 0 = charging (positive)
-		sign := -1.0
-		if dirVal.RawValue == 0 {
-			sign = 1.0
-		}
-
-		// Apply sign to battery_current
-		if bcVal, bcExists := values["battery_current"]; bcExists {
-			bcVal.RawValue *= sign
-			bcVal.DecodedValue *= sign
-			logger.Debug().Msgf("Applied direction sign to battery_current: %.1f A", bcVal.DecodedValue)
-		}
-
-		// Apply sign to battery_power
-		if bpVal, bpExists := values["battery_power"]; bpExists {
-			bpVal.RawValue *= sign
-			bpVal.DecodedValue *= sign
-			logger.Debug().Msgf("Applied direction sign to battery_power: %.1f W", bpVal.DecodedValue)
-		}
-
-		// Remove battery_current_direction from values so it doesn't get saved
-		delete(values, "battery_current_direction")
-		logger.Debug().Msg("Removed battery_current_direction from values")
-	}
-
-	// Filter out disabled registers from the results
-	if p.registerFilter != nil {
-		for key := range values {
-			if !p.registerFilter.IsEnabled(key) {
-				delete(values, key)
-				logger.Debug().Msgf("Filtered out disabled register: %s", key)
-			}
-		}
-	}
-
-	// Compute net grid energy values
-	// total_grid_energy = total_energy_fed_into_grid - total_energy_imported_from_grid
-	if fedTotal, fedExists := values["total_energy_fed_into_grid"]; fedExists {
-		if importTotal, importExists := values["total_energy_imported_from_grid"]; importExists {
-			netTotalValue := *fedTotal
-			netTotalValue.RawValue = fedTotal.RawValue - importTotal.RawValue
-			netTotalValue.DecodedValue = fedTotal.DecodedValue - importTotal.DecodedValue
-			netTotalValue.Key = "total_grid_energy"
-			netTotalValue.Name = "Total Grid Energy (Net)"
-			netTotalValue.Unit = "kWh"
-			values["total_grid_energy"] = &netTotalValue
-			logger.Debug().Msgf("Computed total_grid_energy: %.1f kWh", netTotalValue.DecodedValue)
-		}
-	}
-
-	// today_grid_energy = today_energy_fed_into_grid - today_energy_imported_from_grid
-	if fedToday, fedExists := values["today_energy_fed_into_grid"]; fedExists {
-		if importToday, importExists := values["today_energy_imported_from_grid"]; importExists {
-			netTodayValue := *fedToday
-			netTodayValue.RawValue = fedToday.RawValue - importToday.RawValue
-			netTodayValue.DecodedValue = fedToday.DecodedValue - importToday.DecodedValue
-			netTodayValue.Key = "today_grid_energy"
-			netTodayValue.Name = "Today Grid Energy (Net)"
-			netTodayValue.Unit = "kWh"
-			values["today_grid_energy"] = &netTodayValue
-			logger.Debug().Msgf("Computed today_grid_energy: %.1f kWh", netTodayValue.DecodedValue)
-		}
-	}
-
-	// Compute monthly and yearly energy registers from daily storage
-	// Only compute if storage is available
-	if p.storage != nil {
-		// Get current date for month/year calculation
-		currentMonth := startTime.Format("2006-01")
-		currentYear := startTime.Format("2006")
-
-		// Define mappings from daily to monthly/yearly register keys
-		dailyToMonthly := map[string]string{
-			"today_energy_consumption":        "energy_consumption_month_energy",
-			"today_energy_fed_into_grid":      "energy_fed_into_grid_month_energy",
-			"today_energy_imported_from_grid": "energy_imported_from_grid_month_energy",
-			"today_battery_discharge_energy":  "battery_discharge_month_energy",
-			"today_battery_charge_energy":     "battery_charge_month_energy",
-		}
-
-		dailyToYearly := map[string]string{
-			"today_energy_consumption":        "energy_consumption_year_energy",
-			"today_energy_fed_into_grid":      "energy_fed_into_grid_year_energy",
-			"today_energy_imported_from_grid": "energy_imported_from_grid_year_energy",
-			"today_battery_discharge_energy":  "battery_discharge_year_energy",
-			"today_battery_charge_energy":     "battery_charge_year_energy",
-		}
-
-		// Compute monthly values from daily storage
-		for dailyKey, monthlyKey := range dailyToMonthly {
-			value, _, err := p.storage.GetMonthlySum(dailyKey, currentMonth)
-			if err != nil {
-				logger.Warn().Msgf("Failed to compute %s from daily storage: %v", monthlyKey, err)
-				continue
-			}
-
-			// Look up the register definition
-			reg, ok := solis.RegisterMapByKey[monthlyKey]
-			if !ok {
-				logger.Warn().Msgf("Register %s not found in RegisterMapByKey", monthlyKey)
-				continue
-			}
-
-			// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
-			// Since reg.Scale is 1 for these computed registers, RawValue should equal value
-			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
-			computedValue := &solis.Value{
-				Key:          monthlyKey,
-				Name:         reg.Name,
-				RawValue:     value, // Store the already-scaled value as RawValue
-				DecodedValue: value,
-				Unit:         reg.Unit,
-				Timestamp:    startTime,
-			}
-			values[monthlyKey] = computedValue
-			logger.Debug().Msgf("Computed %s: %.1f kWh", monthlyKey, value)
-		}
-
-		// Compute yearly values from daily storage
-		for dailyKey, yearlyKey := range dailyToYearly {
-			value, _, err := p.storage.GetYearlySum(dailyKey, currentYear)
-			if err != nil {
-				logger.Warn().Msgf("Failed to compute %s from daily storage: %v", yearlyKey, err)
-				continue
-			}
-
-			// Look up the register definition
-			reg, ok := solis.RegisterMapByKey[yearlyKey]
-			if !ok {
-				logger.Warn().Msgf("Register %s not found in RegisterMapByKey", yearlyKey)
-				continue
-			}
-
-			// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
-			// Since reg.Scale is 1 for these computed registers, RawValue should equal value
-			// This ensures that when stored, decodedValue = RawValue * Scale = value * 1 = value
-			computedValue := &solis.Value{
-				Key:          yearlyKey,
-				Name:         reg.Name,
-				RawValue:     value, // Store the already-scaled value as RawValue
-				DecodedValue: value,
-				Unit:         reg.Unit,
-				Timestamp:    startTime,
-			}
-			values[yearlyKey] = computedValue
-			logger.Debug().Msgf("Computed %s: %.1f kWh", yearlyKey, value)
-		}
-
-		// Compute net grid energy for monthly: month_grid_energy = energy_fed_into_grid_month_energy - energy_imported_from_grid_month_energy
-		if fedMonth, fedExists := values["energy_fed_into_grid_month_energy"]; fedExists {
-			if importMonth, importExists := values["energy_imported_from_grid_month_energy"]; importExists {
-				// Both values are already scaled (in kWh), so we can subtract directly
-				// For the net register with Scale=1, RawValue should equal DecodedValue
-				netValue := fedMonth.DecodedValue - importMonth.DecodedValue
-				reg, ok := solis.RegisterMapByKey["month_grid_energy"]
-				if !ok {
-					logger.Warn().Msg("Register month_grid_energy not found in RegisterMapByKey")
-				} else {
-					netMonthValue := &solis.Value{
-						Key:          "month_grid_energy",
-						Name:         reg.Name,
-						RawValue:     netValue, // Store already-scaled value as RawValue
-						DecodedValue: netValue,
-						Unit:         reg.Unit,
-						Timestamp:    startTime,
-					}
-					values["month_grid_energy"] = netMonthValue
-					logger.Debug().Msgf("Computed month_grid_energy: %.1f kWh", netMonthValue.DecodedValue)
-				}
-			}
-		}
-
-		// Compute net grid energy for yearly: year_grid_energy = energy_fed_into_grid_year_energy - energy_imported_from_grid_year_energy
-		if fedYear, fedExists := values["energy_fed_into_grid_year_energy"]; fedExists {
-			if importYear, importExists := values["energy_imported_from_grid_year_energy"]; importExists {
-				// Both values are already scaled (in kWh), so we can subtract directly
-				// For the net register with Scale=1, RawValue should equal DecodedValue
-				netValue := fedYear.DecodedValue - importYear.DecodedValue
-				reg, ok := solis.RegisterMapByKey["year_grid_energy"]
-				if !ok {
-					logger.Warn().Msg("Register year_grid_energy not found in RegisterMapByKey")
-				} else {
-					netYearValue := &solis.Value{
-						Key:          "year_grid_energy",
-						Name:         reg.Name,
-						RawValue:     netValue, // Store already-scaled value as RawValue
-						DecodedValue: netValue,
-						Unit:         reg.Unit,
-						Timestamp:    startTime,
-					}
-					values["year_grid_energy"] = netYearValue
-					logger.Debug().Msgf("Computed year_grid_energy: %.1f kWh", netYearValue.DecodedValue)
-				}
+			if err := p.waitForBlockInterval(ctx); err != nil {
+				return values, totalRegisters, err
 			}
 		}
 	}
@@ -567,24 +329,177 @@ func (p *Poller) pollOnce(startTime time.Time) (map[string]*solis.Value, int, er
 	return values, totalRegisters, nil
 }
 
+// validateModbusConnection checks if the modbus client is ready for polling.
+func (p *Poller) validateModbusConnection() error {
+	if p.modbus == nil {
+		return fmt.Errorf("modbus client is nil")
+	}
+	if !p.modbus.IsConnected() {
+		logger.Warn().Msg("Skipping poll: modbus client is not connected")
+		return fmt.Errorf("modbus not connected")
+	}
+	return nil
+}
+
+// checkContextCancelled checks if the context has been cancelled.
+func (p *Poller) checkContextCancelled(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// handleDisconnectionDuringPoll handles disconnection detected during poll.
+func (p *Poller) handleDisconnectionDuringPoll(rangeIndex int, values map[string]*solis.Value, totalRegisters int) (map[string]*solis.Value, int, error) {
+	logger.Warn().Msgf("Skipping range %d: modbus disconnected during poll", rangeIndex)
+	return values, totalRegisters, fmt.Errorf("modbus disconnected during poll")
+}
+
+// handleRangeReadError handles errors from range read operations.
+func (p *Poller) handleRangeReadError(rangeIndex int, err error, values map[string]*solis.Value, totalRegisters int) (map[string]*solis.Value, int, error) {
+	if len(values) > 0 {
+		return values, totalRegisters, fmt.Errorf("partial poll: range %d failed: %w", rangeIndex, err)
+	}
+	return nil, totalRegisters, fmt.Errorf("poll failed at range %d: %w", rangeIndex, err)
+}
+
+// decodeRangeAndUpdateCount decodes a range and updates the values map.
+func (p *Poller) decodeRangeAndUpdateCount(startAddr uint16, rawRegisters []uint16, startTime time.Time, values map[string]*solis.Value) {
+	p.decodeRange(startAddr, rawRegisters, startTime, values)
+}
+
+// waitForBlockInterval waits for the configured interval between block reads.
+func (p *Poller) waitForBlockInterval(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(p.config.BlockInterval):
+		return nil
+	}
+}
+
+// readRangeWithRetry reads a single range with retry logic.
+// It relies on the background reconnection loop to restore connectivity.
+func (p *Poller) readRangeWithRetry(ctx context.Context, startAddr, count uint16) ([]uint16, error) {
+	if p.modbus == nil {
+		return nil, fmt.Errorf("modbus client is nil")
+	}
+
+	var rawRegisters []uint16
+	var err error
+
+	for attempt := 0; attempt <= p.config.BlockAttempts; attempt++ {
+		if attempt > 0 {
+			if err := p.checkContextCancelled(ctx); err != nil {
+				return nil, err
+			}
+
+			p.handleRetryAttempt(ctx, attempt, startAddr, count)
+
+			if err := p.waitForRetryDelay(ctx); err != nil {
+				return nil, err
+			}
+		}
+
+		rawRegisters, err = p.modbus.ReadRegisters(ctx, startAddr, count)
+		if err == nil {
+			return rawRegisters, nil
+		}
+
+		logger.Warn().Msgf("Range read failed (attempt %d/%d): %v",
+			attempt+1, p.config.BlockAttempts+1, err)
+	}
+
+	return p.handleFinalReadFailure(err)
+}
+
+// handleRetryAttempt handles logic for retry attempts after initial failure.
+func (p *Poller) handleRetryAttempt(ctx context.Context, attempt int, startAddr, count uint16) {
+	if !p.modbus.IsConnected() {
+		p.waitForReconnection(ctx)
+	} else {
+		logger.Warn().Msgf("Range read attempt %d/%d failed, retrying...",
+			attempt+1, p.config.BlockAttempts+1)
+	}
+}
+
+// waitForReconnection waits for the modbus connection to be restored.
+func (p *Poller) waitForReconnection(ctx context.Context) {
+	logger.Warn().Msg("Modbus disconnected, waiting for background reconnection...")
+
+	waitCtx, waitCancel := context.WithTimeout(ctx, p.config.PollTimeout/2)
+	if waitErr := p.modbus.WaitForConnection(waitCtx); waitErr != nil {
+		waitCancel()
+		logger.Warn().Msgf("Wait for connection failed: %v", waitErr)
+		if err := p.waitForRetryDelay(ctx); err != nil {
+			return
+		}
+	} else {
+		waitCancel()
+		logger.Info().Msg("Modbus reconnected, retrying read")
+	}
+}
+
+// waitForRetryDelay waits for the configured retry delay before next attempt.
+func (p *Poller) waitForRetryDelay(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(p.config.BlockRetryDelay):
+		return nil
+	}
+}
+
+// handleFinalReadFailure handles the final failure after all retry attempts.
+func (p *Poller) handleFinalReadFailure(err error) ([]uint16, error) {
+	logger.Error().Msgf("Range failed after %d attempts: %v",
+		p.config.BlockAttempts+1, err)
+	return nil, err
+}
+
+// decodeRange decodes a range of raw registers into values.
+func (p *Poller) decodeRange(startAddr uint16, rawRegisters []uint16, startTime time.Time, values map[string]*solis.Value) {
+	rangeValues := solis.DecodeRange(startAddr, rawRegisters)
+	for key, value := range rangeValues {
+		value.Timestamp = startTime
+		values[key] = &value
+	}
+	logger.Debug().Msgf("Decoded %d values from range", len(rangeValues))
+}
+
 // PollNow triggers an immediate poll and returns the results.
 // This can be called from HTTP handlers for direct reads.
 func (p *Poller) PollNow() (map[string]*solis.Value, error) {
 	logger.Info().Msg("Triggering immediate poll")
 
 	startTime := time.Now()
-	values, _, err := p.pollOnce(startTime)
+
+	// Use a generous timeout for immediate polls
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	values, _, err := p.pollOnce(ctx, startTime)
 	if err != nil {
 		return nil, fmt.Errorf("poll failed: %w", err)
 	}
 
+	// Filter out computed registers for immediate poll as well
+	rawValues := make(map[string]*solis.Value, len(values))
+	for key, value := range values {
+		if !solis.IsComputedRegister(key) {
+			rawValues[key] = value
+		}
+	}
+
 	// Update cache with latest values
 	if p.cache != nil {
-		p.cache.Set(values)
+		p.cache.Merge(rawValues)
 	}
 
 	logger.Info().Msgf("Immediate poll completed in %s: %d values",
-		time.Since(startTime), len(values))
+		time.Since(startTime), len(rawValues))
 
 	return values, nil
 }
@@ -593,11 +508,10 @@ func (p *Poller) PollNow() (map[string]*solis.Value, error) {
 func (p *Poller) IsRunning() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.isRunning
+	return p.running
 }
 
 // GetLastPollInfo returns information about the most recent completed poll.
-// Returns nil if no poll has completed yet.
 func (p *Poller) GetLastPollInfo() *LastPollInfo {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -605,4 +519,11 @@ func (p *Poller) GetLastPollInfo() *LastPollInfo {
 		return nil
 	}
 	return p.lastPollInfo
+}
+
+// GetLastPollError returns the error from the last poll, if any.
+func (p *Poller) GetLastPollError() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastPollErr
 }

@@ -1,9 +1,13 @@
 import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
 import { useWebSocket } from '../lib/hooks/useWebSocket';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
-import { useState, useEffect } from 'react';
+import { useServiceWorkerUpdate } from '../lib/hooks/useServiceWorkerUpdate';
+import { useMobile } from '../hooks/useMobile';
+import { useState, useEffect, useCallback } from 'react';
 
 export function Info() {
+  const isMobile = useMobile();
+
   // Get git commit hash from import.meta.env if available
   const commitHash = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
   const shortHash = typeof commitHash === 'string' ? commitHash.substring(0, 7) : 'dev';
@@ -12,10 +16,37 @@ export function Info() {
   const { isConnected } = useWebSocket({ autoConnect: false, requestInitialData: false });
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
 
+  // Service worker update check
+  const { hasUpdate, checkForUpdate, triggerUpdate } = useServiceWorkerUpdate();
+  const [checking, setChecking] = useState(false);
+  const [lastCheckTime, setLastCheckTime] = useState<number | null>(null);
+  const [checkStatus, setCheckStatus] = useState<'idle' | 'checking' | 'update-available' | 'up-to-date'>('idle');
+
   // State for licenses log
   const [licensesLog, setLicensesLog] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Manual update check handler
+  const handleCheckForUpdate = useCallback(async () => {
+    setChecking(true);
+    setCheckStatus('checking');
+    try {
+      await checkForUpdate();
+      // Small delay to allow state to propagate
+      await new Promise(resolve => setTimeout(resolve, 100));
+      setCheckStatus(hasUpdate ? 'update-available' : 'up-to-date');
+    } finally {
+      setChecking(false);
+      setLastCheckTime(Date.now());
+    }
+  }, [checkForUpdate, hasUpdate]);
+
+  // Trigger update and reload
+  const handleTriggerUpdate = useCallback(() => {
+    setCheckStatus('checking');
+    triggerUpdate();
+  }, [triggerUpdate]);
 
   // Fetch licenses.json as raw text
   useEffect(() => {
@@ -49,7 +80,7 @@ export function Info() {
   return (
     <div className="p-4 sm:p-6 md:p-8 w-full overflow-x-hidden">
       <div className="max-w-2xl mx-auto w-full">
-        <h1 className="hidden md:block text-2xl sm:text-3xl font-bold mb-6">About Solis Monitor</h1>
+        {!isMobile ? <h1 className="text-2xl sm:text-3xl font-bold mb-6">About Solis Monitor</h1> : null}
 
         <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
           <h2 className="text-lg font-semibold mb-4">About</h2>
@@ -102,10 +133,72 @@ export function Info() {
         </div>
 
         <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Version</h2>
-          <p className="text-muted-foreground">
-            <code className="bg-muted px-2 py-1 rounded">v{shortHash}</code>
-          </p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold mb-1">Version</h2>
+              <p className="text-muted-foreground">
+                <code className="bg-muted px-2 py-1 rounded">v{shortHash}</code>
+              </p>
+            </div>
+            {'serviceWorker' in navigator && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={handleCheckForUpdate}
+                  disabled={checking}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent text-sm rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${checking ? 'animate-pulse' : ''}`}
+                  title="Check for updates"
+                >
+                  <LineAwesomeIcon icon={checking ? 'la-spinner fa-spin' : 'la-sync-alt'} size="sm" />
+                  {checking ? 'Checking...' : 'Check Update'}
+                </button>
+                {hasUpdate && (
+                  <button
+                    onClick={handleTriggerUpdate}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm rounded-md transition-all duration-200"
+                    title="Apply update"
+                  >
+                    <LineAwesomeIcon icon="la-rocket" size="sm" />
+                    Apply Update
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          {lastCheckTime && (
+            <div className={`mt-3 p-3 rounded-lg transition-all duration-300 ${
+              checkStatus === 'update-available' ? 'bg-amber-500/10 border border-amber-500/20' :
+              checkStatus === 'up-to-date' ? 'bg-emerald-500/10 border border-emerald-500/20' :
+              'bg-muted/50'
+            }`}>
+              <p className={`text-sm flex items-center gap-2 ${
+                checkStatus === 'update-available' ? 'text-amber-500' :
+                checkStatus === 'up-to-date' ? 'text-emerald-500' :
+                'text-muted-foreground'
+              } ${checkStatus === 'checking' ? 'animate-pulse' : ''}`}>
+                {checkStatus === 'checking' && (
+                  <>
+                    <LineAwesomeIcon icon="la-spinner fa-spin" size="sm" />
+                    <span>Checking for updates...</span>
+                  </>
+                )}
+                {checkStatus === 'update-available' && (
+                  <>
+                    <LineAwesomeIcon icon="la-exclamation-circle" size="sm" />
+                    <span>Update available! Click "Apply Update" to install.</span>
+                  </>
+                )}
+                {checkStatus === 'up-to-date' && (
+                  <>
+                    <LineAwesomeIcon icon="la-check-circle" size="sm" />
+                    <span>Up to date - Last checked: {new Date(lastCheckTime).toLocaleTimeString()}</span>
+                  </>
+                )}
+                {checkStatus === 'idle' && lastCheckTime && (
+                  <span>Last checked: {new Date(lastCheckTime).toLocaleTimeString()}</span>
+                )}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Licenses Section - Log-style display */}

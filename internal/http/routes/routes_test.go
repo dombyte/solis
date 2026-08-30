@@ -136,28 +136,6 @@ func TestRouter_APIEndpoints(t *testing.T) {
 	// Router created with API endpoints registered
 }
 
-func TestRouter_SwaggerEndpoint(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	if router == nil {
-		t.Fatal("Router is nil")
-	}
-
-	// Test /api endpoint (should redirect to /api/)
-	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Should redirect
-	if w.Code != http.StatusMovedPermanently && w.Code != http.StatusFound {
-		t.Logf("Swagger endpoint returned status: %d", w.Code)
-	}
-}
-
 func TestRouter_CORSMiddleware(t *testing.T) {
 	deps := HandlerDeps{
 		Service: nil,

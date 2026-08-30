@@ -6,6 +6,13 @@ RUN npm install
 COPY frontend/ .
 RUN npm run build
 
+FROM node:26-alpine AS docs
+WORKDIR /docs
+COPY docs/package.json docs/package-lock.json ./
+RUN npm install
+COPY docs/ .
+RUN npm run build
+
 FROM alpine:latest AS builder
 RUN apk --update add ca-certificates tzdata
 
@@ -17,6 +24,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY $TARGETPLATFORM/solis /app
 COPY --from=frontend /frontend/dist /app/frontend/dist
+COPY --from=docs /docs/dist /app/docs/dist
 
 EXPOSE 8080
 ENTRYPOINT ["/app/solis"]

@@ -12,7 +12,9 @@ services:
     environment:
       - TZ=Europe/Berlin
     ports:
-      - "4174:8080"
+      # - "4174:8080"
+      - "8080:8080"
+      - "9090:9090"
     deploy:
       resources:
         limits:

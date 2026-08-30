@@ -27,68 +27,12 @@ func TestValidateConfig(t *testing.T) {
 					UnitID:  1,
 				},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
-
-					WalMode:     true,
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid RTU config",
-			config: &AppConfig{
-				App: AppSettings{Port: 8080, Timeout: 30 * time.Second, Debug: "INFO"},
-				Modbus: ModbusSettings{
-					Type:       "rtu",
-					SerialPort: "/dev/ttyUSB0",
-					BaudRate:   9600,
-					DataBits:   8,
-					StopBits:   1,
-					Parity:     "none",
-					Timeout:    5 * time.Second,
-					UnitID:     1,
-				},
-				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
-
-					WalMode:     true,
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid rtu_over_tcp config",
-			config: &AppConfig{
-				App: AppSettings{Port: 8080, Timeout: 30 * time.Second, Debug: "INFO"},
-				Modbus: ModbusSettings{
-					Type:    "rtu_over_tcp",
-					Host:    "192.168.1.100",
-					Port:    502,
-					Timeout: 5 * time.Second,
-					UnitID:  1,
-				},
-				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					WalMode:     true,
 					Synchronous: "NORMAL",
@@ -108,9 +52,12 @@ func TestValidateConfig(t *testing.T) {
 				Modbus: ModbusSettings{Type: "invalid"},
 				App:    AppSettings{Port: 8080},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -130,9 +77,12 @@ func TestValidateConfig(t *testing.T) {
 				Modbus: ModbusSettings{Type: "tcp", Port: 502},
 				App:    AppSettings{Port: 8080},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -152,9 +102,12 @@ func TestValidateConfig(t *testing.T) {
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 0},
 				App:    AppSettings{Port: 8080},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -174,9 +127,12 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 0},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -191,36 +147,17 @@ func TestValidateConfig(t *testing.T) {
 			errContains: "invalid server port",
 		},
 		{
-			name: "rtu without serial port",
-			config: &AppConfig{
-				Modbus: ModbusSettings{Type: "rtu", BaudRate: 9600},
-				App:    AppSettings{Port: 8080},
-				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "serial_port is required",
-		},
-		{
 			name: "invalid synchronous mode",
 			config: &AppConfig{
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "INVALID",
 					TempStore:   "MEMORY",
@@ -240,9 +177,12 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "INVALID",
@@ -262,9 +202,12 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -284,9 +227,12 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -306,9 +252,12 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "./data/solis.db",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
+					Path:             "./data/solis.db",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
 
 					Synchronous: "NORMAL",
 					TempStore:   "MEMORY",
@@ -328,11 +277,14 @@ func TestValidateConfig(t *testing.T) {
 				App:    AppSettings{Port: 8080},
 				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
 				Storage: StorageSettings{
-					Path:           "",
-					DailyRetention: 365 * 24 * time.Hour,
-					ErrorRetention: 30 * 24 * time.Hour,
-					Synchronous:    "NORMAL",
-					TempStore:      "MEMORY",
+					Path:             "",
+					DailyRetention:   365 * 24 * time.Hour,
+					MonthlyRetention: 365 * 24 * time.Hour,
+					YearlyRetention:  365 * 24 * time.Hour,
+					ErrorRetention:   30 * 24 * time.Hour,
+					CleanupInterval:  24 * time.Hour,
+					Synchronous:      "NORMAL",
+					TempStore:        "MEMORY",
 				},
 				Poller: PollerSettings{
 					Interval:      15 * time.Minute,
@@ -395,9 +347,6 @@ poller:
   block_retry_delay: 1s
   block_interval: 0s
   poll_timeout: 30s
-
-metrics:
-  enabled: false
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)
@@ -473,8 +422,6 @@ poller:
   block_retry_delay: 1s
   block_interval: 0s
   poll_timeout: 30s
-metrics:
-  enabled: false
 `
 
 	err := os.WriteFile(configPath, []byte(configContent), 0644)

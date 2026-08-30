@@ -78,7 +78,8 @@ export default defineConfig({
       },
       includeAssets: ["favicon.svg"],
       strategies: "generateSW",
-      injectRegister: "auto",
+      // Use manual registration with workbox-window
+      injectRegister: false,
       pwaAssets: {
         disabled: false,
         preset: "minimal-2023",
@@ -101,6 +102,8 @@ export default defineConfig({
           /\.\w+$/,
         ],
       },
+      // Enable workbox-window for better update control
+      selfDestroying: false,
     }),
   ],
   resolve: {
@@ -111,8 +114,8 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      "/api": { target: "http://192.168.2.225:8080", changeOrigin: true },
-      "/ws": { target: "ws://192.168.2.225:8080", ws: true },
+      "/api": { target: "http://localhost:8080", changeOrigin: true },
+      "/ws": { target: "ws://localhost:8080", ws: true },
     },
   },
   preview: {

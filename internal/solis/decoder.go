@@ -3,7 +3,6 @@
 package solis
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"math"
 	"time"
@@ -55,9 +54,10 @@ func (v Value) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aux)
 }
 
-// DecodeRegister decodes raw bytes from a register into a typed Value.
+// DecodeRegister decodes raw register values into a typed Value.
 // This is the main entry point for decoding individual register data.
-func DecodeRegister(reg *Register, raw []byte) Value {
+// raw contains the uint16 register values as returned directly from Modbus.
+func DecodeRegister(reg *Register, raw []uint16) Value {
 	rawVal := decodeRaw(reg.DataType, raw)
 	decoded := rawVal * reg.Scale
 
@@ -86,88 +86,126 @@ func DecodeRegister(reg *Register, raw []byte) Value {
 // Returns the decoded status information as either a map (for solis_status)
 // or a list of strings (for bitmask fault registers).
 func decodeStatus(reg *Register, rawValue uint16) interface{} {
-	switch reg.Key {
-	case "solis_status":
-		return DecodeSolisStatus(rawValue)
-	case "operating_status":
-		return DecodeOperatingStatus(rawValue)
-	case "grid_fault_status_01":
-		return DecodeGridFaultStatus01(rawValue)
-	case "backup_load_fault_status_02":
-		return DecodeBackupFaultStatus02(rawValue)
-	case "battery_fault_status_03":
-		return DecodeBatteryFaultStatus03(rawValue)
-	case "device_fault_status_04":
-		return DecodeDeviceFaultStatus04(rawValue)
-	case "device_fault_status_05":
-		return DecodeDeviceFaultStatus05(rawValue)
-	case "battery_fault_status_1_bms":
-		return DecodeBatteryFaultStatus1Bms(rawValue)
-	case "battery_fault_status_2_bms":
-		return DecodeBatteryFaultStatus2Bms(rawValue)
-	default:
-		// For unknown status registers, try generic fault decoding
-		return DecodeFaultBits(reg.Address, rawValue)
-	}
+	return decodeStatusByKey(reg.Key, reg.Address, rawValue)
 }
 
-// decodeRaw converts raw bytes to a float64 value based on the data type.
-// The raw bytes are in Modbus format (big-endian for multi-register values).
-func decodeRaw(dataType DataType, raw []byte) float64 {
+// decodeStatusByKey decodes status based on the register key
+func decodeStatusByKey(key string, address uint16, rawValue uint16) interface{} {
+	if handler, ok := statusDecoders[key]; ok {
+		return handler(rawValue)
+	}
+	return DecodeFaultBits(address, rawValue)
+}
+
+// statusDecoders maps status register keys to their decoding functions
+var statusDecoders = map[string]func(uint16) interface{}{
+	"solis_status":        decodeSolisStatusHandler,
+	"operating_status":    decodeOperatingStatusHandler,
+	"grid_fault_1":        decodeGridFault01Handler,
+	"backup_fault_2":      decodeBackupFault02Handler,
+	"battery_fault_3":     decodeBatteryFault03Handler,
+	"device_fault_4":      decodeDeviceFault04Handler,
+	"device_fault_5":      decodeDeviceFault05Handler,
+	"battery_fault_1_bms": decodeBatteryFault1BmsHandler,
+	"battery_fault_2_bms": decodeBatteryFault2BmsHandler,
+}
+
+// Handler wrappers for status decoding
+func decodeSolisStatusHandler(value uint16) interface{}     { return DecodeSolisStatus(value) }
+func decodeOperatingStatusHandler(value uint16) interface{} { return DecodeOperatingStatus(value) }
+func decodeGridFault01Handler(value uint16) interface{}     { return DecodeGridFaultStatus01(value) }
+func decodeBackupFault02Handler(value uint16) interface{}   { return DecodeBackupFaultStatus02(value) }
+func decodeBatteryFault03Handler(value uint16) interface{}  { return DecodeBatteryFaultStatus03(value) }
+func decodeDeviceFault04Handler(value uint16) interface{}   { return DecodeDeviceFaultStatus04(value) }
+func decodeDeviceFault05Handler(value uint16) interface{}   { return DecodeDeviceFaultStatus05(value) }
+func decodeBatteryFault1BmsHandler(value uint16) interface{} {
+	return DecodeBatteryFaultStatus1Bms(value)
+}
+func decodeBatteryFault2BmsHandler(value uint16) interface{} {
+	return DecodeBatteryFaultStatus2Bms(value)
+}
+
+// decodeRaw converts raw uint16 register values to a float64 value based on the data type.
+// The registers are in Modbus format (big-endian for multi-register values).
+// For multi-register types (Uint32, Int32, Float32), the first uint16 is the high word.
+func decodeRaw(dataType DataType, raw []uint16) float64 {
 	if len(raw) == 0 {
 		return 0
 	}
 
-	switch dataType {
-	case Uint16:
-		return float64(binary.BigEndian.Uint16(raw))
-	case Int16:
-		return float64(int16(binary.BigEndian.Uint16(raw))) // #nosec G115
-	case Uint32:
-		if len(raw) >= 4 {
-			return float64(binary.BigEndian.Uint32(raw))
-		}
-		return 0
-	case Int32:
-		if len(raw) >= 4 {
-			return float64(int32(binary.BigEndian.Uint32(raw))) // #nosec G115
-		}
-		return 0
-	case Float32:
-		if len(raw) >= 4 {
-			return float64(math.Float32frombits(binary.BigEndian.Uint32(raw)))
-		}
-		return 0
-	case String:
-		// For string type, return 0 and use DecodeString separately
-		return 0
-	case Bool:
-		if len(raw) >= 2 {
-			if binary.BigEndian.Uint16(raw) != 0 {
-				return 1
-			}
-			return 0
-		}
-		return 0
-	default:
+	// Get the decoder function for this data type
+	decoder, ok := rawDecoders[dataType]
+	if !ok {
 		return 0
 	}
+	return decoder(raw)
 }
 
-// DecodeString decodes a string register from raw bytes.
-// Each Uint16 in the raw bytes contains 2 ASCII characters (big-endian).
-// Example: raw = [0x41, 0x42, 0x43, 0x44] -> "ABCD"
-func DecodeString(raw []byte) string {
-	result := make([]byte, 0, len(raw))
+// rawDecoders maps data types to their decoding functions
+var rawDecoders = map[DataType]func([]uint16) float64{
+	Uint16:  decodeUint16,
+	Int16:   decodeInt16,
+	Uint32:  decodeUint32,
+	Int32:   decodeInt32,
+	Float32: decodeFloat32,
+	Bool:    decodeBool,
+}
 
-	for i := 0; i+1 < len(raw); i += 2 {
-		// Each Uint16 contains 2 ASCII characters
-		word := binary.BigEndian.Uint16(raw[i : i+2])
-		// Extract high and low bytes
+// decodeUint16 decodes a Uint16 value
+func decodeUint16(raw []uint16) float64 {
+	return float64(raw[0])
+}
+
+// decodeInt16 decodes an Int16 value
+func decodeInt16(raw []uint16) float64 {
+	return float64(int16(raw[0])) // #nosec G115
+}
+
+// decodeUint32 decodes a Uint32 value from two uint16 registers
+func decodeUint32(raw []uint16) float64 {
+	if len(raw) < 2 {
+		return 0
+	}
+	return float64(uint32(raw[0])<<16 | uint32(raw[1]))
+}
+
+// decodeInt32 decodes an Int32 value from two uint16 registers
+func decodeInt32(raw []uint16) float64 {
+	if len(raw) < 2 {
+		return 0
+	}
+	return float64(int32(uint32(raw[0])<<16 | uint32(raw[1]))) // #nosec G115
+}
+
+// decodeFloat32 decodes a Float32 value from two uint16 registers
+func decodeFloat32(raw []uint16) float64 {
+	if len(raw) < 2 {
+		return 0
+	}
+	bits := uint32(raw[0])<<16 | uint32(raw[1])
+	return float64(math.Float32frombits(bits))
+}
+
+// decodeBool decodes a Bool value
+func decodeBool(raw []uint16) float64 {
+	if len(raw) >= 1 && raw[0] != 0 {
+		return 1
+	}
+	return 0
+}
+
+// DecodeString decodes a string register from raw uint16 values.
+// Each uint16 contains 2 ASCII characters (high byte and low byte).
+// Example: raw = [0x4845, 0x4C4C, 0x4F20] -> "HELLO " -> "HELLO"
+func DecodeString(raw []uint16) string {
+	result := make([]byte, 0, len(raw)*2)
+
+	for _, word := range raw {
+		// Extract high and low bytes from each uint16
 		high := byte(word >> 8)
 		low := byte(word & 0xFF)
 
-		// Only include printable ASCII characters (32-126) and space (32)
+		// Only include printable ASCII characters (32-126)
 		if high >= 32 && high <= 126 {
 			result = append(result, high)
 		}
@@ -186,27 +224,26 @@ func DecodeString(raw []byte) string {
 
 // DecodeRange decodes all registers within a single read range.
 // startAddr is the starting address of the range.
-// raw is the raw bytes returned from Modbus (length = Count * 2).
+// raw contains the uint16 register values as returned directly from Modbus.
 // Returns a map of register keys to their decoded Values.
-func DecodeRange(startAddr uint16, raw []byte) map[string]Value {
-	decoderLogger.Debug().Msgf("Decoding range starting at address %d, %d bytes", startAddr, len(raw))
+func DecodeRange(startAddr uint16, raw []uint16) map[string]Value {
+	decoderLogger.Debug().Msgf("Decoding range starting at address %d, %d registers", startAddr, len(raw))
 
 	result := make(map[string]Value)
 
-	// Each register is 2 bytes (Uint16)
-	// We need to handle multi-register types (Uint32, Int32, Float32 take 2 registers = 4 bytes)
-
+	// Iterate through registers by index
+	// Each register in the raw slice corresponds to a Modbus address: raw[i] = startAddr + i
 	i := 0
 	for i < len(raw) {
-		addr := startAddr + uint16(i/2)
+		addr := startAddr + uint16(i)
 
 		// Check if there's a register defined at this address
 		if reg, ok := RegisterMap[addr]; ok {
-			// Calculate how many bytes we need to read for this register
-			byteCount := int(reg.Count) * 2
+			// Check if we have enough registers for this data type
+			regCount := int(reg.Count)
 
-			if i+byteCount <= len(raw) {
-				regRaw := raw[i : i+byteCount]
+			if i+regCount <= len(raw) {
+				regRaw := raw[i : i+regCount]
 
 				// Special handling for string type
 				if reg.DataType == String {
@@ -230,16 +267,16 @@ func DecodeRange(startAddr uint16, raw []byte) map[string]Value {
 				}
 
 				// Move past this register (and any additional registers it occupies)
-				i += byteCount
+				i += regCount
 				continue
 			} else {
-				decoderLogger.Warn().Msgf("Insufficient bytes for register %s at address %d (need %d, have %d)",
-					reg.Key, addr, byteCount, len(raw)-i)
+				decoderLogger.Warn().Msgf("Insufficient registers for %s at address %d (need %d, have %d)",
+					reg.Key, addr, regCount, len(raw)-i)
 			}
 		}
 
-		// No register defined at this address, skip 2 bytes (one Uint16)
-		i += 2
+		// No register defined at this address, skip 1 register (one Uint16)
+		i += 1
 	}
 
 	decoderLogger.Debug().Msgf("Decoded %d values from range %d", len(result), startAddr)

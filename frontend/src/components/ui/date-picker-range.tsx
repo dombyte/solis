@@ -9,6 +9,7 @@ import { Button } from "./button"
 import { Calendar } from "./calendar"
 import { Field, FieldLabel } from "./field"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
+import { useMobile } from "../../hooks/useMobile"
 import type { Period } from "../../types"
 
 export function DatePickerWithRange({
@@ -35,14 +36,11 @@ export function DatePickerWithRange({
   // Derived state for tempRange - initialized from date prop
   const [tempRange, setTempRange] = useState<DateRange | undefined>(date)
 
+  const isMobile = useMobile();
+
   useEffect(() => {
-    const handleResize = () => {
-      setNumberOfMonths(window.innerWidth >= 768 ? 2 : 1)
-    }
-    handleResize()
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
+    setNumberOfMonths(isMobile ? 1 : 2);
+  }, [isMobile])
 
   // Sync tempRange when popover opens - only update if date has changed since last open
   useEffect(() => {

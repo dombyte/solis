@@ -45,48 +45,52 @@ func TestDecodeRaw(t *testing.T) {
 	tests := []struct {
 		name     string
 		dataType DataType
-		raw      []byte
+		raw      []uint16
 		want     float64
 	}{
-		// Uint16 tests
-		{"Uint16 zero", Uint16, []byte{0x00, 0x00}, 0},
-		{"Uint16 one", Uint16, []byte{0x00, 0x01}, 1},
-		{"Uint16 max", Uint16, []byte{0xFF, 0xFF}, 65535},
-		{"Uint16 mid", Uint16, []byte{0x12, 0x34}, 0x1234},
+		// Uint16 tests - single register
+		{"Uint16 zero", Uint16, []uint16{0x0000}, 0},
+		{"Uint16 one", Uint16, []uint16{0x0001}, 1},
+		{"Uint16 max", Uint16, []uint16{0xFFFF}, 65535},
+		{"Uint16 mid", Uint16, []uint16{0x1234}, 0x1234},
 
-		// Int16 tests
-		{"Int16 zero", Int16, []byte{0x00, 0x00}, 0},
-		{"Int16 positive", Int16, []byte{0x00, 0x01}, 1},
-		{"Int16 negative", Int16, []byte{0xFF, 0xFF}, -1},
-		{"Int16 max positive", Int16, []byte{0x7F, 0xFF}, 32767},
-		{"Int16 min negative", Int16, []byte{0x80, 0x00}, -32768},
+		// Int16 tests - single register
+		{"Int16 zero", Int16, []uint16{0x0000}, 0},
+		{"Int16 positive", Int16, []uint16{0x0001}, 1},
+		{"Int16 negative", Int16, []uint16{0xFFFF}, -1},
+		{"Int16 max positive", Int16, []uint16{0x7FFF}, 32767},
+		{"Int16 min negative", Int16, []uint16{0x8000}, -32768},
 
-		// Uint32 tests
-		{"Uint32 zero", Uint32, []byte{0x00, 0x00, 0x00, 0x00}, 0},
-		{"Uint32 one", Uint32, []byte{0x00, 0x00, 0x00, 0x01}, 1},
-		{"Uint32 max", Uint32, []byte{0xFF, 0xFF, 0xFF, 0xFF}, 4294967295},
-		{"Uint32 mid", Uint32, []byte{0x12, 0x34, 0x56, 0x78}, 0x12345678},
+		// Uint32 tests - two registers (high word first)
+		{"Uint32 zero", Uint32, []uint16{0x0000, 0x0000}, 0},
+		{"Uint32 one", Uint32, []uint16{0x0000, 0x0001}, 1},
+		{"Uint32 max", Uint32, []uint16{0xFFFF, 0xFFFF}, 4294967295},
+		{"Uint32 mid", Uint32, []uint16{0x1234, 0x5678}, 0x12345678},
 
-		// Int32 tests
-		{"Int32 zero", Int32, []byte{0x00, 0x00, 0x00, 0x00}, 0},
-		{"Int32 positive", Int32, []byte{0x00, 0x00, 0x00, 0x01}, 1},
-		{"Int32 negative", Int32, []byte{0xFF, 0xFF, 0xFF, 0xFF}, -1},
-		{"Int32 max positive", Int32, []byte{0x7F, 0xFF, 0xFF, 0xFF}, 2147483647},
-		{"Int32 min negative", Int32, []byte{0x80, 0x00, 0x00, 0x00}, -2147483648},
+		// Int32 tests - two registers (high word first)
+		{"Int32 zero", Int32, []uint16{0x0000, 0x0000}, 0},
+		{"Int32 positive", Int32, []uint16{0x0000, 0x0001}, 1},
+		{"Int32 negative", Int32, []uint16{0xFFFF, 0xFFFF}, -1},
+		{"Int32 max positive", Int32, []uint16{0x7FFF, 0xFFFF}, 2147483647},
+		{"Int32 min negative", Int32, []uint16{0x8000, 0x0000}, -2147483648},
 
-		// Bool tests
-		{"Bool false", Bool, []byte{0x00, 0x00}, 0},
-		{"Bool true", Bool, []byte{0x00, 0x01}, 1},
-		{"Bool true non-zero", Bool, []byte{0xFF, 0xFF}, 1},
+		// Float32 tests - two registers (high word first)
+		// 1.5 in IEEE 754 float32 is 0x3FC00000
+		{"Float32 1.5", Float32, []uint16{0x3FC0, 0x0000}, 1.5},
+
+		// Bool tests - single register
+		{"Bool false", Bool, []uint16{0x0000}, 0},
+		{"Bool true", Bool, []uint16{0x0001}, 1},
+		{"Bool true non-zero", Bool, []uint16{0xFFFF}, 1},
 
 		// Empty raw
-		{"Empty raw", Uint16, []byte{}, 0},
-		{"Insufficient bytes Uint32", Uint32, []byte{0x00, 0x00}, 0},
-		{"Insufficient bytes Int32", Int32, []byte{0x00, 0x00}, 0},
-		{"Insufficient bytes Float32", Float32, []byte{0x00, 0x00}, 0},
+		{"Empty raw", Uint16, []uint16{}, 0},
+		{"Insufficient registers Uint32", Uint32, []uint16{0x0000}, 0},
+		{"Insufficient registers Int32", Int32, []uint16{0x0000}, 0},
+		{"Insufficient registers Float32", Float32, []uint16{0x0000}, 0},
 
 		// String type should return 0
-		{"String type", String, []byte{0x41, 0x42}, 0},
+		{"String type", String, []uint16{0x4142}, 0},
 	}
 
 	for _, tt := range tests {
@@ -102,17 +106,18 @@ func TestDecodeRaw(t *testing.T) {
 func TestDecodeString(t *testing.T) {
 	tests := []struct {
 		name string
-		raw  []byte
+		raw  []uint16
 		want string
 	}{
-		{"empty", []byte{}, ""},
-		{"single word", []byte{0x41, 0x42}, "AB"},
-		{"two words", []byte{0x41, 0x42, 0x43, 0x44}, "ABCD"},
-		{"with spaces", []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x57, 0x6F, 0x72, 0x6C, 0x64, 0x00}, "Hello World"},
-		{"trailing spaces", []byte{0x48, 0x65, 0x6C, 0x6C, 0x6F, 0x20, 0x20, 0x20}, "Hello"},
-		{"non-printable", []byte{0x00, 0x01, 0x1F, 0x7F}, ""},
-		{"mixed printable and non-printable", []byte{0x41, 0x00, 0x42, 0x1F}, "AB"},
-		{"numbers", []byte{0x30, 0x31, 0x32, 0x33}, "0123"},
+		{"empty", []uint16{}, ""},
+		// Each uint16 contains 2 ASCII characters
+		{"single word", []uint16{0x4142}, "AB"},
+		{"two words", []uint16{0x4142, 0x4344}, "ABCD"},
+		{"with spaces", []uint16{0x4865, 0x6C6C, 0x6F20, 0x576F, 0x726C, 0x6400}, "Hello World"},
+		{"trailing spaces", []uint16{0x4865, 0x6C6C, 0x6F20, 0x2020}, "Hello"},
+		{"non-printable", []uint16{0x0001, 0x1F7F}, ""},
+		{"mixed printable and non-printable", []uint16{0x4100, 0x421F}, "AB"},
+		{"numbers", []uint16{0x3031, 0x3233}, "0123"},
 	}
 
 	for _, tt := range tests {
@@ -137,7 +142,7 @@ func TestDecodeRegister(t *testing.T) {
 		Stability: Dynamic,
 	}
 
-	raw := []byte{0x00, 0x64} // 100 in Uint16
+	raw := []uint16{0x0064} // 100 in Uint16
 	got := DecodeRegister(reg, raw)
 
 	if got.Key != reg.Key {
@@ -177,7 +182,8 @@ func TestDecodeRegister_WithFloat32(t *testing.T) {
 
 	// Float32 representation of 1.5
 	// In IEEE 754: 1.5 = 0x3FC00000
-	raw := []byte{0x3F, 0xC0, 0x00, 0x00}
+	// Stored as two uint16 registers: high word first
+	raw := []uint16{0x3FC0, 0x0000}
 	got := DecodeRegister(reg, raw)
 
 	// Check that the value is approximately 1.5
@@ -220,7 +226,8 @@ func TestDecodeRange(t *testing.T) {
 	}()
 
 	// Create raw data: address 100=0x0100 (256), address 101=0x0000 (gap), address 102=0xFFFE (-2 in Int16)
-	raw := []byte{0x01, 0x00, 0x00, 0x00, 0xFF, 0xFE}
+	// Each uint16 in the slice represents one register
+	raw := []uint16{0x0100, 0x0000, 0xFFFE}
 
 	got := DecodeRange(100, raw)
 
@@ -271,7 +278,7 @@ func TestDecodeRange_WithString(t *testing.T) {
 	// Create raw data: "HELLO" in ASCII
 	// Each Uint16 holds 2 characters
 	// "HE" = 0x4845, "LL" = 0x4C4C, "O " = 0x4F20
-	raw := []byte{0x48, 0x45, 0x4C, 0x4C, 0x4F, 0x20, 0x00, 0x00, 0x00, 0x00}
+	raw := []uint16{0x4845, 0x4C4C, 0x4F20, 0x0000, 0x0000}
 
 	got := DecodeRange(1000, raw)
 
@@ -289,7 +296,7 @@ func TestDecodeRange_WithString(t *testing.T) {
 }
 
 func TestDecodeRange_EmptyRaw(t *testing.T) {
-	got := DecodeRange(100, []byte{})
+	got := DecodeRange(100, []uint16{})
 	if len(got) != 0 {
 		t.Errorf("DecodeRange with empty raw returned %d values, want 0", len(got))
 	}

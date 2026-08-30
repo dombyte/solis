@@ -64,66 +64,97 @@ func NewHub() *Hub {
 
 // Run starts the hub's main loop.
 func (h *Hub) Run() {
-	// Start a ticker for stale client cleanup
-	ticker := time.NewTicker(h.staleClientTimeout / 2)
+	ticker := h.setupTicker()
 	defer ticker.Stop()
 
 	for {
 		select {
 		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.lastActivity[client] = time.Now()
-			h.mu.Unlock()
-			logger.Debug().Msgf("Client registered, total clients: %d", len(h.clients))
-
+			h.handleRegister(client)
 		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				close(client.send)
-				delete(h.clients, client)
-				delete(h.lastActivity, client)
-			}
-			h.mu.Unlock()
-			logger.Debug().Msgf("Client unregistered, total clients: %d", len(h.clients))
-
+			h.handleUnregister(client)
 		case message := <-h.broadcast:
-			h.mu.RLock()
-			clients := make([]*Client, 0, len(h.clients))
-			for client := range h.clients {
-				clients = append(clients, client)
-			}
-			h.mu.RUnlock()
-
-			// Try to send to all clients
-			clientsWithFullBuffers := make([]*Client, 0)
-			for _, client := range clients {
-				select {
-				case client.send <- message:
-					// Update last activity on successful send
-					h.mu.Lock()
-					h.lastActivity[client] = time.Now()
-					h.mu.Unlock()
-				default:
-					// Client buffer full, mark for closing
-					clientsWithFullBuffers = append(clientsWithFullBuffers, client)
-					logger.Warn().Msg("Client buffer full, closing connection")
-				}
-			}
-
-			// Close clients with full buffers
-			for _, client := range clientsWithFullBuffers {
-				close(client.send)
-				h.mu.Lock()
-				delete(h.clients, client)
-				delete(h.lastActivity, client)
-				h.mu.Unlock()
-			}
-
+			h.handleBroadcast(message)
 		case <-ticker.C:
-			// Clean up stale clients
 			h.cleanupStaleClients()
 		}
+	}
+}
+
+// setupTicker sets up the cleanup ticker
+func (h *Hub) setupTicker() *time.Ticker {
+	return time.NewTicker(h.staleClientTimeout / 2)
+}
+
+// handleRegister handles a new client registration
+func (h *Hub) handleRegister(client *Client) {
+	h.mu.Lock()
+	h.clients[client] = true
+	h.lastActivity[client] = time.Now()
+	h.mu.Unlock()
+	logger.Debug().Msgf("Client registered, total clients: %d", len(h.clients))
+}
+
+// handleUnregister handles a client unregistration
+func (h *Hub) handleUnregister(client *Client) {
+	h.mu.Lock()
+	if _, ok := h.clients[client]; ok {
+		client.Close()
+		delete(h.clients, client)
+		delete(h.lastActivity, client)
+	}
+	h.mu.Unlock()
+	logger.Debug().Msgf("Client unregistered, total clients: %d", len(h.clients))
+}
+
+// handleBroadcast handles a broadcast message to all clients
+func (h *Hub) handleBroadcast(message []byte) {
+	clients := h.getAllClients()
+	clientsWithFullBuffers := h.trySendToAll(clients, message)
+	h.closeClientsWithFullBuffers(clientsWithFullBuffers)
+}
+
+// getAllClients returns a slice of all registered clients
+func (h *Hub) getAllClients() []*Client {
+	h.mu.RLock()
+	clients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		clients = append(clients, client)
+	}
+	h.mu.RUnlock()
+	return clients
+}
+
+// trySendToAll tries to send a message to all clients and returns clients with full buffers
+func (h *Hub) trySendToAll(clients []*Client, message []byte) []*Client {
+	clientsWithFullBuffers := make([]*Client, 0)
+	for _, client := range clients {
+		select {
+		case client.send <- message:
+			h.updateClientActivity(client)
+		default:
+			clientsWithFullBuffers = append(clientsWithFullBuffers, client)
+			logger.Warn().Msg("Client buffer full, closing connection")
+		}
+	}
+	return clientsWithFullBuffers
+}
+
+// updateClientActivity updates the last activity time for a client
+func (h *Hub) updateClientActivity(client *Client) {
+	h.mu.Lock()
+	h.lastActivity[client] = time.Now()
+	h.mu.Unlock()
+}
+
+// closeClientsWithFullBuffers closes clients that have full buffers
+func (h *Hub) closeClientsWithFullBuffers(clients []*Client) {
+	for _, client := range clients {
+		client.Close()
+		h.mu.Lock()
+		delete(h.clients, client)
+		delete(h.lastActivity, client)
+		h.mu.Unlock()
 	}
 }
 
@@ -141,7 +172,7 @@ func (h *Hub) cleanupStaleClients() {
 	}
 
 	for _, client := range staleClients {
-		close(client.send)
+		client.Close()
 		delete(h.clients, client)
 		delete(h.lastActivity, client)
 		logger.Debug().Msgf("Removed stale client, total clients: %d", len(h.clients))

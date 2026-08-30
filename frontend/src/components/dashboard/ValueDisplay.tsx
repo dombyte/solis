@@ -154,37 +154,44 @@ export function ValueDisplay({
   const hasIssues = hasStatusIssues(statusDecoded);
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
+    <div className={`flex flex-wrap items-center gap-1.5 sm:gap-2 ${className}`}>
       {showLabel && (
-        <span className="text-sm font-medium">{register.name}:</span>
+        <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
       )}
-      <div className="flex items-center gap-2">
-        <span className="text-lg font-semibold">{displayValue}{displayUnit && ' '}{displayUnit}</span>
-        {showStatusIndicator && hasIssues && rawValue !== undefined && (
-          <Badge variant="destructive" className="text-xs">
-            {Array.isArray(statusDecoded) ? statusDecoded.length : '!'}
-          </Badge>
-        )}
-        {showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined && (
-          <Badge variant="outline" className="text-xs">
-            OK
-          </Badge>
-        )}
+      <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+        <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
+        {(showStatusIndicator && hasIssues && rawValue !== undefined) || 
+         (showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined) ? (
+          <div className="flex-shrink-0">
+            {showStatusIndicator && hasIssues && rawValue !== undefined && (
+              <Badge variant="destructive" className="text-xs px-1.5 py-0.5 truncate max-w-[80px] sm:max-w-[100px] md:max-w-[120px] lg:max-w-[140px]">
+                {Array.isArray(statusDecoded) ? statusDecoded.length : '!'}
+              </Badge>
+            )}
+            {showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined && (
+              <Badge variant="outline" className="text-xs px-1.5 py-0.5">
+                OK
+              </Badge>
+            )}
+          </div>
+        ) : null}
         {showTooltip && register.description && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
-                aria-label={`Info about ${register.name}`}
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
-              <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
-            </PopoverContent>
-          </Popover>
+          <div className="flex-shrink-0">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
+                  aria-label={`Info about ${register.name}`}
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
+                <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
+              </PopoverContent>
+            </Popover>
+          </div>
         )}
       </div>
     </div>

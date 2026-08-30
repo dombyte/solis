@@ -5,7 +5,7 @@
 
 
 ## Tools
-go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -ignore "(?:.*_test\.go|.*test.*\.go)" ./..
+go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -ignore "(?:.*_test\.go|.*test.*\.go|frontend)" .
 go run github.com/securego/gosec/v2/cmd/gosec@v2.23.0 ./...
 go run github.com/gordonklaus/ineffassign@latest ./...
 go run golang.org/x/tools/cmd/deadcode@latest ./...
@@ -546,7 +546,7 @@ When refactoring existing code:
 After integrating SQLite storage and background polling, direct HTTP reads (`?direct=true`) became ~2x slower (600-700ms → 1.5s). The poller and HTTP handlers shared the same Modbus client connection. Since the Solis inverter is sequential-only, when the poller was reading registers, HTTP requests had to wait for the poller to finish before their Modbus reads could execute.
 
 **Root Cause:**
-The grid-x/modbus library serializes requests at the TCP level. With a single shared connection, all requests (poller + HTTP) are queued through the same pipe. If the poller is reading 33 registers (grouped into ranges) taking ~800ms, an HTTP request arriving during that time must wait.
+The simonvetter/modbus library serializes requests at the TCP level. With a single shared connection, all requests (poller + HTTP) are queued through the same pipe. If the poller is reading 33 registers (grouped into ranges) taking ~800ms, an HTTP request arriving during that time must wait.
 
 **Solution:**
 Create **separate Modbus clients** for the poller and HTTP service in `cmd/main.go`. This allows both to queue requests independently at the device level:
@@ -576,7 +576,7 @@ readService := service.NewReadService(cfg, client, st, pl)
 The modbus wrapper (`internal/modbus/tcp.go`) used `sync.RWMutex` with `RLock/RUnlock` on every read operation, adding ~1-2μs of lock overhead per register read.
 
 **Root Cause:**
-Over-cautious synchronization. The grid-x/modbus library already handles its own concurrency control at the TCP level (as documented in old commit messages: "grid-x/modbus handles connection serialization at the TCP level").
+Over-cautious synchronization. The simonvetter/modbus library already handles its own concurrency control at the TCP level (as documented in old commit messages: "simonvetter/modbus handles connection serialization at the TCP level").
 
 **Solution:**
 Remove the mutex for normal read operations. Keep mutex only for reconnection logic which modifies handler state (`c.handler`, `c.isConnected`):
@@ -659,10 +659,10 @@ values, err := h.readService.GetAllValues(forceDirect)
 ### 5. Byte-to-Uint16 Conversion Overhead
 
 **Problem:**
-Switching from `github.com/simonvetter/modbus` to `github.com/grid-x/modbus` introduced byte-to-uint16 conversion overhead. The old library returned `[]uint16` directly; the new one returns `[]byte`.
+Switching from `github.com/grid-x/modbus` to `github.com/simonvetter/modbus` introduced byte-to-uint16 conversion overhead. The old library returned `[]uint16` directly; the new one returns `[]byte`.
 
 **Root Cause:**
-Library API change. The grid-x library was chosen for better maintenance, but its API returns raw bytes requiring manual conversion:
+Library API change. The simonvetter library was chosen for better maintenance, but its API returns raw bytes requiring manual conversion:
 ```go
 results := make([]uint16, len(rawBytes)/2)
 for i := 0; i < len(results); i++ {

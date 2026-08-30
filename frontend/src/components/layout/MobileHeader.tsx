@@ -17,7 +17,7 @@ export function MobileHeader() {
   const title = getPageTitle();
 
   return (
-    <div className="md:hidden flex items-center justify-between px-4 py-3 w-full">
+    <div className="flex items-center justify-between px-4 py-3 w-full">
       <h1 className="text-xl font-bold">{title}</h1>
       <MobileThemeToggle />
     </div>

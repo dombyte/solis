@@ -451,20 +451,28 @@ func TestGetKeysHandler(t *testing.T) {
 		t.Error("GetKeysHandler() returned empty result, want non-empty")
 	}
 
-	// Check first register has required fields
-	if len(result) > 0 {
-		if result[0].Key == "" {
-			t.Error("GetKeysHandler() first register has empty key")
+	// Check that at least one register has required fields (skip computed registers with address 0)
+	foundNonComputed := false
+	for _, reg := range result {
+		if reg.Address != 0 {
+			foundNonComputed = true
+			if reg.Key == "" {
+				t.Error("GetKeysHandler() register has empty key")
+			}
+			if reg.Name == "" {
+				t.Error("GetKeysHandler() register has empty name")
+			}
+			if reg.Address == 0 {
+				t.Error("GetKeysHandler() register has zero address")
+			}
+			if reg.DataType == "" {
+				t.Error("GetKeysHandler() register has empty data type")
+			}
+			break
 		}
-		if result[0].Name == "" {
-			t.Error("GetKeysHandler() first register has empty name")
-		}
-		if result[0].Address == 0 {
-			t.Error("GetKeysHandler() first register has zero address")
-		}
-		if result[0].DataType == "" {
-			t.Error("GetKeysHandler() first register has empty data type")
-		}
+	}
+	if !foundNonComputed {
+		t.Error("GetKeysHandler() returned no registers with non-zero address")
 	}
 }
 
@@ -472,11 +480,11 @@ func TestGetKeysHandler(t *testing.T) {
 func TestGetDataHandler_CurrentValue(t *testing.T) {
 	// Create a mock value - use a real register key from solis package
 	testValue := &solis.Value{
-		Key:          "pv_voltage_1",
-		Name:         "PV1 Voltage",
+		Key:          "pv_energy_daily",
+		Name:         "PV Energy Daily",
 		RawValue:     100.0,
 		DecodedValue: 100.5,
-		Unit:         "V",
+		Unit:         "kWh",
 		Timestamp:    time.Now(),
 		Stability:    solis.Dynamic,
 	}
@@ -484,7 +492,7 @@ func TestGetDataHandler_CurrentValue(t *testing.T) {
 	// Create a mock service
 	service := &MockReadService{
 		getRegisterFunc: func(key string) (*solis.Value, error) {
-			if key == "pv_voltage_1" {
+			if key == "pv_energy_daily" {
 				return testValue, nil
 			}
 			return nil, fmt.Errorf("unknown register: %s", key)
@@ -507,7 +515,7 @@ func TestGetDataHandler_CurrentValue(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/api/v1/data/{key}", handler)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/pv_voltage_1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/pv_energy_daily", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -521,14 +529,14 @@ func TestGetDataHandler_CurrentValue(t *testing.T) {
 		t.Fatalf("GetDataHandler() failed to decode response: %v", err)
 	}
 
-	if result["key"] != "pv_voltage_1" {
-		t.Errorf("GetDataHandler() key = %v, want 'pv_voltage_1'", result["key"])
+	if result["key"] != "pv_energy_daily" {
+		t.Errorf("GetDataHandler() key = %v, want 'pv_energy_daily'", result["key"])
 	}
-	if result["name"] != "PV1 Voltage" {
-		t.Errorf("GetDataHandler() name = %v, want 'PV1 Voltage'", result["name"])
+	if result["name"] != "PV Energy Daily" {
+		t.Errorf("GetDataHandler() name = %v, want 'PV Energy Daily'", result["name"])
 	}
-	if result["unit"] != "V" {
-		t.Errorf("GetDataHandler() unit = %v, want 'V'", result["unit"])
+	if result["unit"] != "kWh" {
+		t.Errorf("GetDataHandler() unit = %v, want 'kWh'", result["unit"])
 	}
 	if _, ok := result["timestamp"]; !ok {
 		t.Error("GetDataHandler() response should contain timestamp")
@@ -583,8 +591,8 @@ func TestGetDataHandler_HistoryQuery(t *testing.T) {
 	end := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 
 	historyResult := &storage.HistoryResult{
-		Key:      "pv_voltage_1",
-		Unit:     "V",
+		Key:      "solis_status",
+		Unit:     "",
 		Interval: storage.IntervalRaw,
 		Data: []storage.HistoryDataPoint{
 			{Timestamp: start.Format(time.RFC3339), Value: 100.0},
@@ -613,17 +621,17 @@ func TestGetDataHandler_HistoryQuery(t *testing.T) {
 	r := chi.NewRouter()
 	r.Get("/api/v1/data/{key}", handler)
 
-	// Request with start and end query parameters - only 'raw' interval is supported now
+	// Request with start and end query parameters for a current register (not daily/monthly/yearly/total)
 	startStr := "2024-01-01T00:00:00Z"
 	endStr := "2024-01-02T00:00:00Z"
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/pv_voltage_1?start="+startStr+"&end="+endStr+"&interval=raw", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/solis_status?start="+startStr+"&end="+endStr+"&interval=raw", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
 
-	// Historical raw data is no longer available - should return 501 Not Implemented
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("GetDataHandler() with history query status code = %v, want %v, body: %s", w.Code, http.StatusNotImplemented, w.Body.String())
+	// Historical queries are not supported for current registers in v2 API - should return 400 Bad Request
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GetDataHandler() with history query for current register status code = %v, want %v, body: %s", w.Code, http.StatusBadRequest, w.Body.String())
 	}
 }
 
@@ -650,13 +658,13 @@ func TestGetDataHandler_InvalidTimeFormat(t *testing.T) {
 	r.Get("/api/v1/data/{key}", handler)
 
 	// Request with invalid time format - use valid register key
-	// With our changes, any query params return 501 Not Implemented
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/pv_voltage_1?start=invalid-time", nil)
+	// With our changes, invalid time range returns 400 Bad Request
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/solis_status?start=invalid-time", nil)
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotImplemented {
-		t.Errorf("GetDataHandler() with invalid time format status code = %v, want %v", w.Code, http.StatusNotImplemented)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("GetDataHandler() with invalid time format status code = %v, want %v", w.Code, http.StatusBadRequest)
 	}
 }

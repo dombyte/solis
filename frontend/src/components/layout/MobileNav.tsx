@@ -20,7 +20,7 @@ export function MobileNav() {
   ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 glassy-nav-mobile z-50 safe-area-inset-bottom w-full">
+    <nav className="fixed bottom-0 left-0 right-0 glassy-nav-mobile z-50 safe-area-inset-bottom w-full">
       <div className="flex justify-around items-center pt-5 pb-0 px-2 w-full">
           {navItems.map((item) => {
             const active = isActive(item.path);

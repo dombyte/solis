@@ -1,6 +1,6 @@
 # Solis Monitor
 
-Monitoring solution for Solis inverters using Modbus TCP/RTU. Polls register data, stores it in SQLite, and exposes it via a web API, frontend dashboard and Prometheus metrics.
+Monitoring solution for Solis inverters using Modbus TCP. Polls register data, stores it in SQLite, and exposes it via a web API and frontend dashboard.
 
 ## Desktop
 <img width="2554" height="1299" alt="solis02" src="https://github.com/user-attachments/assets/df3be693-1289-4a87-8aa1-fad199e92220" />
@@ -18,9 +18,6 @@ After starting, the API Docs are available at `/docs`.
 
 ## Health Check
 A health check endpoint is available at `/health`.
-
-## Metrics
-If enabled, Prometheus metrics are exposed at `/metrics`.
 
 ## Configuration
 
@@ -49,13 +46,6 @@ modbus:
   port: 502
   timeout: 5s
   unit_id: 1
-  # For RTU:
-  # type: rtu
-  # serial_port: /dev/ttyUSB0
-  # baud_rate: 9600
-  # data_bits: 8
-  # stop_bits: 1
-  # parity: none
 
 storage:
   path: ./data/solis.db
@@ -66,9 +56,6 @@ storage:
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
-
-metrics:
-  enabled: true
 
 registers:
   disabled_keys: []
@@ -96,7 +83,7 @@ Serve-only mode allows running the Solis Monitor **without** connecting to the i
 - Containerized deployments where Modbus is not available
 
 **How it works:**
-- HTTP API, WebSocket, and Prometheus metrics all function normally
+- HTTP API and WebSocket all function normally
 - Historical data (daily, monthly, yearly, total energy) is served from SQLite
 - Current register values (PV voltage, battery SOC, power, etc.) are served from cache
 - Modbus connection and background polling are completely disabled
@@ -141,16 +128,11 @@ SOLIS_APP_SERVE_ONLY=true ./solis
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `type` | string | tcp | Connection type: tcp, rtu, or rtu_over_tcp |
-| `host` | string | 192.168.1.100 | Modbus server IP/hostname (TCP only) |
+| `type` | string | tcp | Connection type: tcp |
+| `host` | string | 192.168.1.100 | Modbus server IP/hostname |
 | `port` | int | 502 | Modbus server port (1-65535) |
 | `timeout` | duration | 5s | Connection/read timeout |
 | `unit_id` | byte | 1 | Modbus unit/slave ID (1-247) |
-| `serial_port` | string | | Serial port for RTU (e.g., /dev/ttyUSB0) |
-| `baud_rate` | int | | Baud rate for RTU |
-| `data_bits` | int | | Data bits for RTU (5, 6, 7, 8) |
-| `stop_bits` | int | | Stop bits for RTU (1, 2) |
-| `parity` | string | | Parity for RTU: none, even, odd |
 
 ### Storage Settings (SQLite)
 
@@ -262,12 +244,6 @@ Backup files can be manually managed:
 - Migration only runs when necessary (schema version mismatch)
 - Complex migrations may take time; this is normal for large databases
 - Check logs for migration progress
-
-### Metrics Settings
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | bool | false | Enable Prometheus metrics endpoint |
 
 ### Registers Settings
 

@@ -4,7 +4,7 @@ import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { Badge } from '../ui/badge';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
 
-import { formatTemperature, formatVoltage, formatCurrent, formatPower, formatEnergy, formatPercentage, formatValue } from '../../lib/utils/format';
+import { formatVoltage, formatCurrent, formatPower, formatEnergy, formatPercentage, formatValue } from '../../lib/utils/format';
 import type { SolisStatusDecoded, RegisterMetadata, RegisterValue } from '../../types';
 
 interface StatusDisplayProps {
@@ -18,7 +18,7 @@ interface StatusDisplayProps {
 function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterValue | undefined): boolean {
   if (!register || !value) return false;
 
-  // Numeric values in status groups (like temperature) - never alert
+  // Numeric values in status groups - never alert
   if (value.rawValue !== undefined && register.format) {
     return false;
   }
@@ -54,7 +54,7 @@ function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterVa
       }
       
       // Grid Fault Status - alert if it contains fault/error
-      if (register.id === 'grid_fault_status') {
+      if (register.id === 'grid_fault_1') {
         return statusName !== '' && statusName !== '0' && statusName !== 'no faults';
       }
       
@@ -124,20 +124,17 @@ export function StatusDisplay({
       statusText = String(statusDecoded);
     }
   } else if (rawValue !== undefined) {
-    // For numeric values in status groups (like temperature), use the formatter if available
+    // For numeric values in status groups, use the formatter if available
     if (register.format) {
       // Apply scale factor if present
       const scale = register.scale ?? 1;
       const scaledValue = rawValue * scale;
       // Use the displayValue if it's a number, otherwise use scaled rawValue
       const numericValue = typeof displayValue === 'number' ? displayValue : scaledValue;
-      const precision = register.precision ?? (register.unit === '%' || register.unit === '°C' ? 1 : 2);
+      const precision = register.precision ?? (register.unit === '%' ? 1 : 2);
       
       // Apply the appropriate formatter based on format type
       switch (register.format) {
-        case 'temperature':
-          statusText = formatTemperature(numericValue ?? null, precision);
-          break;
         case 'percentage':
           statusText = formatPercentage(numericValue ?? null, precision);
           break;
@@ -165,37 +162,41 @@ export function StatusDisplay({
   }
 
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
+    <div className={`flex flex-wrap items-center gap-1.5 sm:gap-2 ${className}`}>
       {showLabel && (
-        <span className="text-sm font-medium">{register.name}:</span>
+        <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
       )}
-      {shouldAlert ? (
-        <Badge variant="destructive" className="text-xs px-2 py-0.5">
-          {statusText}
-        </Badge>
-      ) : (
-        <Badge variant="secondary" className="text-xs px-2 py-0.5">
-          {statusText}
-        </Badge>
-      )}
+      <div className="flex-shrink-0">
+        {shouldAlert ? (
+          <Badge variant="destructive" className="text-xs px-1.5 py-0.5 truncate max-w-[100px] sm:max-w-[130px] md:max-w-[160px] lg:max-w-[180px] xl:max-w-[200px]">
+            {statusText}
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="text-xs px-1.5 py-0.5 truncate max-w-[100px] sm:max-w-[130px] md:max-w-[160px] lg:max-w-[180px] xl:max-w-[200px]">
+            {statusText}
+          </Badge>
+        )}
+      </div>
       {shouldAlert && (
-        <AlertTriangle className="h-4 w-4 text-destructive" />
+        <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
       )}
       {showTooltip && register.description && (
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
-              aria-label={`Info about ${register.name}`}
-            >
-              <Info className="h-3.5 w-3.5" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
-            <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
-          </PopoverContent>
-        </Popover>
+        <div className="flex-shrink-0">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
+                aria-label={`Info about ${register.name}`}
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
+              <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
+            </PopoverContent>
+          </Popover>
+        </div>
       )}
     </div>
   );

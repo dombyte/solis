@@ -10,7 +10,7 @@ app:
 
 poller:
   # Base interval between poll cycles
-  interval: 15s
+  interval: 5s
   # Retry attempts per block if read fails
   block_attempts: 2
   # Delay between retry attempts for same block
@@ -18,21 +18,14 @@ poller:
   # Delay between successive block reads (0 = immediate)
   block_interval: 0s
   # Maximum duration for full poll cycle before aborting
-  poll_timeout: 15s
-  jitter_max: 100ms
+  poll_timeout: 5s
+
 modbus:
-  # Connection type: tcp, rtu, or rtu_over_tcp
   type: tcp
-  host: 192.168.2.225
+  host: stratopi.welan
   port: 502
-  timeout: 15s
+  timeout: 2s
   unit_id: 1
-  # RTU-specific settings (only used if type = rtu or rtu_over_tcp)
-  serial_port: /dev/ttyAMA0
-  baud_rate: 9600
-  data_bits: 8
-  stop_bits: 1
-  parity: N
 
 storage:
   path: ./data/solis.db
@@ -45,7 +38,6 @@ storage:
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
-
   # Database maintenance settings
   # Enable automatic schema migrations on startup
   enable_migrations: true
@@ -55,18 +47,10 @@ storage:
   max_backups: 3
   # Interval for periodic online backups (e.g., "24h", "12h", "30m")
   backup_interval: 24h
+  cleanup_interval: 20h
 
-metrics:
-  # Enable Prometheus metrics endpoint
-  enabled: true
-
-registers:
-  # Disable specific registers by key (optional)
-  # Disabled registers will not be polled, stored, cached, or returned by the API
-  disabled_keys:
-    # - meter_total_active_power
-  # Example: disable unknown registers
-  # disabled_keys:
-  #   - unknown_33020
-  #   - unknown_33021
-  #   - battery_fault_status_03_bms
+# Aggregator settings for background computation of derived values
+aggregator:
+  # Interval for recomputing monthly/yearly/net values
+  # Default: 60s
+  interval: 30s

@@ -7,6 +7,7 @@ import { MobileHeader } from './components/layout/MobileHeader';
 import { ToastContainer } from './components/layout/ToastContainer';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { LoadingScreen } from './components/layout/LoadingScreen';
+import { useMobile } from './hooks/useMobile';
 
 import { ToastProvider } from './components/ui/toast';
 
@@ -16,14 +17,16 @@ const Status = lazy(() => import('./pages/Status').then(m => ({ default: m.Statu
 const Info = lazy(() => import('./pages/Info').then(m => ({ default: m.Info })));
 
 export function App() {
+  const isMobile = useMobile();
+
   return (
     <ToastProvider>
         <BrowserRouter>
-          <div className="min-h-screen bg-background flex flex-col md:flex-row w-full max-w-[100vw] overflow-x-hidden pb-24 md:pb-0">
-            <DesktopNav />
+          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'pb-24' : 'pb-0'}`}>
+            {!isMobile && <DesktopNav />}
             <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
-              <MobileHeader />
-              <main className="flex-1 w-full overflow-x-hidden pt-1 md:pt-0">
+              {isMobile && <MobileHeader />}
+              <main className="flex-1 w-full overflow-x-hidden pt-1">
                 <Suspense fallback={<LoadingScreen message="Loading page..." fullPage={false} />}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
@@ -43,7 +46,7 @@ export function App() {
                   </Routes>
                 </Suspense>
               </main>
-              <MobileNav />
+              {isMobile && <MobileNav />}
             </div>
             <ToastContainer />
             <UpdateBanner />

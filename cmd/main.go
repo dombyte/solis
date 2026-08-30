@@ -11,17 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dombyte/solis/internal/aggregator"
 	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/http/routes"
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
-	"github.com/dombyte/solis/internal/metrics"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/service"
-	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/websocket"
 )
 
@@ -32,22 +32,63 @@ var logger = logging.NewComponentLogger("main")
 // Returns an error if initialization fails (non-recoverable).
 // Returns nil if shutdown was requested via signal.
 func runApp() error {
-	// Load configuration
+	cfg, err := loadAndInitConfig()
+	if err != nil {
+		return err
+	}
+
+	dbManager, st, err := initializeDatabase(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dbManager.Close(); err != nil {
+			logger.Error().Msgf("Error closing database manager: %v", err)
+		}
+	}()
+
+	startBackgroundServices(cfg, dbManager, st)
+
+	ca, wsHub, agg, err := initializeApplicationServices(cfg, st)
+	if err != nil {
+		return err
+	}
+
+	modbusClient, pl, err := initializeModbusAndPoller(cfg, st, ca)
+	if err != nil {
+		return err
+	}
+
+	httpServer, err := initializeHTTPServices(cfg, st, ca, wsHub, pl, agg, modbusClient)
+	if err != nil {
+		return err
+	}
+
+	logStartupInfo(cfg, modbusClient, pl)
+
+	err = waitForShutdown(pl, httpServer, cfg)
+	return err
+}
+
+// loadAndInitConfig loads configuration and initializes logging
+func loadAndInitConfig() (*config.AppConfig, error) {
 	cfg, err := config.LoadConfig("config.yaml")
 	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
-	// Initialize logging based on config
-	logging.Init(false, os.Stderr, true, cfg.App.Debug)
+	logging.Init(os.Stderr, true, cfg.App.Debug)
 	logger.Info().Msg("Solis Monitor starting...")
 
-	// Create data directory if it doesn't exist
 	if err := os.MkdirAll("./data", 0750); err != nil && !os.IsExist(err) {
-		return fmt.Errorf("failed to create data directory: %v", err)
+		return nil, fmt.Errorf("failed to create data directory: %v", err)
 	}
 
-	// Initialize database manager for migrations, backups, and cleanup
+	return cfg, nil
+}
+
+// initializeDatabase initializes the database manager and storage
+func initializeDatabase(cfg *config.AppConfig) (*database.DatabaseManager, *storage.Storage, error) {
 	dbManager := database.NewDatabaseManager(
 		&cfg.Storage,
 		&database.BackupConfig{
@@ -57,19 +98,17 @@ func runApp() error {
 		},
 	)
 
-	// Initialize storage with migration support
 	st, err := dbManager.Initialize()
 	if err != nil {
-		return fmt.Errorf("failed to initialize database: %v", err)
+		return nil, nil, fmt.Errorf("failed to initialize database: %v", err)
 	}
-	defer func() {
-		if err := dbManager.Close(); err != nil {
-			logger.Error().Msgf("Error closing database manager: %v", err)
-		}
-	}()
-	logger.Info().Msg("Database initialized with migrations and backup support")
 
-	// Start periodic online backups in background
+	logger.Info().Msg("Database initialized with migrations and backup support")
+	return dbManager, st, nil
+}
+
+// startBackgroundServices starts background database services
+func startBackgroundServices(cfg *config.AppConfig, dbManager *database.DatabaseManager, st *storage.Storage) {
 	if cfg.Storage.EnableBackup && cfg.Storage.BackupInterval > 0 {
 		ctx := context.Background()
 		go func() {
@@ -80,132 +119,130 @@ func runApp() error {
 		logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
 	}
 
-	// Initialize cache for latest register values
+	if cfg.App.ServeOnly && cfg.Storage.CleanupInterval > 0 {
+		ctx := context.Background()
+		go func() {
+			if err := dbManager.StartPeriodicCleanup(ctx); err != nil {
+				logger.Error().Msgf("Failed to start periodic cleanup: %v", err)
+			}
+		}()
+		logger.Info().Msgf("Periodic retention cleanup started (interval: %s)", cfg.Storage.CleanupInterval)
+	}
+}
+
+// initializeApplicationServices initializes cache, websocket hub, and aggregator
+func initializeApplicationServices(cfg *config.AppConfig, st *storage.Storage) (*cache.Cache, *websocket.Hub, *aggregator.Aggregator, error) {
 	ca := cache.New()
 
-	// Initialize WebSocket hub for real-time updates
 	wsHub := websocket.NewHub()
 	go wsHub.Run()
 	ca.SetWebSocketHub(wsHub)
 
-	// Set up callback for when clients request initial data
 	wsHub.SetOnInitialDataRequest(func(client *websocket.Client) {
 		ca.SendInitialData(client)
 	})
 
-	// Initialize register filter for disabled registers
-	// Validate disabled keys against known registers
-	if len(cfg.Registers.DisabledKeys) > 0 {
-		for _, key := range cfg.Registers.DisabledKeys {
-			if _, ok := solis.RegisterMapByKey[key]; !ok {
-				return fmt.Errorf("unknown register key in disabled_keys: %s. Available keys: %v", key, solis.AllRegisters)
-			}
-		}
-		logger.Info().Msgf("Disabled %d registers: %v", len(cfg.Registers.DisabledKeys), cfg.Registers.DisabledKeys)
+	var agg *aggregator.Aggregator
+	if cfg.Aggregator.Interval > 0 {
+		agg = aggregator.New(st, ca, &cfg.Aggregator)
+		agg.Start()
+		logger.Info().Msgf("Aggregator started with interval: %s", cfg.Aggregator.Interval)
+	} else {
+		logger.Info().Msg("Aggregator disabled (interval not configured)")
 	}
-	registerFilter := solis.NewRegisterFilter(cfg.Registers.DisabledKeys)
 
-	// Initialize Modbus client and poller only if NOT in serve-only mode
+	return ca, wsHub, agg, nil
+}
+
+// initializeModbusAndPoller initializes Modbus client and poller if not in serve-only mode
+func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *cache.Cache) (*modbus.Client, *poller.Poller, error) {
 	var modbusClient *modbus.Client
 	var pl *poller.Poller
 
 	if !cfg.App.ServeOnly {
-		// Initialize shared Modbus client (Solis inverter only handles one connection at a time)
-		// Use AllowDisconnected to allow app to start even if modbus is unavailable
 		var err error
-		modbusClient, err = modbus.NewClient(&cfg.Modbus, modbus.WithAllowDisconnected(true))
+		modbusClient, err = modbus.NewClient(&cfg.Modbus)
 		if err != nil {
-			return fmt.Errorf("failed to create Modbus client: %v", err)
+			return nil, nil, fmt.Errorf("failed to create Modbus client: %v", err)
 		}
-		defer modbusClient.Close()
 
-		// Initialize poller and service only if modbus is connected
-		// If modbus is not connected, start reconnection loop but don't start poller
-		if modbusClient.IsConnected() {
-			pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithRegisterFilter(registerFilter))
-			pl.Start()
-			defer pl.Stop()
+		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca))
+		pl.Start()
 
-			// First poll - trigger immediate poll before HTTP server starts (non-blocking)
-			logger.Info().Msg("Triggering first poll...")
-			go func() {
-				if _, err := pl.PollNow(); err != nil {
-					logger.Error().Msgf("First poll failed: %v", err)
-				} else {
-					logger.Info().Msg("First poll completed")
-				}
-			}()
-		} else {
-			logger.Warn().Msg("Modbus not connected, starting background reconnection loop")
-			logger.Warn().Msg("Poller will not start until Modbus is connected")
-			go modbusClient.StartReconnectionLoop(context.Background())
-			// Don't start poller - it needs modbus connection
-		}
+		go modbusClient.StartReconnectionLoop(context.Background())
+
+		logger.Info().Msg("Triggering first poll...")
+		go func() {
+			if _, err := pl.PollNow(); err != nil {
+				logger.Error().Msgf("First poll failed: %v", err)
+			} else {
+				logger.Info().Msg("First poll completed")
+			}
+		}()
+		logger.Info().Msg("Poller and reconnection loop started")
 	} else {
 		logger.Info().Msg("Running in serve-only mode - Modbus and poller disabled")
 	}
 
-	// Initialize service (always needed for HTTP endpoints)
-	readService := service.NewReadService(cfg, modbusClient, st, pl, ca, registerFilter)
+	return modbusClient, pl, nil
+}
 
-	// Initialize HTTP handlers
+// initializeHTTPServices initializes HTTP server
+func initializeHTTPServices(
+	cfg *config.AppConfig,
+	st *storage.Storage,
+	ca *cache.Cache,
+	wsHub *websocket.Hub,
+	pl *poller.Poller,
+	agg *aggregator.Aggregator,
+	modbusClient *modbus.Client,
+) (*server.Server, error) {
+	readService := service.NewReadService(cfg, modbusClient, st, pl, ca, agg)
+
 	handlerDeps := routes.HandlerDeps{
-		Service:        readService,
-		MetricsEnabled: cfg.Metrics.Enabled,
-		WebSocketHub:   wsHub,
+		Service:      readService,
+		WebSocketHub: wsHub,
 	}
 
-	// Set up routes
 	router := routes.SetupRoutes(handlerDeps)
-
-	// Create HTTP server
 	httpServer := server.New(&cfg.App, router)
 
-	// Start HTTP server
 	go func() {
 		if err := httpServer.Start(); err != nil {
 			logger.Error().Msgf("HTTP server failed: %v", err)
-			// Don't exit, just log - the panic recovery in main will handle it
 		}
 	}()
 
-	// Initialize Prometheus metrics
-	if cfg.Metrics.Enabled {
-		metrics.Init(readService)
-		logger.Info().Msgf("  - Prometheus metrics: http://localhost:%d/metrics", cfg.App.Port)
-	}
+	return httpServer, nil
+}
 
+// logStartupInfo logs information about the started services
+func logStartupInfo(cfg *config.AppConfig, modbusClient *modbus.Client, pl *poller.Poller) {
 	logger.Info().Msgf("Solis Monitor started successfully!")
 	logger.Info().Msgf("  - HTTP server: http://localhost:%d", cfg.App.Port)
 	logger.Info().Msgf("  - WebSocket: ws://localhost:%d/ws", cfg.App.Port)
 	logger.Info().Msgf("  - API endpoints: /api/*")
 	logger.Info().Msgf("  - Health check: /health")
 	logger.Info().Msgf("  - API Documentation: /docs")
-	if !cfg.App.ServeOnly {
+	if pl != nil {
 		logger.Info().Msgf("  - Poller interval: %s", cfg.Poller.Interval)
 		logger.Info().Msgf("  - Modbus: %s:%d", cfg.Modbus.Host, cfg.Modbus.Port)
 	} else {
 		logger.Info().Msg("  - Mode: serve-only (no Modbus polling)")
 	}
+}
 
-	// Wait for shutdown signal
+// waitForShutdown waits for shutdown signal and performs cleanup
+func waitForShutdown(pl *poller.Poller, httpServer *server.Server, cfg *config.AppConfig) error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	<-quit
 	logger.Info().Msg("Shutdown signal received")
 
-	// Shutdown sequence
-	// Stop poller if it was started
 	if pl != nil {
 		logger.Info().Msg("Stopping poller...")
 		pl.Stop()
-	}
-
-	// Stop Prometheus metrics
-	if cfg.Metrics.Enabled {
-		logger.Info().Msg("Stopping Prometheus metrics...")
-		metrics.Shutdown()
 	}
 
 	logger.Info().Msg("Stopping HTTP server...")
@@ -227,7 +264,7 @@ func main() {
 			defer func() {
 				if r := recover(); r != nil {
 					// Re-initialize logging in case it failed
-					logging.Init(false, os.Stderr, true, "ERROR")
+					logging.Init(os.Stderr, true, "ERROR")
 					logger.Error().Msgf("PANIC in runApp: %v - restarting in 5 seconds...", r)
 					time.Sleep(5 * time.Second)
 				}
@@ -236,7 +273,7 @@ func main() {
 			if err := runApp(); err != nil {
 				logger.Error().Msgf("App failed: %v - restarting in 5 seconds...", err)
 				// Re-initialize logging in case it failed
-				logging.Init(false, os.Stderr, true, "ERROR")
+				logging.Init(os.Stderr, true, "ERROR")
 				logger.Error().Msg("Waiting 5 seconds before restart...")
 				time.Sleep(5 * time.Second)
 				return

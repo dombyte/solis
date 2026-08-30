@@ -14,7 +14,7 @@ func TestDecodeRegister_WithStatusDecoding(t *testing.T) {
 	}
 
 	// Simulate a raw value (e.g., 3000 which maps to a status)
-	raw := []byte{0x0B, 0xB8} // 3000 in big-endian
+	raw := []uint16{0x0BB8} // 3000 in uint16
 
 	value := DecodeRegister(reg, raw)
 
@@ -67,7 +67,7 @@ func TestDecodeRegister_WithFaultStatus(t *testing.T) {
 	}
 
 	// Simulate a raw value with some bits set
-	raw := []byte{0x00, 0x01} // 1 in big-endian
+	raw := []uint16{0x0001} // 1 in uint16
 
 	value := DecodeRegister(reg, raw)
 
@@ -85,12 +85,12 @@ func TestDecodeRegister_WithFaultStatus(t *testing.T) {
 // TestDecodeRegister_NonStatusRegister tests that non-status registers don't get StatusDecoded
 func TestDecodeRegister_NonStatusRegister(t *testing.T) {
 	// Test a non-status register
-	reg, ok := RegisterMapByKey["pv_voltage_1"]
+	reg, ok := RegisterMapByKey["pv_energy_daily"]
 	if !ok {
-		t.Fatal("pv_voltage_1 register not found")
+		t.Fatal("pv_energy_daily register not found")
 	}
 
-	raw := []byte{0x01, 0x2C} // 300 in big-endian
+	raw := []uint16{0x012C} // 300 in uint16
 
 	value := DecodeRegister(reg, raw)
 

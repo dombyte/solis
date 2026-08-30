@@ -1,0 +1,68 @@
+# Removed Registers (v2)
+
+## Information Registers (Range 1: 33000-33096)
+- `solis_model_no` (33000)
+- `solis_dsp_version` (33001)
+- `solis_hmi_version` (33002)
+- `solis_protocol_version` (33003)
+- `solis_serial_number` (33004)
+
+## PV Voltage/Current Registers (Range 1: 33000-33096)
+- `pv_voltage_1` (33049)
+- `pv_current_1` (33050)
+- `pv_voltage_2` (33051)
+- `pv_current_2` (33052)
+- `pv_voltage_3` (33053)
+- `pv_current_3` (33054)
+- `pv_voltage_4` (33055)
+- `pv_current_4` (33056)
+- `pv_power_total` (33057)
+
+## Grid Voltage/Current/Power Registers (Range 1: 33000-33096)
+- `a_phase_voltage` (33073)
+- `b_phase_voltage` (33074)
+- `c_phase_voltage` (33075)
+- `a_phase_current` (33076)
+- `b_phase_current` (33077)
+- `c_phase_current` (33078)
+- `active_power` (33079)
+- `reactive_power` (33081)
+- `apparent_power` (33083)
+- `grid_frequency` (33094)
+
+## Temperature Register (Range 1: 33000-33096)
+- `temperature` (33093)
+
+## Battery/SOC/SOH Registers (Range 2: 33116-33180)
+- `battery_voltage` (33133)
+- `battery_current` (33134)
+- `battery_current_direction` (33135)
+- `battery_soc` (33139)
+- `battery_soh` (33140)
+- `battery_voltage_bms` (33141)
+
+## Power Registers (Range 2: 33116-33180)
+- `household_power` (33147)
+- `backup_power` (33148)
+- `battery_power` (33149)
+- `ac_grid_power` (33151)
+
+## Backup AC Registers (Range 2: 33116-33180)
+- `backup_ac_voltage_phase_a` (33137)
+- `backup_ac_current_phase_a` (33138)
+
+## Meter Registers (Range 3: 33251-33264)
+- `meter_voltage_a` (33251)
+- `meter_current_a` (33252)
+- `meter_voltage_b` (33253)
+- `meter_current_b` (33254)
+- `meter_voltage_c` (33255)
+- `meter_current_c` (33256)
+- `meter_power_a` (33257)
+- `meter_power_b` (33259)
+- `meter_power_c` (33261)
+- `meter_power_total` (33263)
+
+---
+
+**Total: 47 registers removed**
