@@ -77,7 +77,7 @@ func (m *DatabaseManager) Initialize() (*storage.Storage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer db.Close()
+	// Don't defer close - we'll close it explicitly after migrations
 
 	currentVersion, err := m.getCurrentSchemaVersion(db)
 	if err != nil {
@@ -93,11 +93,23 @@ func (m *DatabaseManager) Initialize() (*storage.Storage, error) {
 		return nil, err
 	}
 
+	// Explicitly checkpoint WAL to ensure migration data is flushed to main database
+	// This is important when using WAL mode - closing the connection will also checkpoint,
+	// but we want to ensure the data is visible to other connections immediately
+	if _, err := db.Exec("PRAGMA wal_checkpoint(FULL);"); err != nil {
+		managerLogger.Warn().Msgf("Failed to checkpoint WAL after migrations: %v", err)
+	}
+
 	m.cleanupOldBackups()
 
 	st, err := m.createStorageInstance()
 	if err != nil {
 		return nil, err
+	}
+
+	// Now that Storage has its own connection, we can close the temporary migration connection
+	if err := db.Close(); err != nil {
+		managerLogger.Warn().Msgf("Failed to close temporary database connection: %v", err)
 	}
 
 	m.runStartupCleanup(st)
