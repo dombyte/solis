@@ -552,11 +552,20 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 			// so we use it directly without any scaling
 			decodedValue := dp.Value
 			
+			// Get target register to compute raw_value based on its scale
+			reg, ok := solis.RegisterMapByKey[monthlyKey]
+			if !ok {
+				tx.Rollback()
+				logger.Error().Msgf("Register %s not found in RegisterMapByKey", monthlyKey)
+				continue
+			}
+			rawValueForStorage := decodedValue / reg.Scale
+			
 			// Insert new value
 			_, err = tx.Exec(`
 				INSERT INTO monthly_values (month, register_key, value, raw_value)
 				VALUES (?, ?, ?, ?)
-			`, month, monthlyKey, decodedValue, dp.RawValue)
+			`, month, monthlyKey, decodedValue, rawValueForStorage)
 			
 			if err != nil {
 				tx.Rollback()
@@ -625,7 +634,8 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 		
 		// Compute net value
 		netValue := fedMonthValue - importMonthValue
-		netRawValue := fedMonthRawValue - importMonthRawValue
+		// For grid_energy_monthly (scale=1), raw_value should equal value
+		netRawValue := netValue
 		
 		// Store the net monthly value
 		tx, err := a.storage.DB().Begin()

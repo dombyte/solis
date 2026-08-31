@@ -1162,13 +1162,16 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 	defer tx.Rollback()
 
 	// Validate that the register exists
-	if _, ok := solis.RegisterMapByKey[key]; !ok {
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
 		return fmt.Errorf("register %s not found", key)
 	}
 
 	// For computed registers, dp.Value is already the decoded/summed value.
-	// Use it directly instead of recomputing from RawValue.
+	// Use it directly and compute raw_value based on target register's scale.
+	// For monthly/yearly registers (scale=1), raw_value should equal value.
 	decodedValue := dp.Value
+	rawValueForStorage := decodedValue / reg.Scale
 
 	// Get existing value for this month
 	var existingValue float64
@@ -1190,7 +1193,7 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 		_, err = tx.Exec(`
 			INSERT INTO monthly_values (month, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?)
-		`, dp.Month, key, decodedValue, dp.RawValue)
+		`, dp.Month, key, decodedValue, rawValueForStorage)
 	} else {
 		// For net registers, always update; for others, only update if higher
 		if isNetRegister || decodedValue > existingValue {
@@ -1198,7 +1201,7 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 				UPDATE monthly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND month = ?
-			`, decodedValue, dp.RawValue, key, dp.Month)
+			`, decodedValue, rawValueForStorage, key, dp.Month)
 		}
 	}
 
@@ -1219,13 +1222,16 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	defer tx.Rollback()
 
 	// Validate that the register exists
-	if _, ok := solis.RegisterMapByKey[key]; !ok {
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
 		return fmt.Errorf("register %s not found", key)
 	}
 
 	// For computed registers, dp.Value is already the decoded/summed value.
-	// Use it directly instead of recomputing from RawValue.
+	// Use it directly and compute raw_value based on target register's scale.
+	// For yearly registers (scale=1), raw_value should equal value.
 	decodedValue := dp.Value
+	rawValueForStorage := decodedValue / reg.Scale
 
 	// For net energy registers, always update (they can be negative or decrease)
 	// For other yearly registers (energy totals), only update if value is higher
@@ -1247,7 +1253,7 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 		_, err = tx.Exec(`
 			INSERT INTO yearly_values (year, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?)
-		`, dp.Year, key, decodedValue, dp.RawValue)
+		`, dp.Year, key, decodedValue, rawValueForStorage)
 	} else {
 		// For net registers, always update; for others, only update if higher
 		if isNetRegister || decodedValue > existingValue {
@@ -1255,8 +1261,7 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 				UPDATE yearly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND year = ?
-			`, decodedValue, dp.RawValue, key, dp.Year)
-		}
+			`, decodedValue, rawValueForStorage, key, dp.Year)		}
 	}
 
 	if err != nil {

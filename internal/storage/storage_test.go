@@ -565,15 +565,14 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 	}()
 
 	// Create a test monthly data point
-	// For computed monthly registers, Value should be the decoded/summed value
-	// and RawValue should be the sum of daily raw values
+	// For computed monthly registers with scale=1, both Value and RawValue should be the same
 	dp := &MonthlyDataPoint{
 		Month:    "2024-06",
-		Value:    1005.0,  // This is the decoded monthly value (what we want stored)
-		RawValue: 10050.0, // This is the sum of daily raw values (for auditing)
+		Value:    1005.0,  // This is the decoded monthly value
+		RawValue: 10050.0, // This is the sum of daily raw values (used for auditing, but stored as value/scale)
 	}
 
-	// Store it for a valid register key
+	// Store it for a valid register key (energy_consumption_monthly has scale=1)
 	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", dp)
 	if err != nil {
 		t.Fatalf("StoreMonthlyDataPoint() error = %v", err)
@@ -591,12 +590,17 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 		t.Error("StoreMonthlyDataPoint() did not store the data")
 	} else {
 		// Check that the stored value is correct
+		// For registers with scale=1, raw_value should equal value
 		found := false
 		for _, storedDp := range retrieved {
 			if storedDp.Month == "2024-06" {
-				// The stored value should be dp.Value (already decoded), not dp.RawValue * scale
+				// The stored value should be dp.Value (already decoded)
 				if storedDp.Value != 1005.0 {
 					t.Errorf("Stored value = %v, want %v", storedDp.Value, 1005.0)
+				}
+				// For scale=1 registers, raw_value should equal value
+				if storedDp.RawValue != 1005.0 {
+					t.Errorf("Stored raw_value = %v, want %v (same as value for scale=1)", storedDp.RawValue, 1005.0)
 				}
 				found = true
 				break
