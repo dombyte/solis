@@ -20,6 +20,16 @@ interface UpdateState {
   hasUpdate: boolean;
 }
 
+// Check if this is a real update (not first install or re-registration)
+// Based on the approach from https://github.com/deanhume/pwa-update-available
+// The updatefound event only fires when the service worker file actually changes
+// We just need to check if there's an active controller to distinguish first install
+const isRealUpdate = (): boolean => {
+  // If there's a controller, it means there's an existing service worker
+  // So if updatefound fires AND there's a controller, it's a real update
+  return !!navigator.serviceWorker.controller;
+};
+
 // Type guard for WorkboxType
 function isWorkboxType(obj: unknown): obj is WorkboxType {
   return (
@@ -46,31 +56,15 @@ export function useServiceWorkerUpdate() {
     if (!('serviceWorker' in navigator)) return;
 
     try {
-      // Get workbox instance from window
       const wb = window.__workbox;
       
       if (wb) {
         // Use workbox-window's update method to force check for updates
-        // update() returns void, updates are communicated via events
+        // This will trigger the updatefound event if there's an update
         await wb.update();
         
-        // After update(), check if there's a waiting service worker
-        // We need to check this after a small delay to allow the SW to process
-        setTimeout(async () => {
-          const registration = await navigator.serviceWorker.getRegistration();
-          const hasWaiting = !!registration?.waiting;
-          const hasActive = !!registration?.active;
-          
-          // Only consider it an update if there's an active SW being replaced
-          const isUpdate = hasWaiting && hasActive;
-          
-          setUpdateState({ hasUpdate: isUpdate });
-          if (isUpdate) {
-            updateAvailableRef.current = wb;
-          } else {
-            updateAvailableRef.current = null;
-          }
-        }, 100);
+        // Store the workbox instance for later use in triggerUpdate
+        updateAvailableRef.current = wb;
         
         // Reset retry counter
         checkAttemptsRef.current = 0;
@@ -79,36 +73,17 @@ export function useServiceWorkerUpdate() {
 
       // Fallback to native API if workbox-window is not available
       const registration = await navigator.serviceWorker.getRegistration();
-      const hasWaiting = !!registration?.waiting;
-      const hasActive = !!registration?.active;
       
-      if (hasWaiting) {
-        // Only show update banner if we have an active service worker
-        // This prevents false positives on initial registration
-        const isUpdate = hasActive;
-        
-        if (isUpdate) {
-          setUpdateState({ hasUpdate: true });
-          updateAvailableRef.current = null;
-        } else {
-          // This is initial registration, not an update
-          setUpdateState({ hasUpdate: false });
-          updateAvailableRef.current = null;
-        }
-        
-        // Reset retry counter since we found a registration
-        checkAttemptsRef.current = 0;
-      } else {
-        // Reset state when no update is waiting
-        setUpdateState({ hasUpdate: false });
+      if (registration) {
+        // Force an update check
+        await registration.update();
         updateAvailableRef.current = null;
-        
+        checkAttemptsRef.current = 0;
+      } else if (checkAttemptsRef.current < MAX_CHECK_ATTEMPTS) {
         // If no registration yet, retry after a short delay
         // This handles the case when PWA is first launching
-        if (!registration && checkAttemptsRef.current < MAX_CHECK_ATTEMPTS) {
-          checkAttemptsRef.current++;
-          setTimeout(() => checkForUpdateRef.current?.(), 500);
-        }
+        checkAttemptsRef.current++;
+        setTimeout(() => checkForUpdateRef.current?.(), 500);
       }
     } catch (error) {
       console.error('Error checking for SW update:', error);
@@ -152,21 +127,23 @@ export function useServiceWorkerUpdate() {
 
     let registration: ServiceWorkerRegistration | null = null;
     let wb: any = null;
+    let newWorker: ServiceWorker | null = null;
+    
+    const handleStateChange = () => {
+      // Only show update when the new worker is installed
+      if (newWorker?.state === 'installed' && isRealUpdate()) {
+        setUpdateState({ hasUpdate: true });
+      }
+    };
     
     const handleUpdateFound = () => {
-      // When an update is found, check immediately and then continue periodic checks
-      // Add a small delay to avoid race conditions during initial registration
-      setTimeout(() => checkForUpdate(), 100);
-    };
-
-    const handleWorkboxWaiting = () => {
-      // workbox-window emits 'waiting' event when update is available
-      console.log('Workbox waiting event fired');
-      // Use a timeout to avoid synchronous setState in useEffect
-      setTimeout(() => {
-        setUpdateState({ hasUpdate: true });
-        updateAvailableRef.current = wb;
-      }, 0);
+      // When an update is found (native SW API event)
+      // This only fires when the service worker file actually changes
+      // Get the installing worker and listen for state changes
+      if (registration?.installing) {
+        newWorker = registration.installing;
+        newWorker.addEventListener('statechange', handleStateChange);
+      }
     };
 
     const handleControlling = () => {
@@ -175,10 +152,10 @@ export function useServiceWorkerUpdate() {
     };
 
     // Start checking after a small delay to let SW register
-    // This does an initial check to see if there's an update available on app load
+    // The browser automatically checks for SW updates on page load
+    // We just need to listen for the updatefound event
     const initialDelay = setTimeout(() => {
       checkAttemptsRef.current = 0;
-      checkForUpdate();
     }, 1000);
 
     // Setup listeners
@@ -187,13 +164,11 @@ export function useServiceWorkerUpdate() {
       wb = window.__workbox;
       
       if (wb) {
-        // Listen to workbox-window events
-        wb.addEventListener('waiting', handleWorkboxWaiting);
-        wb.addEventListener('externalwaiting', handleWorkboxWaiting);
+        // Listen to workbox-window controlling event
         wb.addEventListener('controlling', handleControlling);
       }
 
-      // Also listen for native updatefound events on the registration
+      // Listen for native updatefound events on the registration
       const reg = await navigator.serviceWorker.getRegistration();
       if (reg) {
         registration = reg;
@@ -207,9 +182,10 @@ export function useServiceWorkerUpdate() {
       if (registration) {
         registration.removeEventListener('updatefound', handleUpdateFound);
       }
+      if (newWorker) {
+        newWorker.removeEventListener('statechange', handleStateChange);
+      }
       if (wb) {
-        wb.removeEventListener('waiting', handleWorkboxWaiting);
-        wb.removeEventListener('externalwaiting', handleWorkboxWaiting);
         wb.removeEventListener('controlling', handleControlling);
       }
     };
