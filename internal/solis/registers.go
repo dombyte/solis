@@ -121,6 +121,10 @@ var DailyToMonthlyMap = map[string]string{
 	"grid_import_daily":        "grid_import_monthly",
 	"battery_discharge_daily":  "battery_discharge_monthly",
 	"battery_charge_daily":     "battery_charge_monthly",
+	// Directly-polled energy registers that also have daily equivalents
+	"pv_energy_daily":         "pv_energy_monthly",
+	"household_energy_daily":  "household_energy_monthly",
+	"backup_energy_daily":     "backup_energy_monthly",
 }
 
 // DailyToYearlyMap maps daily register keys to their corresponding yearly register keys.
@@ -131,6 +135,10 @@ var DailyToYearlyMap = map[string]string{
 	"grid_import_daily":        "grid_import_yearly",
 	"battery_discharge_daily":  "battery_discharge_yearly",
 	"battery_charge_daily":     "battery_charge_yearly",
+	// Directly-polled energy registers that also have daily equivalents
+	"pv_energy_daily":         "pv_energy_yearly",
+	"household_energy_daily":  "household_energy_yearly",
+	"backup_energy_daily":     "backup_energy_yearly",
 }
 
 // DailyRegisterKeys are the register keys that should have daily aggregation.

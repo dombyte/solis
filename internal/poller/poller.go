@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dombyte/solis/internal/aggregator"
 	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/logging"
@@ -30,10 +31,11 @@ type LastPollInfo struct {
 // Poller is the background service that polls the Solis inverter for register data.
 // It uses a single Modbus connection for sequential range reads.
 type Poller struct {
-	config  *config.PollerSettings
-	modbus  *modbus.Client
-	storage *storage.Storage
-	cache   *cache.Cache
+	config     *config.PollerSettings
+	modbus     *modbus.Client
+	storage    *storage.Storage
+	cache      *cache.Cache
+	aggregator *aggregator.Aggregator
 
 	// Lifecycle management
 	ctx     context.Context
@@ -47,6 +49,9 @@ type Poller struct {
 	lastPollTime time.Time
 	lastPollInfo *LastPollInfo
 	lastPollErr  error
+
+	// Track first poll completion for aggregator signaling
+	firstPollDone bool
 }
 
 // New creates a new Poller instance.
@@ -82,6 +87,14 @@ func WithStorage(st *storage.Storage) Option {
 func WithCache(ca *cache.Cache) Option {
 	return func(p *Poller) {
 		p.cache = ca
+	}
+}
+
+// WithAggregator sets the aggregator for the poller.
+// The poller will signal the aggregator when the first poll completes.
+func WithAggregator(agg *aggregator.Aggregator) Option {
+	return func(p *Poller) {
+		p.aggregator = agg
 	}
 }
 
@@ -200,6 +213,8 @@ func (p *Poller) performPollAndStore() {
 
 	if err != nil {
 		p.handlePollError(err, pollDuration)
+		// Signal aggregator about first poll completion (even with error)
+		p.signalAggregatorFirstPoll(err)
 		return
 	}
 
@@ -214,6 +229,9 @@ func (p *Poller) performPollAndStore() {
 
 	// Update stats
 	p.updatePollStats(pollDuration, registersRead, len(values))
+
+	// Signal aggregator about first poll completion
+	p.signalAggregatorFirstPoll(nil)
 }
 
 // handlePollError handles errors from poll operations.
@@ -227,6 +245,19 @@ func (p *Poller) handlePollError(err error, pollDuration time.Duration) {
 
 	// Don't add extra sleep - the next poll will happen at the scheduled interval
 	// The modbus layer handles reconnection automatically
+}
+
+// signalAggregatorFirstPoll signals the aggregator that the first poll has completed.
+// This is called after every poll, but only has effect on the first poll.
+func (p *Poller) signalAggregatorFirstPoll(err error) {
+	p.mu.Lock()
+	if !p.firstPollDone && p.aggregator != nil {
+		p.firstPollDone = true
+		p.mu.Unlock()
+		p.aggregator.SignalFirstPollDone(err)
+	} else {
+		p.mu.Unlock()
+	}
 }
 
 // filterComputedRegisters filters out computed registers from the results.

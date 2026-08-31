@@ -54,7 +54,7 @@ func runApp() error {
 		return err
 	}
 
-	modbusClient, pl, err := initializeModbusAndPoller(cfg, st, ca)
+	modbusClient, pl, err := initializeModbusAndPoller(cfg, st, ca, agg)
 	if err != nil {
 		return err
 	}
@@ -144,9 +144,9 @@ func initializeApplicationServices(cfg *config.AppConfig, st *storage.Storage) (
 
 	var agg *aggregator.Aggregator
 	if cfg.Aggregator.Interval > 0 {
+		// Create aggregator but don't start it yet - we need to pass it to poller first
 		agg = aggregator.New(st, ca, &cfg.Aggregator)
-		agg.Start()
-		logger.Info().Msgf("Aggregator started with interval: %s", cfg.Aggregator.Interval)
+		logger.Info().Msgf("Aggregator created with interval: %s", cfg.Aggregator.Interval)
 	} else {
 		logger.Info().Msg("Aggregator disabled (interval not configured)")
 	}
@@ -155,7 +155,7 @@ func initializeApplicationServices(cfg *config.AppConfig, st *storage.Storage) (
 }
 
 // initializeModbusAndPoller initializes Modbus client and poller if not in serve-only mode
-func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *cache.Cache) (*modbus.Client, *poller.Poller, error) {
+func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *cache.Cache, agg *aggregator.Aggregator) (*modbus.Client, *poller.Poller, error) {
 	var modbusClient *modbus.Client
 	var pl *poller.Poller
 
@@ -166,8 +166,15 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 			return nil, nil, fmt.Errorf("failed to create Modbus client: %v", err)
 		}
 
-		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca))
+		// Pass aggregator to poller so poller can signal when first poll completes
+		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithAggregator(agg))
 		pl.Start()
+
+		// Start aggregator now that poller has a reference to it
+		if agg != nil {
+			agg.Start()
+			logger.Info().Msgf("Aggregator started with interval: %s", cfg.Aggregator.Interval)
+		}
 
 		go modbusClient.StartReconnectionLoop(context.Background())
 
@@ -181,6 +188,11 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 		}()
 		logger.Info().Msg("Poller and reconnection loop started")
 	} else {
+		// Start aggregator even in serve-only mode (it will compute from existing storage)
+		if agg != nil {
+			agg.Start()
+			logger.Info().Msgf("Aggregator started with interval: %s (serve-only mode)", cfg.Aggregator.Interval)
+		}
 		logger.Info().Msg("Running in serve-only mode - Modbus and poller disabled")
 	}
 

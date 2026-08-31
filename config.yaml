@@ -54,3 +54,4 @@ aggregator:
   # Interval for recomputing monthly/yearly/net values
   # Default: 60s
   interval: 30s
+  backfill_current_year_monthly: true

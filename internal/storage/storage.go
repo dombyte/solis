@@ -1266,6 +1266,62 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	return tx.Commit()
 }
 
+// StoreTotalDataPoint stores a total (lifetime) data point in the total_values table.
+// This is used for net total values like grid_energy_total.
+func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	reg, ok := solis.RegisterMapByKey[key]
+	if !ok {
+		return fmt.Errorf("register %s not found", key)
+	}
+
+	// Calculate decoded value using the register's scale
+	decodedValue := dp.RawValue * reg.Scale
+
+	// For net energy registers, always update (they can be negative or decrease)
+	// For other total registers, only update if value is higher
+	isNetRegister := key == "grid_energy_total"
+
+	// Get existing value
+	var existingValue float64
+	err = tx.QueryRow(`
+		SELECT value FROM total_values
+		WHERE register_key = ?
+	`, key).Scan(&existingValue)
+
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("failed to query existing total value: %w", err)
+	}
+
+	if err == sql.ErrNoRows {
+		// New record, insert
+		_, err = tx.Exec(`
+			INSERT INTO total_values (register_key, value, raw_value, timestamp)
+			VALUES (?, ?, ?, ?)
+		`, key, decodedValue, dp.RawValue, dp.Timestamp)
+	} else {
+		// Update existing: net registers always update, others only if higher
+		if isNetRegister || decodedValue > existingValue {
+			_, err = tx.Exec(`
+				UPDATE total_values
+				SET value = ?, raw_value = ?, timestamp = ?
+				WHERE register_key = ?
+			`, decodedValue, dp.RawValue, dp.Timestamp, key)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to store total data point: %w", err)
+	}
+
+	return tx.Commit()
+}
+
 // GetTotalHistory retrieves the total (lifetime) value for a specific register key.
 // Returns the latest stored value.
 func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {

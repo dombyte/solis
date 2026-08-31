@@ -113,6 +113,12 @@ type AggregatorSettings struct {
 	// Example: "60s", "5m", "1h"
 	// Default: "60s"
 	Interval time.Duration `mapstructure:"interval"`
+
+	// BackfillCurrentYearMonthly enables backfilling all monthly data for the current year on startup.
+	// When enabled, the aggregator will recompute and overwrite ALL monthly values for the current year.
+	// This is a one-time operation that runs only at startup.
+	// Default: false (to prevent accidental data overwrites)
+	BackfillCurrentYearMonthly bool `mapstructure:"backfill_current_year_monthly"`
 }
 
 // setDefaults configures default values for Viper.
@@ -132,6 +138,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Aggregator defaults
 	v.SetDefault("aggregator.interval", "60s")
+	v.SetDefault("aggregator.backfill_current_year_monthly", false)
 
 	// Modbus defaults
 	v.SetDefault("modbus.type", "tcp")
