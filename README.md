@@ -155,6 +155,17 @@ SOLIS_APP_SERVE_ONLY=true ./solis
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `interval` | duration | 60s | Interval for recomputing monthly/yearly/net values |
+| `backfill_current_year_monthly` | boolean | false | **WARNING**: When enabled, recomputes and OVERWRITES all monthly data for the current year from daily values on startup. See warning below. |
+
+> **⚠️ WARNING: Backfill Option**
+> 
+> The `backfill_current_year_monthly` option should **only be enabled when you need to rebuild monthly aggregates from daily data**. When enabled:
+> - On startup, the aggregator will **delete and recompute ALL monthly values for the current year**
+> - This includes directly-polled monthly registers like `pv_energy_monthly`, `household_energy_monthly`, `backup_energy_monthly`
+> - Polled values from the inverter will be **overwritten** with computed values from daily aggregation
+> - Only affects the current year's data (past years are safe)
+> 
+> **Keep this disabled (false) for normal operation** to prevent accidental data loss. Only enable temporarily if you need to rebuild monthly aggregates, then disable it again and restart.
 
 ### Database Maintenance
 

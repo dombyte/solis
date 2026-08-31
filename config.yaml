@@ -54,4 +54,7 @@ aggregator:
   # Interval for recomputing monthly/yearly/net values
   # Default: 60s
   interval: 30s
-  backfill_current_year_monthly: true
+  # WARNING: Only enable if you need to rebuild monthly aggregates from daily data.
+  # When enabled, this will OVERWRITE all monthly values for the current year on startup.
+  # Keep disabled (false) for normal operation to prevent accidental data loss.
+  backfill_current_year_monthly: false

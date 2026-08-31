@@ -115,8 +115,16 @@ type AggregatorSettings struct {
 	Interval time.Duration `mapstructure:"interval"`
 
 	// BackfillCurrentYearMonthly enables backfilling all monthly data for the current year on startup.
-	// When enabled, the aggregator will recompute and overwrite ALL monthly values for the current year.
+	// 
+	// WARNING: When enabled, the aggregator will DELETE and RECOMPUTE ALL monthly values
+	// for the current year from daily data. This includes directly-polled monthly registers like
+	// pv_energy_monthly, household_energy_monthly, and backup_energy_monthly.
+	// Polled values from the inverter will be OVERWRITTEN with computed values.
+	// 
 	// This is a one-time operation that runs only at startup.
+	// Keep this DISABLED (false) for normal operation to prevent accidental data loss.
+	// Only enable temporarily when you need to rebuild monthly aggregates, then disable and restart.
+	// 
 	// Default: false (to prevent accidental data overwrites)
 	BackfillCurrentYearMonthly bool `mapstructure:"backfill_current_year_monthly"`
 }
