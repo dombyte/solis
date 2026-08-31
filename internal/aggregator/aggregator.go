@@ -163,6 +163,9 @@ func (a *Aggregator) computeAll() {
 }
 
 // computeAndStoreDailyToMonthly computes monthly values from daily storage and stores in DB.
+// This only processes COMPUTED monthly registers (those in DailyToMonthlyMap), not directly-polled ones.
+// Directly-polled monthly registers (like pv_energy_monthly, household_energy_monthly) are stored
+// by the poller and should not be overwritten by the aggregator during normal operation.
 func (a *Aggregator) computeAndStoreDailyToMonthly() {
 	// Skip if storage is not configured
 	if a.storage == nil {
@@ -215,6 +218,9 @@ func (a *Aggregator) computeAndStoreDailyToMonthly() {
 }
 
 // computeAndStoreDailyToYearly computes yearly values from daily storage and stores in DB.
+// This only processes COMPUTED yearly registers (those in DailyToYearlyMap), not directly-polled ones.
+// Directly-polled yearly registers (like pv_energy_yearly, household_energy_yearly) are stored
+// by the poller and should not be overwritten by the aggregator during normal operation.
 func (a *Aggregator) computeAndStoreDailyToYearly() {
 	// Skip if storage is not configured
 	if a.storage == nil {
@@ -497,11 +503,18 @@ func (a *Aggregator) updateCache(values map[string]*solis.Value) {
 
 // backfillCurrentYearMonthly recomputes and overwrites ALL monthly data for the current year.
 // This runs once at startup if BackfillCurrentYearMonthly is enabled in config.
+// 
+// NOTE: This uses BackfillDailyToMonthlyMap which includes BOTH:
+//   - Computed monthly registers (energy_consumption_monthly, grid_export_monthly, etc.)
+//   - Directly-polled monthly registers (pv_energy_monthly, household_energy_monthly, backup_energy_monthly)
+// 
+// For directly-polled registers, the backfill will OVERWRITE the polled values with computed
+// values from daily aggregation. This is intentional when backfill is enabled.
 func (a *Aggregator) backfillCurrentYearMonthly() {
 	currentYear := time.Now().Format("2006")
 	logger.Info().Msgf("Starting backfill of monthly data for year %s", currentYear)
 
-	for dailyKey, monthlyKey := range solis.DailyToMonthlyMap {
+	for dailyKey, monthlyKey := range solis.BackfillDailyToMonthlyMap {
 		// Get all daily data for current year
 		startDate := time.Date(time.Now().Year(), time.January, 1, 0, 0, 0, 0, time.Local)
 		endDate := time.Date(time.Now().Year(), time.December, 31, 23, 59, 59, 0, time.Local)
@@ -534,15 +547,9 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 				continue
 			}
 			
-			// Get register for scaling
-			reg, ok := solis.RegisterMapByKey[monthlyKey]
-			if !ok {
-				tx.Rollback()
-				logger.Error().Msgf("Register %s not found", monthlyKey)
-				continue
-			}
-			
-			decodedValue := dp.Value * reg.Scale
+			// For backfill, dp.Value is already the sum of scaled daily values,
+			// so we use it directly without any scaling
+			decodedValue := dp.Value
 			
 			// Insert new value
 			_, err = tx.Exec(`
@@ -576,10 +583,10 @@ func aggregateDailyToMonthly(dailyHistory []*storage.DailyDataPoint) map[string]
 				RawValue: 0,
 			}
 		}
-		// Sum the already-scaled daily values (dp.Value contains the scaled value from daily_values)
-		// For computed registers with Scale=1, both Value and RawValue should equal this sum
+		// Sum the already-scaled daily values for Value
+		// Sum the raw daily values for RawValue
 		calculatedMap[month].Value += dp.Value
-		calculatedMap[month].RawValue += dp.Value
+		calculatedMap[month].RawValue += dp.RawValue
 	}
 	return calculatedMap
 }

@@ -115,7 +115,19 @@ var RegisterMapByKey = buildRegisterMapByKey()
 
 // DailyToMonthlyMap maps daily register keys to their corresponding monthly register keys.
 // Used by the aggregator to compute monthly values from daily storage.
+// These are COMPUTED registers (not directly polled) that should be aggregated from daily values.
 var DailyToMonthlyMap = map[string]string{
+	"energy_consumption_daily": "energy_consumption_monthly",
+	"grid_export_daily":        "grid_export_monthly",
+	"grid_import_daily":        "grid_import_monthly",
+	"battery_discharge_daily":  "battery_discharge_monthly",
+	"battery_charge_daily":     "battery_charge_monthly",
+}
+
+// BackfillDailyToMonthlyMap includes ALL daily-to-monthly mappings, including
+// directly-polled registers. Used by the backfill to recompute ALL monthly values
+// from daily data, overriding any polled values for the current year.
+var BackfillDailyToMonthlyMap = map[string]string{
 	"energy_consumption_daily": "energy_consumption_monthly",
 	"grid_export_daily":        "grid_export_monthly",
 	"grid_import_daily":        "grid_import_monthly",
@@ -129,7 +141,19 @@ var DailyToMonthlyMap = map[string]string{
 
 // DailyToYearlyMap maps daily register keys to their corresponding yearly register keys.
 // Used by the aggregator to compute yearly values from daily storage.
+// These are COMPUTED registers (not directly polled) that should be aggregated from daily values.
 var DailyToYearlyMap = map[string]string{
+	"energy_consumption_daily": "energy_consumption_yearly",
+	"grid_export_daily":        "grid_export_yearly",
+	"grid_import_daily":        "grid_import_yearly",
+	"battery_discharge_daily":  "battery_discharge_yearly",
+	"battery_charge_daily":     "battery_charge_yearly",
+}
+
+// BackfillDailyToYearlyMap includes ALL daily-to-yearly mappings, including
+// directly-polled registers. Used by the backfill to recompute ALL yearly values
+// from daily data, overriding any polled values for the current year.
+var BackfillDailyToYearlyMap = map[string]string{
 	"energy_consumption_daily": "energy_consumption_yearly",
 	"grid_export_daily":        "grid_export_yearly",
 	"grid_import_daily":        "grid_import_yearly",
