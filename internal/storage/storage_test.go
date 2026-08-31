@@ -565,10 +565,12 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 	}()
 
 	// Create a test monthly data point
+	// For computed monthly registers, Value should be the decoded/summed value
+	// and RawValue should be the sum of daily raw values
 	dp := &MonthlyDataPoint{
 		Month:    "2024-06",
-		Value:    100.5,
-		RawValue: 1005,
+		Value:    1005.0,  // This is the decoded monthly value (what we want stored)
+		RawValue: 10050.0, // This is the sum of daily raw values (for auditing)
 	}
 
 	// Store it for a valid register key
@@ -592,8 +594,10 @@ func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
 		found := false
 		for _, storedDp := range retrieved {
 			if storedDp.Month == "2024-06" {
-				// Note: the stored value is scaled by the register's scale
-				// For computed registers, scale is 1, so value should equal RawValue
+				// The stored value should be dp.Value (already decoded), not dp.RawValue * scale
+				if storedDp.Value != 1005.0 {
+					t.Errorf("Stored value = %v, want %v", storedDp.Value, 1005.0)
+				}
 				found = true
 				break
 			}
@@ -655,10 +659,12 @@ func TestStorage_StoreYearlyDataPoint(t *testing.T) {
 	}()
 
 	// Create a test yearly data point
+	// For computed yearly registers, Value should be the decoded/summed value
+	// and RawValue should be the sum of daily raw values
 	dp := &YearlyDataPoint{
 		Year:     "2024",
-		Value:    1000.5,
-		RawValue: 10005,
+		Value:    10005.0, // This is the decoded yearly value (what we want stored)
+		RawValue: 100050.0, // This is the sum of daily raw values (for auditing)
 	}
 
 	// Store it for a valid register key
@@ -681,6 +687,10 @@ func TestStorage_StoreYearlyDataPoint(t *testing.T) {
 		found := false
 		for _, storedDp := range retrieved {
 			if storedDp.Year == "2024" {
+				// The stored value should be dp.Value (already decoded), not dp.RawValue * scale
+				if storedDp.Value != 10005.0 {
+					t.Errorf("Stored value = %v, want %v", storedDp.Value, 10005.0)
+				}
 				found = true
 				break
 			}

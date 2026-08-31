@@ -1161,14 +1161,14 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 	}
 	defer tx.Rollback()
 
-	// Get register definition to apply scaling
-	reg, ok := solis.RegisterMapByKey[key]
-	if !ok {
+	// Validate that the register exists
+	if _, ok := solis.RegisterMapByKey[key]; !ok {
 		return fmt.Errorf("register %s not found", key)
 	}
 
-	// Calculate decoded value using the register's scale
-	decodedValue := dp.RawValue * reg.Scale
+	// For computed registers, dp.Value is already the decoded/summed value.
+	// Use it directly instead of recomputing from RawValue.
+	decodedValue := dp.Value
 
 	// Get existing value for this month
 	var existingValue float64
@@ -1218,14 +1218,14 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	}
 	defer tx.Rollback()
 
-	// Get register definition to apply scaling
-	reg, ok := solis.RegisterMapByKey[key]
-	if !ok {
+	// Validate that the register exists
+	if _, ok := solis.RegisterMapByKey[key]; !ok {
 		return fmt.Errorf("register %s not found", key)
 	}
 
-	// Calculate decoded value using the register's scale
-	decodedValue := dp.RawValue * reg.Scale
+	// For computed registers, dp.Value is already the decoded/summed value.
+	// Use it directly instead of recomputing from RawValue.
+	decodedValue := dp.Value
 
 	// For net energy registers, always update (they can be negative or decrease)
 	// For other yearly registers (energy totals), only update if value is higher
