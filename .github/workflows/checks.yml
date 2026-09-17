@@ -1,0 +1,125 @@
+# name: Checks
+
+
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     types: [opened, edited, synchronize, ready_for_review, reopened]
+
+# permissions:
+#   contents: read
+
+# jobs:
+#   validate:
+#     name: Quick Validation
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v7
+
+#       - name: Set up Go
+#         uses: actions/setup-go@v7
+#         with:
+#           go-version-file: go.mod
+
+#       - name: Download dependencies
+#         run: go mod download
+
+#       - name: Verify module tidiness
+#         run: go mod tidy && git diff --exit-code
+
+#       - name: Build all packages
+#         run: go build ./...
+
+#       - name: Run tests
+#         run: go test -v ./...
+
+#   golangci-lint:
+#     name: golangci-lint
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v7
+
+#       - name: Set up Go
+#         uses: actions/setup-go@v7
+#         with:
+#           go-version-file: go.mod
+
+#       - name: Run golangci-lint with all linters
+#         uses: golangci/golangci-lint-action@v9
+#         with:
+#           version: latest
+#           args: --timeout=5m
+
+#   # Function length check (< 40 lines)
+#   function-length:
+#     name: Function Length Check
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v7
+
+#       - name: Check function lengths
+#         run: |
+#           echo "Checking for functions exceeding 40 lines..."
+#           LONG_FUNCS=$(awk '
+#             FNR == 1 {
+#               in_func=0
+#               lines=0
+#             }
+#             /^func / {
+#               if (in_func && lines > 40) {
+#                 print FILENAME ": line " start_line ": function is " lines " lines (> 40)"
+#               }
+#               in_func=1
+#               start_line=FNR
+#               lines=1
+#               next
+#             }
+#             in_func { lines++ }
+#             END {
+#               if (in_func && lines > 40) {
+#                 print FILENAME ": line " start_line ": function is " lines " lines (> 40)"
+#               }
+#             }
+#           ' $(find . -name "*.go" -not -path "./test/*" -not -path "./mocks/*" -not -path "./.git/*" -not -path "./vendor/*" -not -name "*_test.go") 2>/dev/null || true)
+
+#           if [ -n "$LONG_FUNCS" ]; then
+#             echo "$LONG_FUNCS"
+#             echo "::error::Functions exceed 40 line limit"
+#             exit 1
+#           fi
+#           echo "All functions are under 40 lines"
+
+
+
+#   custom-compliance:
+#     name: Custom Compliance Checks
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v7
+
+#       - name: Check for global state
+#         run: |
+#           echo "Checking for package-level global state (excluding cmd/)..."
+#           GLOBAL_VARS=$(grep -rn "^var [a-z]" --include="*.go" . | grep -v "_test.go" | grep -v "// " | grep -v "mock" | grep -v "cmd/" | grep -v "^var [a-z].*=.*$" || true)
+#           if [ -n "$GLOBAL_VARS" ]; then
+#             echo "::error::Found package-level global state:"
+#             echo "$GLOBAL_VARS"
+#             exit 1
+#           fi
+#           echo "No package-level global state found"
+
+#       - name: Check for panic usage
+#         run: |
+#           echo "Checking for panic usage (excluding tests and recovery)..."
+#           PANICS=$(grep -rn "panic(" --include="*.go" . | grep -v "_test.go" | grep -v "recover" | grep -v "// " || true)
+#           if [ -n "$PANICS" ]; then
+#             echo "::error::Found panic calls (only allowed in startup):"
+#             echo "$PANICS"
+#             exit 1
+#           fi
+#           echo "No runtime panics found"

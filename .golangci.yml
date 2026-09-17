@@ -1,0 +1,94 @@
+# Gatekeeper golangci-lint Configuration
+# Customized per Global AI Work Plan v2.1
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  enable:
+    # Style and best practices
+    - revive
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+
+    # Error handling
+    - errcheck
+
+    # Security
+    - gosec
+
+    # Performance and complexity
+    - ineffassign
+    - gocyclo
+    - dupl
+
+    # Code structure
+    - lll
+
+  exclusions:
+    paths:
+      - test/
+      - mocks/
+      - reff/
+      - vendor/
+    rules:
+      - linters: [revive]
+        path: _test\.go
+      - linters: [revive]
+        path: mocks/
+      - linters: [dupl]
+        path: _test\.go
+
+
+  settings:
+    # Line length linter - hard limit of 100 chars per Global Plan
+    lll:
+      line-length: 100
+
+    # Cyclomatic complexity linter - warn on complexity >= 8 per Global Plan
+    gocyclo:
+      min-complexity: 8
+
+    # Duplicate code linter - 50% similarity threshold
+    dupl:
+      threshold: 50
+
+    # Gosec linter - security checks
+    gosec:
+      confidence: high
+
+    # Revive linter - modern replacement for golint
+    # Note: revive uses a different configuration format in v2
+    revive:
+      # Enable default rules
+      severity: warning
+      confidence: 0.8
+      # Custom rules configuration
+      rules:
+        # Documentation: require docs for exported identifiers
+        - name: exported
+          disabled: false
+
+        # Documentation: require package comments
+        - name: package-comments
+          disabled: false
+
+        # Style: max function length
+        - name: function-length
+          disabled: false
+          arguments: [40, 0]
+
+        # Style: max function parameters
+        - name: argument-limit
+          disabled: false
+          arguments: [5]
+
+run:
+  timeout: 5m
+  allow-parallel-runners: true
+  modules-download-mode: readonly
