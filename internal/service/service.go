@@ -206,8 +206,6 @@ func (s *ReadService) GetDailyHistory(key string, start, end time.Time) ([]*stor
 	return s.storage.GetDailyHistory(key, start, end)
 }
 
-
-
 // GetDeviceInfo returns all stable register values (device information).
 // Stable registers are only stored in cache, not in the database.
 func (s *ReadService) GetDeviceInfo() (map[string]*solis.Value, error) {
@@ -331,9 +329,3 @@ func (s *ReadService) GetTotalHistory(key string) (*storage.TotalDataPoint, erro
 	// which stores them in the database. Simply retrieve from storage.
 	return s.storage.GetTotalHistory(key)
 }
-
-
-
-
-
-

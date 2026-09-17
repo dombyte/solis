@@ -667,7 +667,7 @@ func TestStorage_StoreYearlyDataPoint(t *testing.T) {
 	// and RawValue should be the sum of daily raw values
 	dp := &YearlyDataPoint{
 		Year:     "2024",
-		Value:    10005.0, // This is the decoded yearly value (what we want stored)
+		Value:    10005.0,  // This is the decoded yearly value (what we want stored)
 		RawValue: 100050.0, // This is the sum of daily raw values (for auditing)
 	}
 

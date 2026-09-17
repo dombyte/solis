@@ -134,9 +134,9 @@ var BackfillDailyToMonthlyMap = map[string]string{
 	"battery_discharge_daily":  "battery_discharge_monthly",
 	"battery_charge_daily":     "battery_charge_monthly",
 	// Directly-polled energy registers that also have daily equivalents
-	"pv_energy_daily":         "pv_energy_monthly",
-	"household_energy_daily":  "household_energy_monthly",
-	"backup_energy_daily":     "backup_energy_monthly",
+	"pv_energy_daily":        "pv_energy_monthly",
+	"household_energy_daily": "household_energy_monthly",
+	"backup_energy_daily":    "backup_energy_monthly",
 }
 
 // DailyToYearlyMap maps daily register keys to their corresponding yearly register keys.
@@ -160,9 +160,9 @@ var BackfillDailyToYearlyMap = map[string]string{
 	"battery_discharge_daily":  "battery_discharge_yearly",
 	"battery_charge_daily":     "battery_charge_yearly",
 	// Directly-polled energy registers that also have daily equivalents
-	"pv_energy_daily":         "pv_energy_yearly",
-	"household_energy_daily":  "household_energy_yearly",
-	"backup_energy_daily":     "backup_energy_yearly",
+	"pv_energy_daily":        "pv_energy_yearly",
+	"household_energy_daily": "household_energy_yearly",
+	"backup_energy_daily":    "backup_energy_yearly",
 }
 
 // DailyRegisterKeys are the register keys that should have daily aggregation.

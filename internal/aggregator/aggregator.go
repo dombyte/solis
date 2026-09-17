@@ -46,11 +46,11 @@ type Aggregator struct {
 // immediately before returning (synchronously).
 func New(storage *storage.Storage, cache *cache.Cache, cfg *config.AggregatorSettings) *Aggregator {
 	a := &Aggregator{
-		storage:      storage,
-		cache:        cache,
-		config:       cfg,
-		stopChan:     make(chan struct{}),
-		isRunning:    false,
+		storage:       storage,
+		cache:         cache,
+		config:        cfg,
+		stopChan:      make(chan struct{}),
+		isRunning:     false,
 		firstPollDone: make(chan struct{}),
 	}
 
@@ -504,11 +504,11 @@ func (a *Aggregator) updateCache(values map[string]*solis.Value) {
 
 // backfillCurrentYearMonthly recomputes and overwrites ALL monthly data for the current year.
 // This runs once at startup if BackfillCurrentYearMonthly is enabled in config.
-// 
+//
 // NOTE: This uses BackfillDailyToMonthlyMap which includes BOTH:
 //   - Computed monthly registers (energy_consumption_monthly, grid_export_monthly, etc.)
 //   - Directly-polled monthly registers (pv_energy_monthly, household_energy_monthly, backup_energy_monthly)
-// 
+//
 // For directly-polled registers, the backfill will OVERWRITE the polled values with computed
 // values from daily aggregation. This is intentional when backfill is enabled.
 func (a *Aggregator) backfillCurrentYearMonthly() {
@@ -538,7 +538,7 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 				logger.Error().Msgf("Failed to begin backfill transaction for %s: %v", monthlyKey, err)
 				continue
 			}
-			
+
 			// Delete existing entry for this month if it exists
 			_, err = tx.Exec(`DELETE FROM monthly_values WHERE register_key = ? AND month = ?`, monthlyKey, month)
 			if err != nil {
@@ -547,11 +547,11 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 					monthlyKey, month, err)
 				continue
 			}
-			
+
 			// For backfill, dp.Value is already the sum of scaled daily values,
 			// so we use it directly without any scaling
 			decodedValue := dp.Value
-			
+
 			// Get target register to compute raw_value based on its scale
 			reg, ok := solis.RegisterMapByKey[monthlyKey]
 			if !ok {
@@ -560,13 +560,13 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 				continue
 			}
 			rawValueForStorage := decodedValue / reg.Scale
-			
+
 			// Insert new value
 			_, err = tx.Exec(`
 				INSERT INTO monthly_values (month, register_key, value, raw_value)
 				VALUES (?, ?, ?, ?)
 			`, month, monthlyKey, decodedValue, rawValueForStorage)
-			
+
 			if err != nil {
 				tx.Rollback()
 				logger.Error().Msgf("Failed to backfill monthly value for %s month %s: %v",
@@ -592,7 +592,7 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 func (a *Aggregator) backfillNetMonthlyValues() {
 	// Get all months for current year that have backfilled grid_export/import values
 	currentYear := time.Now().Format("2006")
-	
+
 	// Get all months for grid_export_monthly in current year
 	rows, err := a.storage.DB().Query(`
 		SELECT month, value, raw_value 
@@ -600,13 +600,13 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 		WHERE register_key = ? AND month LIKE ?
 		ORDER BY month
 	`, "grid_export_monthly", currentYear+"-%")
-	
+
 	if err != nil {
 		logger.Warn().Msgf("Failed to query grid_export_monthly months: %v", err)
 		return
 	}
 	defer rows.Close()
-	
+
 	// Process each month
 	for rows.Next() {
 		var month string
@@ -615,14 +615,14 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 			logger.Warn().Msgf("Failed to scan grid_export_monthly: %v", err)
 			continue
 		}
-		
+
 		// Get corresponding grid_import_monthly value
 		var importMonthValue, importMonthRawValue float64
 		err = a.storage.DB().QueryRow(`
 			SELECT value, raw_value FROM monthly_values 
 			WHERE register_key = ? AND month = ?
 		`, "grid_import_monthly", month).Scan(&importMonthValue, &importMonthRawValue)
-		
+
 		if err != nil {
 			if err == sql.ErrNoRows {
 				logger.Debug().Msgf("No grid_import_monthly found for month %s, skipping grid_energy_monthly", month)
@@ -631,19 +631,19 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 			}
 			continue
 		}
-		
+
 		// Compute net value
 		netValue := fedMonthValue - importMonthValue
 		// For grid_energy_monthly (scale=1), raw_value should equal value
 		netRawValue := netValue
-		
+
 		// Store the net monthly value
 		tx, err := a.storage.DB().Begin()
 		if err != nil {
 			logger.Error().Msgf("Failed to begin transaction for grid_energy_monthly backfill: %v", err)
 			continue
 		}
-		
+
 		// Delete existing entry for this month if it exists
 		_, err = tx.Exec(`DELETE FROM monthly_values WHERE register_key = ? AND month = ?`, "grid_energy_monthly", month)
 		if err != nil {
@@ -651,13 +651,13 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 			logger.Error().Msgf("Failed to delete existing grid_energy_monthly for month %s: %v", month, err)
 			continue
 		}
-		
+
 		// Insert new value
 		_, err = tx.Exec(`
 			INSERT INTO monthly_values (month, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?)
 		`, month, "grid_energy_monthly", netValue, netRawValue)
-		
+
 		if err != nil {
 			tx.Rollback()
 			logger.Error().Msgf("Failed to backfill grid_energy_monthly for month %s: %v", month, err)
@@ -666,7 +666,7 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 			logger.Debug().Msgf("Backfilled grid_energy_monthly for month %s: %.1f", month, netValue)
 		}
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		logger.Warn().Msgf("Error iterating grid_export_monthly months: %v", err)
 	}

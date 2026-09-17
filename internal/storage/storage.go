@@ -1261,7 +1261,8 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 				UPDATE yearly_values
 				SET value = ?, raw_value = ?
 				WHERE register_key = ? AND year = ?
-			`, decodedValue, rawValueForStorage, key, dp.Year)		}
+			`, decodedValue, rawValueForStorage, key, dp.Year)
+		}
 	}
 
 	if err != nil {
