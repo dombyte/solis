@@ -18,8 +18,7 @@
     ":dependencyDashboard",
     ":enableVulnerabilityAlertsWithLabel('security')",
     ":preserveSemverRanges",
-    ":rebaseStalePrs",
-    "group:recommended"
+    ":rebaseStalePrs"
   ],
   "labels": ["renovate"],
   "ignoreUnstable": true,
