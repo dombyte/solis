@@ -22,21 +22,25 @@ func cacheMiddleware(next http.Handler) http.Handler {
 		// Assets: immutable, long cache
 		if strings.HasPrefix(path, "/assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-			// Index and SPA routes: no-store
-		} else if path == "/" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "/api/") &&
-			!strings.HasPrefix(path, "/health") && !strings.HasPrefix(path, "/ws") &&
-			!strings.HasPrefix(path, "/docs")) {
-			w.Header().Set("Cache-Control", "no-store")
-			// Manifest and data: no-cache
+		// Manifest and data: no-cache
 		} else if strings.HasPrefix(path, "/manifest.webmanifest") || strings.HasPrefix(path, "/data/") {
 			w.Header().Set("Cache-Control", "no-cache")
-			// sw.js: no-cache with max-age=0
+		// sw.js: no-cache with max-age=0
 		} else if strings.HasPrefix(path, "/sw.js") {
 			w.Header().Set("Cache-Control", "no-cache, max-age=0")
-			// Icons and static images: short cache
+		// Icons and static images: short cache
 		} else if strings.HasPrefix(path, "/favicon") || strings.HasPrefix(path, "/vite.svg") ||
 			strings.HasPrefix(path, "/pwa-") || strings.HasPrefix(path, "/apple-touch") {
 			w.Header().Set("Cache-Control", "public, max-age=86400")
+		// Index and SPA routes: no-store (must be last as it's a catch-all for /)
+		} else if path == "/" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "/api/") &&
+			!strings.HasPrefix(path, "/health") && !strings.HasPrefix(path, "/ws") &&
+			!strings.HasPrefix(path, "/docs") && !strings.HasPrefix(path, "/assets/") &&
+			!strings.HasPrefix(path, "/manifest.webmanifest") && !strings.HasPrefix(path, "/data/") &&
+			!strings.HasPrefix(path, "/sw.js") && !strings.HasPrefix(path, "/favicon") &&
+			!strings.HasPrefix(path, "/vite.svg") && !strings.HasPrefix(path, "/pwa-") &&
+			!strings.HasPrefix(path, "/apple-touch")) {
+			w.Header().Set("Cache-Control", "no-store")
 		}
 
 		next.ServeHTTP(w, r)
@@ -90,8 +94,14 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 		r.Handle("/data/*", http.StripPrefix("/data/", http.FileServer(http.Dir(filepath.Join(frontendDist, "data")))))
 
 		// Serve manifest and sw.js
-		r.Handle("/manifest.webmanifest", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/sw.js", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/manifest.webmanifest", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/manifest+json")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "manifest.webmanifest"))
+		}))
+		r.Handle("/sw.js", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "sw.js"))
+		}))
 		r.Handle("/vite.svg", http.FileServer(http.Dir(frontendDist)))
 
 		// Serve icon files
