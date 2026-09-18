@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -24,7 +25,8 @@ const (
 	maxMessageSize = 512 * 1024 // 512KB
 
 	// Time to wait before closing connection after write error.
-	closeGracePeriod = 10 * time.Second
+	// Must be shorter than HTTP server shutdown timeout (5s).
+	closeGracePeriod = 1 * time.Second
 )
 
 // Client is a middleman between the WebSocket connection and the hub.
@@ -34,10 +36,18 @@ type Client struct {
 	send chan []byte
 	// closeOnce ensures the send channel is only closed once
 	closeOnce sync.Once
+	// sendOpen is 1 when the send channel is open, 0 when closed (used with atomic)
+	sendOpen int32
 }
 
 // Send sends a message to this client.
+// Returns false if the send buffer is full or the channel is closed.
 func (c *Client) Send(message []byte) bool {
+	// Check if channel is closed before attempting to send
+	// This prevents panic from sending on a closed channel
+	if atomic.LoadInt32(&c.sendOpen) == 0 {
+		return false
+	}
 	select {
 	case c.send <- message:
 		return true
@@ -51,6 +61,7 @@ func (c *Client) Send(message []byte) bool {
 func (c *Client) Close() {
 	c.closeOnce.Do(func() {
 		close(c.send)
+		atomic.StoreInt32(&c.sendOpen, 0)
 	})
 }
 
@@ -149,9 +160,10 @@ func ServeWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) *Client {
 	}
 
 	client := &Client{
-		hub:  hub,
-		conn: conn,
-		send: make(chan []byte, 256),
+		hub:      hub,
+		conn:     conn,
+		send:     make(chan []byte, 256),
+		sendOpen: 1, // Channel starts open
 	}
 
 	hub.register <- client

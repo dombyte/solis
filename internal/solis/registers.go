@@ -287,10 +287,27 @@ var ComputedRegisterSet = map[string]bool{
 	"grid_energy_yearly":  true,
 }
 
+// NetRegisterSet contains registers that represent net energy values
+// (export - import). These should use LATEST value logic, not MAX value logic.
+var NetRegisterSet = map[string]bool{
+	"grid_energy_total":   true,
+	"grid_energy_daily":   true,
+	"grid_energy_monthly": true,
+	"grid_energy_yearly":  true,
+}
+
 // IsComputedRegister returns true if the key is a computed register
 // (monthly, yearly, or net values that are computed by the aggregator).
 func IsComputedRegister(key string) bool {
 	return ComputedRegisterSet[key]
+}
+
+// IsNetRegister returns true if the key is a net energy register.
+// Net energy registers (grid_energy_*) represent the difference between
+// export and import, and can be negative or decreasing. They should
+// store the LATEST value, not the MAX value.
+func IsNetRegister(key string) bool {
+	return NetRegisterSet[key]
 }
 
 // TotalRegisterKeys are the register keys that should have total aggregation.

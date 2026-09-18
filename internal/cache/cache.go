@@ -137,8 +137,6 @@ func (c *Cache) GetAll() map[string]*solis.Value {
 // Only the latest values are kept - old entries are removed.
 func (c *Cache) Set(values map[string]*solis.Value) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Replace entire cache with new values to ensure only latest entries are kept
 	// This prevents unbounded cache growth
 	c.data = make(map[string]*solis.Value, len(values))
@@ -148,10 +146,16 @@ func (c *Cache) Set(values map[string]*solis.Value) {
 	c.lastUpdate = time.Now()
 
 	logger.Debug().Msgf("Cache updated with %d values", len(values))
-
+	
+	// Check if we need to notify (outside the lock to avoid blocking)
+	needNotify := c.wsHub != nil
+	c.mu.Unlock()
+	
 	// Notify WebSocket clients if hub is configured and has clients
 	// Use throttling to prevent unbounded goroutine creation
-	if c.wsHub != nil && c.wsHub.ClientCount() > 0 {
+	// This is done OUTSIDE the lock to prevent the notification goroutine from
+	// blocking on the RLock (which would block until Lock is released)
+	if needNotify && c.wsHub.ClientCount() > 0 {
 		select {
 		case c.notifyChan <- struct{}{}:
 			go c.notifyWebSocketClients()
@@ -167,8 +171,6 @@ func (c *Cache) Set(values map[string]*solis.Value) {
 // Use this when multiple sources (poller and aggregator) need to update the cache independently.
 func (c *Cache) Merge(values map[string]*solis.Value) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	// Merge new values into existing cache
 	for key, value := range values {
 		c.data[key] = value
@@ -176,10 +178,16 @@ func (c *Cache) Merge(values map[string]*solis.Value) {
 	c.lastUpdate = time.Now()
 
 	logger.Debug().Msgf("Cache merged with %d values", len(values))
-
+	
+	// Check if we need to notify (outside the lock to avoid blocking)
+	needNotify := c.wsHub != nil
+	c.mu.Unlock()
+	
 	// Notify WebSocket clients if hub is configured and has clients
 	// Use throttling to prevent unbounded goroutine creation
-	if c.wsHub != nil && c.wsHub.ClientCount() > 0 {
+	// This is done OUTSIDE the lock to prevent the notification goroutine from
+	// blocking on the RLock (which would block until Lock is released)
+	if needNotify && c.wsHub.ClientCount() > 0 {
 		select {
 		case c.notifyChan <- struct{}{}:
 			go c.notifyWebSocketClients()

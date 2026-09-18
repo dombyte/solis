@@ -22,17 +22,17 @@ func cacheMiddleware(next http.Handler) http.Handler {
 		// Assets: immutable, long cache
 		if strings.HasPrefix(path, "/assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		// Manifest and data: no-cache
+			// Manifest and data: no-cache
 		} else if strings.HasPrefix(path, "/manifest.webmanifest") || strings.HasPrefix(path, "/data/") {
 			w.Header().Set("Cache-Control", "no-cache")
-		// sw.js: no-cache with max-age=0
+			// sw.js: no-cache with max-age=0
 		} else if strings.HasPrefix(path, "/sw.js") {
 			w.Header().Set("Cache-Control", "no-cache, max-age=0")
-		// Icons and static images: short cache
+			// Icons and static images: short cache
 		} else if strings.HasPrefix(path, "/favicon") || strings.HasPrefix(path, "/vite.svg") ||
 			strings.HasPrefix(path, "/pwa-") || strings.HasPrefix(path, "/apple-touch") {
 			w.Header().Set("Cache-Control", "public, max-age=86400")
-		// Index and SPA routes: no-store (must be last as it's a catch-all for /)
+			// Index and SPA routes: no-store (must be last as it's a catch-all for /)
 		} else if path == "/" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "/api/") &&
 			!strings.HasPrefix(path, "/health") && !strings.HasPrefix(path, "/ws") &&
 			!strings.HasPrefix(path, "/docs") && !strings.HasPrefix(path, "/assets/") &&

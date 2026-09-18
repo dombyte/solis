@@ -119,7 +119,7 @@ func startBackgroundServices(cfg *config.AppConfig, dbManager *database.Database
 		logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
 	}
 
-	if cfg.App.ServeOnly && cfg.Storage.CleanupInterval > 0 {
+	if cfg.Storage.CleanupInterval > 0 {
 		ctx := context.Background()
 		go func() {
 			if err := dbManager.StartPeriodicCleanup(ctx); err != nil {

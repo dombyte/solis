@@ -314,8 +314,12 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 
 	decodedValue := value.RawValue * reg.Scale
 
-	// For energy registers, we want the MAXIMUM value seen during the day
-	// (they reset at midnight, so the highest value is the end-of-day total)
+	// For most energy registers, we want the MAXIMUM value seen during the day
+	// (they reset at midnight, so the highest value is the end-of-day total).
+	// However, for NET energy registers (grid_energy_*), we want the LATEST value
+	// because net values can be negative or decreasing.
+	isNetRegister := solis.IsNetRegister(key)
+
 	if err == sql.ErrNoRows {
 		// New day, insert new record
 		_, err = tx.Exec(`
@@ -323,8 +327,9 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 			VALUES (?, ?, ?, ?)
 		`, date, key, decodedValue, value.RawValue)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update to latest value
+		// For other registers, only update if new value is higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
 				UPDATE daily_values
 				SET value = ?, raw_value = ?
@@ -359,8 +364,12 @@ func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, 
 
 	decodedValue := value.RawValue * reg.Scale
 
-	// For energy registers, we want the MAXIMUM value seen during the month
-	// (they reset at the start of a new month, so the highest value is the end-of-month total)
+	// For most energy registers, we want the MAXIMUM value seen during the month
+	// (they reset at the start of a new month, so the highest value is the end-of-month total).
+	// However, for NET energy registers (grid_energy_*), we want the LATEST value
+	// because net values can be negative or decreasing.
+	isNetRegister := solis.IsNetRegister(key)
+
 	if err == sql.ErrNoRows {
 		// New month, insert new record
 		_, err = tx.Exec(`
@@ -368,8 +377,9 @@ func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, 
 			VALUES (?, ?, ?, ?)
 		`, month, key, decodedValue, value.RawValue)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update to latest value
+		// For other registers, only update if new value is higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
 				UPDATE monthly_values
 				SET value = ?, raw_value = ?
@@ -404,8 +414,12 @@ func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, t
 
 	decodedValue := value.RawValue * reg.Scale
 
-	// For energy registers, we want the MAXIMUM value seen during the year
-	// (they reset at the start of a new year, so the highest value is the end-of-year total)
+	// For most energy registers, we want the MAXIMUM value seen during the year
+	// (they reset at the start of a new year, so the highest value is the end-of-year total).
+	// However, for NET energy registers (grid_energy_*), we want the LATEST value
+	// because net values can be negative or decreasing.
+	isNetRegister := solis.IsNetRegister(key)
+
 	if err == sql.ErrNoRows {
 		// New year, insert new record
 		_, err = tx.Exec(`
@@ -413,8 +427,9 @@ func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, t
 			VALUES (?, ?, ?, ?)
 		`, year, key, decodedValue, value.RawValue)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update to latest value
+		// For other registers, only update if new value is higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
 				UPDATE yearly_values
 				SET value = ?, raw_value = ?
@@ -448,7 +463,11 @@ func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, ti
 		return fmt.Errorf("failed to query total value: %w", err)
 	}
 
-	// For total registers, we want the MAXIMUM value seen (they only increase)
+	// For most total registers, we want the MAXIMUM value seen (they only increase).
+	// However, for NET energy registers (grid_energy_total), we want the LATEST value
+	// because net values can be negative or decreasing.
+	isNetRegister := solis.IsNetRegister(key)
+
 	if err == sql.ErrNoRows {
 		// No existing value, insert new record
 		_, err = tx.Exec(`
@@ -456,8 +475,9 @@ func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, ti
 			VALUES (?, ?, ?, ?)
 		`, key, decodedValue, value.RawValue, timestampStr)
 	} else {
-		// Update existing record if new value is higher
-		if decodedValue > existingValue {
+		// For net registers, always update to latest value
+		// For other registers, only update if new value is higher
+		if isNetRegister || decodedValue > existingValue {
 			_, err = tx.Exec(`
 				UPDATE total_values
 				SET value = ?, raw_value = ?, timestamp = ?

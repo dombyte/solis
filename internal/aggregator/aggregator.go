@@ -39,6 +39,8 @@ type Aggregator struct {
 	// Sync mechanism to wait for first poll completion
 	firstPollDone chan struct{}
 	firstPollErr  error
+	// firstPollSignaled tracks if SignalFirstPollDone has been called to prevent double-close
+	firstPollSignaled bool
 }
 
 // New creates a new Aggregator instance.
@@ -111,7 +113,16 @@ func (a *Aggregator) IsRunning() bool {
 
 // SignalFirstPollDone is called by the poller after the first poll completes.
 // This allows the aggregator to wait for data before starting computation.
+// This method is idempotent - multiple calls will not cause a panic.
 func (a *Aggregator) SignalFirstPollDone(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	
+	// Prevent double-close of channel
+	if a.firstPollSignaled {
+		return
+	}
+	a.firstPollSignaled = true
 	a.firstPollErr = err
 	close(a.firstPollDone)
 }

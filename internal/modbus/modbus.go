@@ -153,10 +153,10 @@ func NewClient(cfg *config.ModbusSettings) (*Client, error) {
 // Connect establishes a connection to the Modbus device.
 func (c *Client) Connect(ctx context.Context) error {
 	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
 
 	if c.state == Connected {
 		logger.Debug().Msg("Already connected")
+		c.stateMu.Unlock()
 		return nil
 	}
 
@@ -166,6 +166,8 @@ func (c *Client) Connect(ctx context.Context) error {
 		c.stateMu.Unlock()
 		return c.waitForState(ctx, Connected, Error, Disconnected)
 	}
+
+	defer c.stateMu.Unlock()
 
 	c.setState(Connecting)
 
@@ -256,6 +258,7 @@ func (c *Client) Config() *config.ModbusSettings {
 }
 
 // setState changes the state with logging.
+// This method MUST be called with c.stateMu.Lock() held by the caller.
 func (c *Client) setState(newState State) {
 	oldState := c.state
 	c.state = newState
