@@ -175,11 +175,6 @@ func (s *Storage) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
-		}
-	}()
 
 	// Create daily_values table for daily energy totals
 	// Stores one value per day per key, updated with the maximum value seen during the day
@@ -197,6 +192,7 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(dailySQL); err != nil {
+		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create daily_values table: %w", err)
 	}
 
@@ -216,6 +212,7 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(monthlySQL); err != nil {
+		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create monthly_values table: %w", err)
 	}
 
@@ -235,6 +232,7 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(yearlySQL); err != nil {
+		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create yearly_values table: %w", err)
 	}
 
@@ -252,6 +250,7 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(totalSQL); err != nil {
+		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create total_values table: %w", err)
 	}
 
@@ -271,6 +270,7 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(errorSQL); err != nil {
+		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create error_data table: %w", err)
 	}
 
@@ -361,8 +361,12 @@ func (s *Storage) storePeriodicValue(
 // Creates a new entry for the current date if none exists, or updates the existing one
 // with the maximum value seen so far that day.
 //
-//nolint:dupl // Different configuration (daily table/format) from storeMonthlyValue/storeYearlyValue
-func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+// from storeMonthlyValue/storeYearlyValue
+//
+//nolint:dupl // Different configuration (daily table/format)
+func (s *Storage) storeDailyValue(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	return s.storePeriodicValue(tx, key, value, timestamp, PeriodicValueConfig{
 		Format:       solis.DateFormat,
 		TableName:    "daily_values",
@@ -374,8 +378,12 @@ func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, ti
 // Creates a new entry for the current month if none exists, or updates the existing one
 // with the maximum value seen so far that month.
 //
-//nolint:dupl // Different configuration (monthly table/format) from storeDailyValue/storeYearlyValue
-func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+// from storeDailyValue/storeYearlyValue
+//
+//nolint:dupl // Different configuration (monthly table/format)
+func (s *Storage) storeMonthlyValue(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	return s.storePeriodicValue(tx, key, value, timestamp, PeriodicValueConfig{
 		Format:       solis.MonthFormat,
 		TableName:    "monthly_values",
@@ -466,11 +474,6 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
-		}
-	}()
 
 	var firstErr error
 	for key, value := range values {
@@ -479,6 +482,7 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 			if firstErr == nil {
 				firstErr = err
 			}
+			// Continue processing other registers even if one fails
 		}
 	}
 
@@ -827,7 +831,9 @@ func (s *Storage) runVacuumIfNeeded(totalRowsDeleted int64) {
 }
 
 // completeCleanup completes the cleanup process
-func (s *Storage) completeCleanup(cleanupStart time.Time, totalRowsDeleted int64, errs []error) error {
+func (s *Storage) completeCleanup(
+	cleanupStart time.Time, totalRowsDeleted int64, errs []error,
+) error {
 	s.mu.Lock()
 	s.lastCleanupTime = cleanupStart
 	s.mu.Unlock()
@@ -884,7 +890,9 @@ func (s *Storage) cleanupTable(tableName, dateColumn string, retention time.Dura
 }
 
 // cleanupWithTimestamp handles cleanup for tables with timestamp columns.
-func (s *Storage) cleanupWithTimestamp(tableName, dateColumn string, retention time.Duration, totalDeleted *int64) error {
+func (s *Storage) cleanupWithTimestamp(
+	tableName, dateColumn string, retention time.Duration, totalDeleted *int64,
+) error {
 	cutoff := time.Now().Add(-retention)
 	logger.Info().Msgf("Cleaning up %s data older than %s (cutoff: %s)", tableName, retention, cutoff)
 
@@ -906,7 +914,8 @@ func (s *Storage) cleanupWithTimestamp(tableName, dateColumn string, retention t
 }
 
 // Interval represents the aggregation interval for historical data.
-// Only IntervalRaw is supported now. Aggregated intervals have been removed to simplify the storage layer.
+// Only IntervalRaw is supported now. Aggregated intervals have been removed to
+// simplify the storage layer.
 type Interval string
 
 const (
@@ -921,9 +930,9 @@ const (
 type HistoryDataPoint struct {
 	Timestamp string   `json:"timestamp"`
 	Value     float64  `json:"value"`
-	Min       *float64 `json:"min,omitempty"`   // Minimum value in aggregation window (for aggregated intervals)
-	Max       *float64 `json:"max,omitempty"`   // Maximum value in aggregation window (for aggregated intervals)
-	Count     *int     `json:"count,omitempty"` // Number of data points in aggregation window (for aggregated intervals)
+	Min       *float64 `json:"min,omitempty"`   // Min value in aggregation window
+	Max       *float64 `json:"max,omitempty"`   // Max value in aggregation window
+	Count     *int     `json:"count,omitempty"` // Count of data points in aggregation window
 }
 
 // HistoryResult represents historical data for a register.
@@ -1119,8 +1128,12 @@ func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDat
 
 // GetDailyHistory retrieves daily values for a specific register key.
 //
-//nolint:dupl // Different table/type (daily) from GetErrorHistory/GetMonthlyHistory/GetYearlyHistory
-func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*DailyDataPoint, error) {
+// /GetYearlyHistory
+//
+//nolint:dupl // Different table/type (daily) from GetErrorHistory/GetMonthlyHistory
+func (s *Storage) GetDailyHistory(
+	key string, startDate, endDate time.Time,
+) ([]*DailyDataPoint, error) {
 	start := startDate.Format(solis.DateFormat)
 	end := endDate.Format(solis.DateFormat)
 
@@ -1158,8 +1171,12 @@ func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*
 
 // GetMonthlyHistory retrieves monthly values for a specific register key.
 //
-//nolint:dupl // Different table/type (monthly) from GetErrorHistory/GetDailyHistory/GetYearlyHistory
-func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) ([]*MonthlyDataPoint, error) {
+// /GetYearlyHistory
+//
+//nolint:dupl // Different table/type (monthly) from GetErrorHistory/GetDailyHistory
+func (s *Storage) GetMonthlyHistory(
+	key string, startMonth, endMonth time.Time,
+) ([]*MonthlyDataPoint, error) {
 	start := startMonth.Format(solis.MonthFormat)
 	end := endMonth.Format(solis.MonthFormat)
 
@@ -1197,8 +1214,12 @@ func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) 
 
 // GetYearlyHistory retrieves yearly values for a specific register key.
 //
-//nolint:dupl // Different table/type (yearly) from GetErrorHistory/GetDailyHistory/GetMonthlyHistory
-func (s *Storage) GetYearlyHistory(key string, startYear, endYear time.Time) ([]*YearlyDataPoint, error) {
+// /GetMonthlyHistory
+//
+//nolint:dupl // Different table/type (yearly) from GetErrorHistory/GetDailyHistory
+func (s *Storage) GetYearlyHistory(
+	key string, startYear, endYear time.Time,
+) ([]*YearlyDataPoint, error) {
 	start := startYear.Format(solis.YearFormat)
 	end := endYear.Format(solis.YearFormat)
 
@@ -1241,11 +1262,6 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
-		}
-	}()
 
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
@@ -1305,11 +1321,6 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
-		}
-	}()
 
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
@@ -1369,11 +1380,6 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil {
-			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
-		}
-	}()
 
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {

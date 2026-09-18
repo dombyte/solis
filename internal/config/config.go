@@ -334,7 +334,8 @@ func validateStorageRetention(cfg *StorageSettings) error {
 
 // logRetentionConfig logs the retention configuration
 func logRetentionConfig(cfg *StorageSettings) {
-	logger.Info().Msgf("Retention configuration: daily=%s, monthly=%s, yearly=%s, error=%s, cleanup_interval=%s",
+	logger.Info().Msgf("Retention configuration: daily=%s, monthly=%s, yearly=%s, "+
+		"error=%s, cleanup_interval=%s",
 		cfg.DailyRetention, cfg.MonthlyRetention,
 		cfg.YearlyRetention, cfg.ErrorRetention, cfg.CleanupInterval)
 }
@@ -343,7 +344,8 @@ func logRetentionConfig(cfg *StorageSettings) {
 func validateStorageSyncMode(cfg *StorageSettings) error {
 	validSyncModes := map[string]bool{"OFF": true, "NORMAL": true, "FULL": true, "EXTRA": true}
 	if !validSyncModes[cfg.Synchronous] {
-		return fmt.Errorf("invalid synchronous mode: %s (must be OFF, NORMAL, FULL, or EXTRA)", cfg.Synchronous)
+		return fmt.Errorf("invalid synchronous mode: %s (must be OFF, NORMAL, FULL, or "+
+			"EXTRA)", cfg.Synchronous)
 	}
 	return nil
 }

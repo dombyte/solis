@@ -24,7 +24,10 @@ func init() {
 	// Initialize with a basic stderr logger
 	globalLoggerMu.Lock()
 	defer globalLoggerMu.Unlock()
-	globalLogger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.000"}).With().Timestamp().Caller().Logger()
+	globalLogger = zerolog.New(zerolog.ConsoleWriter{
+		Out:        os.Stderr,
+		TimeFormat: "15:04:05.000",
+	}).With().Timestamp().Caller().Logger()
 	globalLoggerLevel = zerolog.InfoLevel
 	zerolog.SetGlobalLevel(globalLoggerLevel)
 	log.Logger = globalLogger
@@ -102,7 +105,10 @@ func Init(output io.Writer, pretty bool, logLevel ...string) {
 
 	if pretty {
 		// Human-readable console output for development
-		globalLogger = zerolog.New(zerolog.ConsoleWriter{Out: output, TimeFormat: "15:04:05.000"}).With().Timestamp().Caller().Logger()
+		globalLogger = zerolog.New(zerolog.ConsoleWriter{
+			Out:        output,
+			TimeFormat: "15:04:05.000",
+		}).With().Timestamp().Caller().Logger()
 	} else {
 		// JSON output for production
 		globalLogger = zerolog.New(output).With().Timestamp().Caller().Logger()

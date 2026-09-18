@@ -290,7 +290,9 @@ func (s *ReadService) HealthCheck() (map[string]string, error) {
 // GetMonthlyHistory returns monthly values for a specific register key.
 //
 //nolint:dupl // Different return type and validation logic from GetYearlyHistory
-func (s *ReadService) GetMonthlyHistory(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error) {
+func (s *ReadService) GetMonthlyHistory(
+	key string, start, end time.Time,
+) ([]*storage.MonthlyDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}
@@ -306,7 +308,9 @@ func (s *ReadService) GetMonthlyHistory(key string, start, end time.Time) ([]*st
 // GetYearlyHistory returns yearly values for a specific register key.
 //
 //nolint:dupl // Different return type and validation logic from GetMonthlyHistory
-func (s *ReadService) GetYearlyHistory(key string, start, end time.Time) ([]*storage.YearlyDataPoint, error) {
+func (s *ReadService) GetYearlyHistory(
+	key string, start, end time.Time,
+) ([]*storage.YearlyDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}

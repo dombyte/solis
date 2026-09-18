@@ -97,24 +97,30 @@ func removeSensitivePaths(errStr string) string {
 
 // getSanitizedErrorMessage returns a sanitized error message based on patterns.
 func getSanitizedErrorMessage(sanitizedErrStr string, originalErr error) string {
-	switch {
-	case strings.Contains(sanitizedErrStr, "no rows") ||
-		strings.Contains(sanitizedErrStr, "not found"):
-		return "resource not found"
-	case strings.Contains(sanitizedErrStr, "database") ||
-		strings.Contains(sanitizedErrStr, "sqlite"):
-		return "database error"
-	case strings.Contains(sanitizedErrStr, "timeout") ||
-		strings.Contains(sanitizedErrStr, "context"):
-		return "request timeout"
-	case strings.Contains(sanitizedErrStr, "connection") ||
-		strings.Contains(sanitizedErrStr, "network"):
-		return "service unavailable"
-	default:
-		// Return a generic message but log the full error
-		logger.Warn().Msgf("Returning sanitized error to client, full error: %v", originalErr)
-		return "internal server error"
+	// Map of error patterns to sanitized messages
+	errorPatterns := []struct {
+		pattern string
+		message string
+	}{
+		{"no rows", "resource not found"},
+		{"not found", "resource not found"},
+		{"database", "database error"},
+		{"sqlite", "database error"},
+		{"timeout", "request timeout"},
+		{"context", "request timeout"},
+		{"connection", "service unavailable"},
+		{"network", "service unavailable"},
 	}
+
+	for _, ep := range errorPatterns {
+		if strings.Contains(sanitizedErrStr, ep.pattern) {
+			return ep.message
+		}
+	}
+
+	// Return a generic message but log the full error
+	logger.Warn().Msgf("Returning sanitized error to client, full error: %v", originalErr)
+	return "internal server error"
 }
 
 // ReadServiceInterface defines the methods from service.ReadService that handlers need.

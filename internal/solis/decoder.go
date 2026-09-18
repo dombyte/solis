@@ -40,7 +40,8 @@ type Value struct {
 	StatusDecoded interface{} `json:"status_decoded,omitempty"`
 }
 
-// MarshalJSON implements json.Marshaler for Value to ensure DecodedValue is rounded to 2 decimal places.
+// MarshalJSON implements json.Marshaler for Value to ensure DecodedValue is rounded
+// to 2 decimal places.
 func (v Value) MarshalJSON() ([]byte, error) {
 	// Create a copy with rounded DecodedValue
 	type Alias Value
