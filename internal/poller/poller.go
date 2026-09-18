@@ -28,6 +28,14 @@ type LastPollInfo struct {
 	ValuesStored  int
 }
 
+// PollerInterface defines the methods used by the service layer to check poller health.
+// This interface allows for easier testing with mock implementations.
+type PollerInterface interface {
+	IsRunning() bool
+	GetLastPollInfo() *LastPollInfo
+	GetLastPollError() error
+}
+
 // Poller is the background service that polls the Solis inverter for register data.
 // It uses a single Modbus connection for sequential range reads.
 type Poller struct {
@@ -246,6 +254,9 @@ func (p *Poller) handlePollError(err error, pollDuration time.Duration) {
 
 	// Don't add extra sleep - the next poll will happen at the scheduled interval
 	// The modbus layer handles reconnection automatically
+	// TODO: Consider adding consecutive failure tracking and auto-restart after N failures.
+	// Currently, if a poll hangs indefinitely (not just times out), the goroutine is stuck
+	// and won't recover. External monitoring via HealthCheck must detect and restart service.
 }
 
 // signalAggregatorFirstPoll signals the aggregator that the first poll has completed.

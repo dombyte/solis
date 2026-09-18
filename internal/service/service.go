@@ -25,7 +25,8 @@ type ReadService struct {
 	// storage is the storage backend.
 	storage *storage.Storage
 	// poller is the background poller (may be nil if not using background polling).
-	poller *poller.Poller
+	// Uses PollerInterface to allow for mock implementations in tests.
+	poller poller.PollerInterface
 	// aggregator is the background aggregator for computed values (may be nil if disabled).
 	aggregator *aggregator.Aggregator
 	// cache holds the latest register values for fast access.
@@ -38,7 +39,7 @@ type ReadServiceConfig struct {
 	Config       *config.AppConfig
 	ModbusClient *modbus.Client
 	Storage      *storage.Storage
-	Poller       *poller.Poller
+	Poller       poller.PollerInterface
 	Cache        *cache.Cache
 	Aggregator   *aggregator.Aggregator
 }
@@ -244,6 +245,8 @@ func (s *ReadService) GetDeviceInfo() (map[string]*solis.Value, error) {
 }
 
 // HealthCheck returns a simple health status.
+// If the poller is running but hasn't completed a poll within 3x the configured interval,
+// it returns an error to detect hanging pollers.
 func (s *ReadService) HealthCheck() (map[string]string, error) {
 	status := map[string]string{
 		"status": "ok",
@@ -260,6 +263,20 @@ func (s *ReadService) HealthCheck() (map[string]string, error) {
 		if info := s.poller.GetLastPollInfo(); info != nil {
 			status["last_poll"] = info.Timestamp.Format(time.RFC3339)
 			status["poll_duration_ms"] = fmt.Sprintf("%d", info.DurationMs)
+			
+			// Check if poller is stale (last poll older than 3x the interval)
+			if s.poller.IsRunning() && s.config != nil && s.config.Poller.Interval > 0 {
+				elapsed := time.Since(info.Timestamp)
+				maxInterval := s.config.Poller.Interval * 3
+				if elapsed > maxInterval {
+					status["status"] = "degraded"
+					status["poller_stale"] = "true"
+					status["poller_stale_error"] = fmt.Sprintf(
+						"last poll was %s ago, expected within %s",
+						elapsed.Round(time.Second), maxInterval,
+					)
+				}
+			}
 		}
 	} else {
 		status["poller_running"] = "disabled"
@@ -284,7 +301,16 @@ func (s *ReadService) HealthCheck() (map[string]string, error) {
 		status["storage"] = "disabled"
 	}
 
+	// Return error if status is degraded
+	if status["status"] != "ok" {
+		return status, fmt.Errorf("health check failed: %s", status["poller_stale_error"])
+	}
+
 	return status, nil
+	// TODO: Consider adding automatic poller restart logic when stale state is detected.
+	// Options: restart poller after N consecutive failures, or when HealthCheck detects
+	// stale state. Current design relies on external monitoring (K8s, systemd) to restart
+	// the service. Auto-recovery may not help if root cause is device/network issue.
 }
 
 // GetMonthlyHistory returns monthly values for a specific register key.
