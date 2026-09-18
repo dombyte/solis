@@ -424,11 +424,8 @@ func TestDecodeOpStatusBits(t *testing.T) {
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
 			got := decodeOpStatusBits(tt.value)
-			// Just verify it doesn't panic
-			if len(got) == 0 && tt.value != 0 {
-				// If value has bits set, we should get some output
-				// But the bit map might be empty, so just check it runs
-			}
+			// Just verify it doesn't panic - the function should always return a non-nil slice
+			_ = got
 		})
 	}
 }

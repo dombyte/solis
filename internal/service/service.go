@@ -9,15 +9,11 @@ import (
 	"github.com/dombyte/solis/internal/aggregator"
 	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
-	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
 )
-
-// logger is the package-level logger for service operations.
-var logger = logging.NewComponentLogger("service")
 
 // ReadService provides read operations for the Solis monitor.
 // It handles reading registers, either from cache, storage, or directly from the device.

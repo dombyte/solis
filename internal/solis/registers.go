@@ -128,6 +128,8 @@ var DailyToMonthlyMap = map[string]string{
 // directly-polled registers. Used by the backfill to recompute ALL monthly values
 // from daily data, overriding any polled values for the current year.
 
+// BackfillDailyToMonthlyMap maps daily register keys to their corresponding monthly register keys.
+// This is used for backfilling monthly data from daily data.
 var BackfillDailyToMonthlyMap = map[string]string{
 	"energy_consumption_daily": "energy_consumption_monthly",
 	"grid_export_daily":        "grid_export_monthly",

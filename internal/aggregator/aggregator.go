@@ -561,7 +561,9 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 			// Delete existing entry for this month if it exists
 			_, err = tx.Exec(`DELETE FROM monthly_values WHERE register_key = ? AND month = ?`, monthlyKey, month)
 			if err != nil {
-				tx.Rollback()
+				if rbErr := tx.Rollback(); rbErr != nil {
+					logger.Error().Msgf("Failed to rollback transaction: %v", rbErr)
+				}
 				logger.Error().Msgf("Failed to delete existing monthly value for %s month %s: %v",
 					monthlyKey, month, err)
 				continue
@@ -574,7 +576,9 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 			// Get target register to compute raw_value based on its scale
 			reg, ok := solis.RegisterMapByKey[monthlyKey]
 			if !ok {
-				tx.Rollback()
+				if rbErr := tx.Rollback(); rbErr != nil {
+					logger.Error().Msgf("Failed to rollback transaction: %v", rbErr)
+				}
 				logger.Error().Msgf("Register %s not found in RegisterMapByKey", monthlyKey)
 				continue
 			}
@@ -587,12 +591,17 @@ func (a *Aggregator) backfillCurrentYearMonthly() {
 			`, month, monthlyKey, decodedValue, rawValueForStorage)
 
 			if err != nil {
-				tx.Rollback()
+				if rbErr := tx.Rollback(); rbErr != nil {
+					logger.Error().Msgf("Failed to rollback transaction: %v", rbErr)
+				}
 				logger.Error().Msgf("Failed to backfill monthly value for %s month %s: %v",
 					monthlyKey, month, err)
 			} else {
-				tx.Commit()
-				logger.Debug().Msgf("Backfilled %s month %s: %.1f", monthlyKey, month, dp.Value)
+				if commitErr := tx.Commit(); commitErr != nil {
+					logger.Error().Msgf("Failed to commit transaction: %v", commitErr)
+				} else {
+					logger.Debug().Msgf("Backfilled %s month %s: %.1f", monthlyKey, month, dp.Value)
+				}
 			}
 		}
 	}
@@ -624,7 +633,11 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 		logger.Warn().Msgf("Failed to query grid_export_monthly months: %v", err)
 		return
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			logger.Warn().Msgf("Failed to close rows: %v", err)
+		}
+	}()
 
 	// Process each month
 	for rows.Next() {
@@ -666,7 +679,9 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 		// Delete existing entry for this month if it exists
 		_, err = tx.Exec(`DELETE FROM monthly_values WHERE register_key = ? AND month = ?`, "grid_energy_monthly", month)
 		if err != nil {
-			tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil {
+				logger.Error().Msgf("Failed to rollback transaction: %v", rbErr)
+			}
 			logger.Error().Msgf("Failed to delete existing grid_energy_monthly for month %s: %v", month, err)
 			continue
 		}
@@ -678,11 +693,16 @@ func (a *Aggregator) backfillNetMonthlyValues() {
 		`, month, "grid_energy_monthly", netValue, netRawValue)
 
 		if err != nil {
-			tx.Rollback()
+			if rbErr := tx.Rollback(); rbErr != nil {
+				logger.Error().Msgf("Failed to rollback transaction: %v", rbErr)
+			}
 			logger.Error().Msgf("Failed to backfill grid_energy_monthly for month %s: %v", month, err)
 		} else {
-			tx.Commit()
-			logger.Debug().Msgf("Backfilled grid_energy_monthly for month %s: %.1f", month, netValue)
+			if commitErr := tx.Commit(); commitErr != nil {
+				logger.Error().Msgf("Failed to commit transaction: %v", commitErr)
+			} else {
+				logger.Debug().Msgf("Backfilled grid_energy_monthly for month %s: %.1f", month, netValue)
+			}
 		}
 	}
 
