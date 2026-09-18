@@ -60,44 +60,42 @@ func ParseTimeRange(startStr, endStr string) (TimeRange, error) {
 	var tr TimeRange
 	var err error
 
-	if startStr != "" {
-		// Try to parse as date (YYYY-MM-DD)
-		tr.Start, err = time.Parse(solis.DateFormat, startStr)
-		if err != nil {
-			// Try to parse as month (YYYY-MM)
-			tr.Start, err = time.Parse(solis.MonthFormat, startStr)
-			if err != nil {
-				// Try to parse as year (YYYY)
-				tr.Start, err = time.Parse(solis.YearFormat, startStr)
-				if err != nil {
-					return TimeRange{}, err
-				}
-			}
-		}
-	} else {
-		// Default start: 30 days ago for daily, 12 months ago for monthly, 10 years ago for yearly
-		tr.Start = time.Now().Add(-30 * 24 * time.Hour)
+	tr.Start, err = parseTimeString(startStr, time.Now().Add(-30*24*time.Hour))
+	if err != nil {
+		return TimeRange{}, err
 	}
-
-	if endStr != "" {
-		// Try to parse as date (YYYY-MM-DD)
-		tr.End, err = time.Parse(solis.DateFormat, endStr)
-		if err != nil {
-			// Try to parse as month (YYYY-MM)
-			tr.End, err = time.Parse(solis.MonthFormat, endStr)
-			if err != nil {
-				// Try to parse as year (YYYY)
-				tr.End, err = time.Parse(solis.YearFormat, endStr)
-				if err != nil {
-					return TimeRange{}, err
-				}
-			}
-		}
-	} else {
-		tr.End = time.Now()
+	tr.End, err = parseTimeString(endStr, time.Now())
+	if err != nil {
+		return TimeRange{}, err
 	}
 
 	return tr, nil
+}
+
+// parseTimeString parses a time string in various formats.
+// Tries to parse as date (YYYY-MM-DD), month (YYYY-MM), or year (YYYY).
+// Returns the default value if the input string is empty.
+//
+//nolint:dupl // Helper function used by ParseTimeRange - intentionally similar parsing logic
+func parseTimeString(timeStr string, defaultTime time.Time) (time.Time, error) {
+	if timeStr == "" {
+		return defaultTime, nil
+	}
+
+	// Try to parse as date (YYYY-MM-DD)
+	t, err := time.Parse(solis.DateFormat, timeStr)
+	if err != nil {
+		// Try to parse as month (YYYY-MM)
+		t, err = time.Parse(solis.MonthFormat, timeStr)
+		if err != nil {
+			// Try to parse as year (YYYY)
+			t, err = time.Parse(solis.YearFormat, timeStr)
+			if err != nil {
+				return time.Time{}, err
+			}
+		}
+	}
+	return t, nil
 }
 
 // GetKeyType determines the type of a register key using the canonical

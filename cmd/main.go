@@ -171,7 +171,8 @@ func initializeDatabase(cfg *config.AppConfig) (*database.Manager, *storage.Stor
 // startBackgroundServices starts background database services with proper context and tracking.
 // The context allows graceful cancellation of background operations.
 // The wait group allows the caller to wait for all background goroutines to complete.
-// Returns a list of errors encountered during initialization (for services that don't start goroutines).
+// Returns a list of errors encountered during initialization (for services that
+// don't start goroutines).
 func startBackgroundServices(
 	ctx context.Context,
 	wg *sync.WaitGroup,
@@ -181,39 +182,54 @@ func startBackgroundServices(
 ) []error {
 	var errors []error
 
-	if cfg.Storage.EnableBackup && cfg.Storage.BackupInterval > 0 {
+	startBackgroundTask := func(
+		enabled, configured bool,
+		interval time.Duration,
+		taskName string,
+		startFunc func(context.Context) error,
+	) {
+		if !enabled {
+			logger.Info().Msgf("Periodic %s disabled by configuration", taskName)
+			return
+		}
+		if !configured {
+			logger.Info().Msgf("Periodic %s disabled: %s interval not configured", taskName, taskName)
+			return
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
-			if err := dbManager.StartPeriodicBackups(ctx); err != nil {
-				logger.Error().Msgf("Periodic backups failed: %v", err)
+			logger.Info().Msgf("Periodic %s started (interval: %s)", taskName, interval)
+			if err := startFunc(ctx); err != nil {
+				logger.Error().Msgf("Periodic %s failed: %v", taskName, err)
 			}
 		}()
-	} else if !cfg.Storage.EnableBackup {
-		logger.Info().Msg("Periodic backups disabled by configuration")
-	} else {
-		logger.Info().Msg("Periodic backups disabled: backup interval not configured")
 	}
 
-	if cfg.Storage.CleanupInterval > 0 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			logger.Info().Msgf("Periodic retention cleanup started (interval: %s)", cfg.Storage.CleanupInterval)
-			if err := dbManager.StartPeriodicCleanup(ctx); err != nil {
-				logger.Error().Msgf("Periodic cleanup failed: %v", err)
-			}
-		}()
-	} else {
-		logger.Info().Msg("Periodic retention cleanup disabled: cleanup interval not configured")
-	}
+	startBackgroundTask(
+		cfg.Storage.EnableBackup,
+		cfg.Storage.BackupInterval > 0,
+		cfg.Storage.BackupInterval,
+		"backups",
+		dbManager.StartPeriodicBackups,
+	)
+
+	startBackgroundTask(
+		true,
+		cfg.Storage.CleanupInterval > 0,
+		cfg.Storage.CleanupInterval,
+		"retention cleanup",
+		dbManager.StartPeriodicCleanup,
+	)
 
 	return errors
 }
 
 // initializeApplicationServices initializes cache, websocket hub, and aggregator
-func initializeApplicationServices(cfg *config.AppConfig, st *storage.Storage) (*cache.Cache, *websocket.Hub, *aggregator.Aggregator, error) {
+func initializeApplicationServices(
+	cfg *config.AppConfig,
+	st *storage.Storage,
+) (*cache.Cache, *websocket.Hub, *aggregator.Aggregator, error) {
 	ca := cache.New()
 
 	wsHub := websocket.NewHub()
@@ -237,7 +253,12 @@ func initializeApplicationServices(cfg *config.AppConfig, st *storage.Storage) (
 }
 
 // initializeModbusAndPoller initializes Modbus client and poller if not in serve-only mode
-func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *cache.Cache, agg *aggregator.Aggregator) (*modbus.Client, *poller.Poller, error) {
+func initializeModbusAndPoller(
+	cfg *config.AppConfig,
+	st *storage.Storage,
+	ca *cache.Cache,
+	agg *aggregator.Aggregator,
+) (*modbus.Client, *poller.Poller, error) {
 	var modbusClient *modbus.Client
 	var pl *poller.Poller
 
@@ -249,7 +270,13 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 		}
 
 		// Pass aggregator to poller so poller can signal when first poll completes
-		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithAggregator(agg))
+		pl = poller.New(
+			&cfg.Poller,
+			modbusClient,
+			poller.WithStorage(st),
+			poller.WithCache(ca),
+			poller.WithAggregator(agg),
+		)
 		if err := pl.Start(); err != nil {
 			return nil, nil, fmt.Errorf("failed to start poller: %v", err)
 		}
@@ -257,7 +284,8 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 		// Start aggregator now that poller has a reference to it
 		if agg != nil {
 			agg.Start()
-			logger.Info().Msgf("Aggregator started with interval: %s", cfg.Aggregator.Interval)
+			logger.Info().Msgf("Aggregator started with interval: %s",
+				cfg.Aggregator.Interval)
 		}
 
 		go modbusClient.StartReconnectionLoop(context.Background())
@@ -270,7 +298,8 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 		// Start aggregator even in serve-only mode (it will compute from existing storage)
 		if agg != nil {
 			agg.Start()
-			logger.Info().Msgf("Aggregator started with interval: %s (serve-only mode)", cfg.Aggregator.Interval)
+			logger.Info().Msgf("Aggregator started with interval: %s (serve-only mode)",
+				cfg.Aggregator.Interval)
 		}
 		logger.Info().Msg("Running in serve-only mode - Modbus and poller disabled")
 	}
@@ -371,7 +400,8 @@ func main() {
 		if restartCount >= maxRestarts {
 			// Re-initialize logging in case it failed
 			logging.Init(os.Stderr, true, "ERROR")
-			logger.Error().Msgf("Maximum restart count (%d) reached - stopping to prevent infinite loop", maxRestarts)
+			logger.Error().Msgf("Maximum restart count (%d) reached - stopping to prevent "+
+				"infinite loop", maxRestarts)
 			os.Exit(1)
 		}
 		restartCount++
@@ -382,13 +412,15 @@ func main() {
 				if r := recover(); r != nil {
 					// Re-initialize logging in case it failed
 					logging.Init(os.Stderr, true, "ERROR")
-					logger.Error().Msgf("PANIC in runApp (restart #%d): %v - restarting in 5 seconds...", restartCount, r)
+					logger.Error().Msgf("PANIC in runApp (restart #%d): %v - restarting in "+
+						"5 seconds...", restartCount, r)
 					time.Sleep(5 * time.Second)
 				}
 			}()
 
 			if err := runApp(); err != nil {
-				logger.Error().Msgf("App failed (restart #%d): %v - restarting in 5 seconds...", restartCount, err)
+				logger.Error().Msgf("App failed (restart #%d): %v - restarting in "+
+					"5 seconds...", restartCount, err)
 				// Re-initialize logging in case it failed
 				logging.Init(os.Stderr, true, "ERROR")
 				logger.Error().Msg("Waiting 5 seconds before restart...")

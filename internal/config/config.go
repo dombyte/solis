@@ -131,31 +131,48 @@ type AggregatorSettings struct {
 
 // setDefaults configures default values for Viper.
 func setDefaults(v *viper.Viper) {
-	// App defaults
+	setAppDefaults(v)
+	setPollerDefaults(v)
+	setAggregatorDefaults(v)
+	setModbusDefaults(v)
+	setStorageDefaults(v)
+	setDatabaseDefaults(v)
+}
+
+// setAppDefaults configures default values for app configuration.
+func setAppDefaults(v *viper.Viper) {
 	v.SetDefault("app.debug", "INFO")
 	v.SetDefault("app.port", 8080)
 	v.SetDefault("app.timeout", "30s")
 	v.SetDefault("app.serve_only", false)
+}
 
-	// Poller defaults
+// setPollerDefaults configures default values for poller configuration.
+func setPollerDefaults(v *viper.Viper) {
 	v.SetDefault("poller.interval", "30s")
 	v.SetDefault("poller.block_attempts", 3)
 	v.SetDefault("poller.block_retry_delay", "1s")
 	v.SetDefault("poller.block_interval", "0s")
 	v.SetDefault("poller.poll_timeout", "30s")
+}
 
-	// Aggregator defaults
+// setAggregatorDefaults configures default values for aggregator configuration.
+func setAggregatorDefaults(v *viper.Viper) {
 	v.SetDefault("aggregator.interval", "60s")
 	v.SetDefault("aggregator.backfill_current_year_monthly", false)
+}
 
-	// Modbus defaults
+// setModbusDefaults configures default values for modbus configuration.
+func setModbusDefaults(v *viper.Viper) {
 	v.SetDefault("modbus.type", "tcp")
 	v.SetDefault("modbus.host", "192.168.1.100")
 	v.SetDefault("modbus.port", 502)
 	v.SetDefault("modbus.timeout", "5s")
 	v.SetDefault("modbus.unit_id", 1)
+}
 
-	// Storage defaults
+// setStorageDefaults configures default values for storage configuration.
+func setStorageDefaults(v *viper.Viper) {
 	v.SetDefault("storage.path", "./data/solis.db")
 	v.SetDefault("storage.daily_retention", "8760h")
 	v.SetDefault("storage.monthly_retention", "8760h")
@@ -164,8 +181,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("storage.wal_mode", true)
 	v.SetDefault("storage.synchronous", "NORMAL")
 	v.SetDefault("storage.temp_store", "MEMORY")
+}
 
-	// Database maintenance defaults
+// setDatabaseDefaults configures default values for database maintenance configuration.
+func setDatabaseDefaults(v *viper.Viper) {
 	v.SetDefault("storage.enable_migrations", true)
 	v.SetDefault("storage.enable_backup", true)
 	v.SetDefault("storage.max_backups", 3)

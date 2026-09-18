@@ -167,43 +167,49 @@ func (a *Aggregator) run() {
 func (a *Aggregator) computeAll() {
 	logger.Debug().Msg("Starting aggregation cycle")
 
-	a.computeAndStoreDailyToMonthly()
-	a.computeAndStoreDailyToYearly()
+	// Compute and store daily→monthly aggregated values
+	a.computeAndStoreMonthlyAggregatedValues()
+
+	// Compute and store daily→yearly aggregated values
+	a.computeAndStoreYearlyAggregatedValues()
+
 	a.computeAndStoreNetValues()
 
 	logger.Debug().Msg("Aggregation cycle completed")
 }
 
-// computeAndStoreDailyToMonthly computes monthly values from daily storage and stores in DB.
-// This only processes COMPUTED monthly registers (those in DailyToMonthlyMap), not directly-polled ones.
-// Directly-polled monthly registers (like pv_energy_monthly, household_energy_monthly) are stored
-// by the poller and should not be overwritten by the aggregator during normal operation.
-func (a *Aggregator) computeAndStoreDailyToMonthly() {
-	// Skip if storage is not configured
+// computeAndStoreAggregatedValues is a generic helper that computes and stores aggregated values
+// (monthly from daily, yearly from daily) by summing daily values for the given time period.
+func (a *Aggregator) computeAndStoreAggregatedValues(
+	keyMap map[string]string,
+	format string,
+	getSum func(string, string) (float64, float64, error),
+	storeFunc func(string, string, float64, float64) error,
+) {
 	if a.storage == nil {
-		logger.Warn().Msg("Cannot compute monthly values: storage not configured")
+		logger.Warn().Msg("Cannot compute values: storage not configured")
 		return
 	}
 
-	currentMonth := time.Now().Format(solis.MonthFormat)
+	timeStr := time.Now().Format(format)
 
-	for dailyKey, monthlyKey := range solis.DailyToMonthlyMap {
-		value, rawValue, err := a.storage.GetMonthlySum(dailyKey, currentMonth)
+	for dailyKey, targetKey := range keyMap {
+		value, rawValue, err := getSum(dailyKey, timeStr)
 		if err != nil {
-			logger.Warn().Msgf("Failed to compute %s from daily storage: %v", monthlyKey, err)
+			logger.Warn().Msgf("Failed to compute %s from daily storage: %v", targetKey, err)
 			continue
 		}
 
-		reg, ok := solis.RegisterMapByKey[monthlyKey]
+		reg, ok := solis.RegisterMapByKey[targetKey]
 		if !ok {
-			logger.Warn().Msgf("Register %s not found in RegisterMapByKey", monthlyKey)
+			logger.Warn().Msgf("Register %s not found in RegisterMapByKey", targetKey)
 			continue
 		}
 
 		// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
 		// Since reg.Scale is 1 for these computed registers, RawValue should equal value
 		computedValue := &solis.Value{
-			Key:          monthlyKey,
+			Key:          targetKey,
 			Name:         reg.Name,
 			RawValue:     value,
 			DecodedValue: value,
@@ -214,108 +220,103 @@ func (a *Aggregator) computeAndStoreDailyToMonthly() {
 		}
 
 		// Store in database
-		monthlyDp := &storage.MonthlyDataPoint{
-			Month:    currentMonth,
-			Value:    value,
-			RawValue: rawValue,
-		}
-		if storeErr := a.storage.StoreMonthlyDataPoint(monthlyKey, monthlyDp); storeErr != nil {
-			logger.Warn().Msgf("Failed to store monthly value for %s: %v", monthlyKey, storeErr)
+		if storeErr := storeFunc(targetKey, timeStr, value, rawValue); storeErr != nil {
+			logger.Warn().Msgf("Failed to store value for %s: %v", targetKey, storeErr)
 		}
 
 		// Update cache with computed value (merges into existing cache)
-		a.updateCache(map[string]*solis.Value{monthlyKey: computedValue})
-		logger.Debug().Msgf("Computed and stored %s: %.1f %s", monthlyKey, value, reg.Unit)
+		a.updateCache(map[string]*solis.Value{targetKey: computedValue})
+		logger.Debug().Msgf("Computed and stored %s: %.1f %s", targetKey, value, reg.Unit)
 	}
 }
 
-// computeAndStoreDailyToYearly computes yearly values from daily storage and stores in DB.
-// This only processes COMPUTED yearly registers (those in DailyToYearlyMap), not directly-polled ones.
-// Directly-polled yearly registers (like pv_energy_yearly, household_energy_yearly) are stored
-// by the poller and should not be overwritten by the aggregator during normal operation.
-func (a *Aggregator) computeAndStoreDailyToYearly() {
-	// Skip if storage is not configured
-	if a.storage == nil {
-		logger.Warn().Msg("Cannot compute yearly values: storage not configured")
-		return
-	}
+// computeAndStoreMonthlyAggregatedValues computes and stores daily→monthly aggregated values.
+//
+//nolint:dupl // Different period (monthly) from computeAndStoreYearlyAggregatedValues
+func (a *Aggregator) computeAndStoreMonthlyAggregatedValues() {
+	a.computeAndStoreAggregatedValues(
+		solis.DailyToMonthlyMap,
+		solis.MonthFormat,
+		a.storage.GetMonthlySum,
+		func(key, timeStr string, value, rawValue float64) error {
+			dp := &storage.MonthlyDataPoint{
+				Month:    timeStr,
+				Value:    value,
+				RawValue: rawValue,
+			}
+			return a.storage.StoreMonthlyDataPoint(key, dp)
+		},
+	)
+}
 
-	currentYear := time.Now().Format(solis.YearFormat)
+// computeAndStoreYearlyAggregatedValues computes and stores daily→yearly aggregated values.
+//
+//nolint:dupl // Different period (yearly) from computeAndStoreMonthlyAggregatedValues
+func (a *Aggregator) computeAndStoreYearlyAggregatedValues() {
+	a.computeAndStoreAggregatedValues(
+		solis.DailyToYearlyMap,
+		solis.YearFormat,
+		a.storage.GetYearlySum,
+		func(key, timeStr string, value, rawValue float64) error {
+			dp := &storage.YearlyDataPoint{
+				Year:     timeStr,
+				Value:    value,
+				RawValue: rawValue,
+			}
+			return a.storage.StoreYearlyDataPoint(key, dp)
+		},
+	)
+}
 
-	for dailyKey, yearlyKey := range solis.DailyToYearlyMap {
-		value, rawValue, err := a.storage.GetYearlySum(dailyKey, currentYear)
-		if err != nil {
-			logger.Warn().Msgf("Failed to compute %s from daily storage: %v", yearlyKey, err)
-			continue
-		}
-
-		reg, ok := solis.RegisterMapByKey[yearlyKey]
-		if !ok {
-			logger.Warn().Msgf("Register %s not found in RegisterMapByKey", yearlyKey)
-			continue
-		}
-
-		// For computed registers, we want RawValue * Scale = value (the already-scaled sum)
-		computedValue := &solis.Value{
-			Key:          yearlyKey,
-			Name:         reg.Name,
-			RawValue:     value,
-			DecodedValue: value,
-			Unit:         reg.Unit,
-			Timestamp:    time.Now(),
-			DataType:     reg.DataType,
-			Stability:    reg.Stability,
-		}
-
-		// Store in database
-		yearlyDp := &storage.YearlyDataPoint{
-			Year:     currentYear,
-			Value:    value,
-			RawValue: rawValue,
-		}
-		if storeErr := a.storage.StoreYearlyDataPoint(yearlyKey, yearlyDp); storeErr != nil {
-			logger.Warn().Msgf("Failed to store yearly value for %s: %v", yearlyKey, storeErr)
-		}
-
-		// Update cache with computed value (merges into existing cache)
-		a.updateCache(map[string]*solis.Value{yearlyKey: computedValue})
-		logger.Debug().Msgf("Computed and stored %s: %.1f %s", yearlyKey, value, reg.Unit)
-	}
+// GridEnergyConfig holds configuration for computing grid energy values
+type GridEnergyConfig struct {
+	ExportKey     string
+	ImportKey     string
+	TargetKey     string
+	TimeFormat    string
+	StoreFunc     func(string, interface{}) error
+	DataPointFunc func(float64, string) interface{}
 }
 
 // computeAndStoreNetValues computes net grid energy values and stores them in DB.
 func (a *Aggregator) computeAndStoreNetValues() {
-	a.computeAndStoreGridEnergyTotal()
-	a.computeAndStoreGridEnergyDaily()
-	a.computeAndStoreGridEnergyMonthly()
-	a.computeAndStoreGridEnergyYearly()
+	// Compute grid_energy_total = grid_export_total - grid_import_total
+	a.computeGridEnergyTotal()
+
+	// Compute grid_energy_daily = grid_export_daily - grid_import_daily
+	a.computeGridEnergyDaily()
+
+	// Compute grid_energy_monthly = grid_export_monthly - grid_import_monthly
+	a.computeGridEnergyMonthly()
+
+	// Compute grid_energy_yearly = grid_export_yearly - grid_import_yearly
+	a.computeGridEnergyYearly()
 }
 
-// computeAndStoreGridEnergyTotal computes grid_energy_total = grid_export_total - grid_import_total and stores in DB.
-func (a *Aggregator) computeAndStoreGridEnergyTotal() {
-	fedTotal, err := a.getRegisterValueFromCache("grid_export_total")
+// computeGridEnergy is a generic helper that computes grid_energy = grid_export - grid_import
+// and stores the result using the provided storage function.
+func (a *Aggregator) computeGridEnergy(cfg GridEnergyConfig) {
+	exportVal, err := a.getRegisterValueFromCache(cfg.ExportKey)
 	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_export_total: %v", err)
+		logger.Warn().Msgf("Failed to get %s: %v", cfg.ExportKey, err)
 		return
 	}
 
-	importTotal, err := a.getRegisterValueFromCache("grid_import_total")
+	importVal, err := a.getRegisterValueFromCache(cfg.ImportKey)
 	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_import_total: %v", err)
+		logger.Warn().Msgf("Failed to get %s: %v", cfg.ImportKey, err)
 		return
 	}
 
-	reg, ok := solis.RegisterMapByKey["grid_energy_total"]
+	reg, ok := solis.RegisterMapByKey[cfg.TargetKey]
 	if !ok {
-		logger.Warn().Msg("Register grid_energy_total not found in RegisterMapByKey")
+		logger.Warn().Msgf("Register %s not found in RegisterMapByKey", cfg.TargetKey)
 		return
 	}
 
-	netValue := fedTotal.DecodedValue - importTotal.DecodedValue
-	// For computed net registers, RawValue should be the decoded difference
-	// This prevents double-scaling in storage (StoreTotalDataPoint multiplies RawValue * Scale)
+	netValue := exportVal.DecodedValue - importVal.DecodedValue
 	computedValue := &solis.Value{
-		Key:          "grid_energy_total",
+		Key:          cfg.TargetKey,
 		Name:         reg.Name,
 		RawValue:     netValue,
 		DecodedValue: netValue,
@@ -326,177 +327,13 @@ func (a *Aggregator) computeAndStoreGridEnergyTotal() {
 	}
 
 	// Store in database
-	totalDp := &storage.TotalDataPoint{
-		Value:     netValue,
-		RawValue:  netValue, // Use decoded value to prevent double-scaling
-		Timestamp: time.Now().Format(time.RFC3339),
-	}
-	if storeErr := a.storage.StoreTotalDataPoint("grid_energy_total", totalDp); storeErr != nil {
-		logger.Warn().Msgf("Failed to store total value for grid_energy_total: %v", storeErr)
+	timeStr := time.Now().Format(cfg.TimeFormat)
+	if storeErr := cfg.StoreFunc(cfg.TargetKey, cfg.DataPointFunc(netValue, timeStr)); storeErr != nil {
+		logger.Warn().Msgf("Failed to store value for %s: %v", cfg.TargetKey, storeErr)
 	}
 
-	a.updateCache(map[string]*solis.Value{"grid_energy_total": computedValue})
-	logger.Debug().Msgf("Computed and stored grid_energy_total: %.1f kWh", netValue)
-}
-
-// computeAndStoreGridEnergyDaily computes grid_energy_daily = grid_export_daily - grid_import_daily and stores in DB.
-func (a *Aggregator) computeAndStoreGridEnergyDaily() {
-	fedDaily, err := a.getRegisterValueFromCache("grid_export_daily")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_export_daily: %v", err)
-		return
-	}
-
-	importDaily, err := a.getRegisterValueFromCache("grid_import_daily")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_import_daily: %v", err)
-		return
-	}
-
-	reg, ok := solis.RegisterMapByKey["grid_energy_daily"]
-	if !ok {
-		logger.Warn().Msg("Register grid_energy_daily not found in RegisterMapByKey")
-		return
-	}
-
-	netValue := fedDaily.DecodedValue - importDaily.DecodedValue
-	// For computed net registers, RawValue should be the decoded difference
-	// This prevents double-scaling in storage (which multiplies RawValue * Scale)
-	// Since grid_energy_daily is computed from already-decoded values, we store
-	// RawValue = DecodedValue to avoid double-scaling
-	computedValue := &solis.Value{
-		Key:          "grid_energy_daily",
-		Name:         reg.Name,
-		RawValue:     netValue,
-		DecodedValue: netValue,
-		Unit:         reg.Unit,
-		Timestamp:    time.Now(),
-		DataType:     reg.DataType,
-		Stability:    reg.Stability,
-	}
-
-	// Store in database - use StoreAllRegisters to store as daily value
-	// Since grid_energy_daily is computed, we store it directly via StoreAllRegisters
-	values := map[string]*solis.Value{
-		"grid_energy_daily": {
-			Key:          "grid_energy_daily",
-			Name:         reg.Name,
-			RawValue:     netValue, // Use decoded value to prevent double-scaling
-			DecodedValue: netValue,
-			Unit:         reg.Unit,
-			Timestamp:    time.Now(),
-			DataType:     reg.DataType,
-			Stability:    reg.Stability,
-		},
-	}
-	if a.storage != nil {
-		if storeErr := a.storage.StoreAllRegisters(values, time.Now()); storeErr != nil {
-			logger.Warn().Msgf("Failed to store daily value for grid_energy_daily: %v", storeErr)
-		}
-	}
-
-	a.updateCache(map[string]*solis.Value{"grid_energy_daily": computedValue})
-	logger.Debug().Msgf("Computed and stored grid_energy_daily: %.1f kWh", netValue)
-}
-
-// computeAndStoreGridEnergyMonthly computes grid_energy_monthly = grid_export_monthly - grid_import_monthly and stores in DB.
-func (a *Aggregator) computeAndStoreGridEnergyMonthly() {
-	fedMonth, err := a.getRegisterValueFromCache("grid_export_monthly")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_export_monthly: %v", err)
-		return
-	}
-
-	importMonth, err := a.getRegisterValueFromCache("grid_import_monthly")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_import_monthly: %v", err)
-		return
-	}
-
-	reg, ok := solis.RegisterMapByKey["grid_energy_monthly"]
-	if !ok {
-		logger.Warn().Msg("Register grid_energy_monthly not found in RegisterMapByKey")
-		return
-	}
-
-	netValue := fedMonth.DecodedValue - importMonth.DecodedValue
-	// For computed net registers, Value should be the decoded difference.
-	// StoreMonthlyDataPoint will compute raw_value from Value and register's Scale.
-	// RawValue field is not used by StoreMonthlyDataPoint, but set it correctly for clarity.
-	computedValue := &solis.Value{
-		Key:          "grid_energy_monthly",
-		Name:         reg.Name,
-		RawValue:     netValue,
-		DecodedValue: netValue,
-		Unit:         reg.Unit,
-		Timestamp:    time.Now(),
-		DataType:     reg.DataType,
-		Stability:    reg.Stability,
-	}
-
-	// Store in database
-	currentMonth := time.Now().Format(solis.MonthFormat)
-	monthlyDp := &storage.MonthlyDataPoint{
-		Month:    currentMonth,
-		Value:    netValue,
-		RawValue: netValue, // RawValue should match Value for computed registers
-	}
-	if storeErr := a.storage.StoreMonthlyDataPoint("grid_energy_monthly", monthlyDp); storeErr != nil {
-		logger.Warn().Msgf("Failed to store monthly value for grid_energy_monthly: %v", storeErr)
-	}
-
-	a.updateCache(map[string]*solis.Value{"grid_energy_monthly": computedValue})
-	logger.Debug().Msgf("Computed and stored grid_energy_monthly: %.1f kWh", netValue)
-}
-
-// computeAndStoreGridEnergyYearly computes grid_energy_yearly = grid_export_yearly - grid_import_yearly and stores in DB.
-func (a *Aggregator) computeAndStoreGridEnergyYearly() {
-	fedYear, err := a.getRegisterValueFromCache("grid_export_yearly")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_export_yearly: %v", err)
-		return
-	}
-
-	importYear, err := a.getRegisterValueFromCache("grid_import_yearly")
-	if err != nil {
-		logger.Warn().Msgf("Failed to get grid_import_yearly: %v", err)
-		return
-	}
-
-	reg, ok := solis.RegisterMapByKey["grid_energy_yearly"]
-	if !ok {
-		logger.Warn().Msg("Register grid_energy_yearly not found in RegisterMapByKey")
-		return
-	}
-
-	netValue := fedYear.DecodedValue - importYear.DecodedValue
-	// For computed net registers, Value should be the decoded difference.
-	// StoreYearlyDataPoint will compute raw_value from Value and register's Scale.
-	// RawValue field is not used by StoreYearlyDataPoint, but set it correctly for clarity.
-	computedValue := &solis.Value{
-		Key:          "grid_energy_yearly",
-		Name:         reg.Name,
-		RawValue:     netValue,
-		DecodedValue: netValue,
-		Unit:         reg.Unit,
-		Timestamp:    time.Now(),
-		DataType:     reg.DataType,
-		Stability:    reg.Stability,
-	}
-
-	// Store in database
-	currentYear := time.Now().Format(solis.YearFormat)
-	yearlyDp := &storage.YearlyDataPoint{
-		Year:     currentYear,
-		Value:    netValue,
-		RawValue: netValue, // RawValue should match Value for computed registers
-	}
-	if storeErr := a.storage.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp); storeErr != nil {
-		logger.Warn().Msgf("Failed to store yearly value for grid_energy_yearly: %v", storeErr)
-	}
-
-	a.updateCache(map[string]*solis.Value{"grid_energy_yearly": computedValue})
-	logger.Debug().Msgf("Computed and stored grid_energy_yearly: %.1f kWh", netValue)
+	a.updateCache(map[string]*solis.Value{cfg.TargetKey: computedValue})
+	logger.Debug().Msgf("Computed and stored %s: %.1f kWh", cfg.TargetKey, netValue)
 }
 
 // getRegisterValueFromCache retrieves a register value from cache.
@@ -510,6 +347,104 @@ func (a *Aggregator) getRegisterValueFromCache(key string) (*solis.Value, error)
 		return value, nil
 	}
 	return nil, fmt.Errorf("value not found in cache for %s", key)
+}
+
+// computeGridEnergyTotal computes grid_energy_total = grid_export_total - grid_import_total.
+//
+//nolint:dupl // Different target (total) from computeGridEnergyDaily/computeGridEnergyMonthly/computeGridEnergyYearly
+func (a *Aggregator) computeGridEnergyTotal() {
+	a.computeGridEnergy(GridEnergyConfig{
+		ExportKey:  "grid_export_total",
+		ImportKey:  "grid_import_total",
+		TargetKey:  "grid_energy_total",
+		TimeFormat: time.RFC3339,
+		StoreFunc: func(key string, dp interface{}) error {
+			return a.storage.StoreTotalDataPoint(key, dp.(*storage.TotalDataPoint))
+		},
+		DataPointFunc: func(value float64, timeStr string) interface{} {
+			return &storage.TotalDataPoint{
+				Value:     value,
+				RawValue:  value,
+				Timestamp: timeStr,
+			}
+		},
+	})
+}
+
+// computeGridEnergyDaily computes grid_energy_daily = grid_export_daily - grid_import_daily.
+//
+//nolint:dupl // Different target (daily) from computeGridEnergyTotal/computeGridEnergyMonthly/computeGridEnergyYearly
+func (a *Aggregator) computeGridEnergyDaily() {
+	a.computeGridEnergy(GridEnergyConfig{
+		ExportKey:  "grid_export_daily",
+		ImportKey:  "grid_import_daily",
+		TargetKey:  "grid_energy_daily",
+		TimeFormat: "",
+		StoreFunc: func(key string, dp interface{}) error {
+			values := map[string]*solis.Value{key: dp.(*solis.Value)}
+			if a.storage != nil {
+				return a.storage.StoreAllRegisters(values, time.Now())
+			}
+			return nil
+		},
+		DataPointFunc: func(value float64, _ string) interface{} {
+			reg := solis.RegisterMapByKey["grid_energy_daily"]
+			return &solis.Value{
+				Key:          "grid_energy_daily",
+				Name:         reg.Name,
+				RawValue:     value,
+				DecodedValue: value,
+				Unit:         reg.Unit,
+				Timestamp:    time.Now(),
+				DataType:     reg.DataType,
+				Stability:    reg.Stability,
+			}
+		},
+	})
+}
+
+// computeGridEnergyMonthly computes grid_energy_monthly = grid_export_monthly - grid_import_monthly.
+//
+//nolint:dupl // Different target (monthly) from computeGridEnergyTotal/computeGridEnergyDaily/computeGridEnergyYearly
+func (a *Aggregator) computeGridEnergyMonthly() {
+	a.computeGridEnergy(GridEnergyConfig{
+		ExportKey:  "grid_export_monthly",
+		ImportKey:  "grid_import_monthly",
+		TargetKey:  "grid_energy_monthly",
+		TimeFormat: solis.MonthFormat,
+		StoreFunc: func(key string, dp interface{}) error {
+			return a.storage.StoreMonthlyDataPoint(key, dp.(*storage.MonthlyDataPoint))
+		},
+		DataPointFunc: func(value float64, timeStr string) interface{} {
+			return &storage.MonthlyDataPoint{
+				Month:    timeStr,
+				Value:    value,
+				RawValue: value,
+			}
+		},
+	})
+}
+
+// computeGridEnergyYearly computes grid_energy_yearly = grid_export_yearly - grid_import_yearly.
+//
+//nolint:dupl // Different target (yearly) from computeGridEnergyTotal/computeGridEnergyDaily/computeGridEnergyMonthly
+func (a *Aggregator) computeGridEnergyYearly() {
+	a.computeGridEnergy(GridEnergyConfig{
+		ExportKey:  "grid_export_yearly",
+		ImportKey:  "grid_import_yearly",
+		TargetKey:  "grid_energy_yearly",
+		TimeFormat: solis.YearFormat,
+		StoreFunc: func(key string, dp interface{}) error {
+			return a.storage.StoreYearlyDataPoint(key, dp.(*storage.YearlyDataPoint))
+		},
+		DataPointFunc: func(value float64, timeStr string) interface{} {
+			return &storage.YearlyDataPoint{
+				Year:     timeStr,
+				Value:    value,
+				RawValue: value,
+			}
+		},
+	})
 }
 
 // updateCache safely updates the cache with computed values.

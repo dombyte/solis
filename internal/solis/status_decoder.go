@@ -42,82 +42,27 @@ func DecodeOperatingStatus(value uint16) []string {
 
 // DecodeGridFaultStatus01 decodes the grid_fault_status_01 register (33116).
 func DecodeGridFaultStatus01(value uint16) []string {
-	bitMap := FAULT_BIT_MAP[33116]
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			if i < len(bitMap) && bitMap[i] != "" {
-				faults = append(faults, bitMap[i])
-			} else {
-				faults = append(faults, fmt.Sprintf("Unknown bit %d", i))
-			}
-		}
-	}
-	return faults
+	return DecodeFaultBits(33116, value)
 }
 
 // DecodeBackupFaultStatus02 decodes the backup_load_fault_status_02 register (33117).
 func DecodeBackupFaultStatus02(value uint16) []string {
-	bitMap := FAULT_BIT_MAP[33117]
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			if i < len(bitMap) && bitMap[i] != "" {
-				faults = append(faults, bitMap[i])
-			} else {
-				faults = append(faults, fmt.Sprintf("Unknown bit %d", i))
-			}
-		}
-	}
-	return faults
+	return DecodeFaultBits(33117, value)
 }
 
 // DecodeBatteryFaultStatus03 decodes the battery_fault_status_03 register (33118).
 func DecodeBatteryFaultStatus03(value uint16) []string {
-	bitMap := FAULT_BIT_MAP[33118]
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			if i < len(bitMap) && bitMap[i] != "" {
-				faults = append(faults, bitMap[i])
-			} else {
-				faults = append(faults, fmt.Sprintf("Unknown bit %d", i))
-			}
-		}
-	}
-	return faults
+	return DecodeFaultBits(33118, value)
 }
 
 // DecodeDeviceFaultStatus04 decodes the device_fault_status_04 register (33119).
 func DecodeDeviceFaultStatus04(value uint16) []string {
-	bitMap := FAULT_BIT_MAP[33119]
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			if i < len(bitMap) && bitMap[i] != "" {
-				faults = append(faults, bitMap[i])
-			} else {
-				faults = append(faults, fmt.Sprintf("Unknown bit %d", i))
-			}
-		}
-	}
-	return faults
+	return DecodeFaultBits(33119, value)
 }
 
 // DecodeDeviceFaultStatus05 decodes the device_fault_status_05 register (33120).
 func DecodeDeviceFaultStatus05(value uint16) []string {
-	bitMap := FAULT_BIT_MAP[33120]
-	var faults []string
-	for i := range 16 {
-		if value&(1<<i) != 0 {
-			if i < len(bitMap) && bitMap[i] != "" {
-				faults = append(faults, bitMap[i])
-			} else {
-				faults = append(faults, fmt.Sprintf("Unknown bit %d", i))
-			}
-		}
-	}
-	return faults
+	return DecodeFaultBits(33120, value)
 }
 
 // DecodeBatteryFaultStatus1Bms decodes the battery_fault_status_1_bms register (33145).

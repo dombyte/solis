@@ -296,159 +296,114 @@ func (s *Storage) getLastErrorValue(tx *sql.Tx, key string) (*float64, error) {
 	return &lastValue, nil
 }
 
-// storeDailyValue updates the daily value for a register.
-// Creates a new entry for the current date if none exists, or updates the existing one
-// with the maximum value seen so far that day.
-func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	date := timestamp.Format(solis.DateFormat)
+// PeriodicValueConfig holds configuration for storing periodic values
+type PeriodicValueConfig struct {
+	Format       string
+	TableName    string
+	PeriodColumn string
+}
+
+// storePeriodicValue stores a periodic value (daily, monthly, yearly) in the database
+func (s *Storage) storePeriodicValue(
+	tx *sql.Tx,
+	key string,
+	value *solis.Value,
+	timestamp time.Time,
+	cfg PeriodicValueConfig,
+) error {
+	period := timestamp.Format(cfg.Format)
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return nil
 	}
 
-	// Get existing value for today
+	// Get existing value for this period
 	var existingValue float64
-	err := tx.QueryRow(`
-		SELECT value FROM daily_values
-		WHERE register_key = ? AND date = ?
-	`, key, date).Scan(&existingValue)
+	// TableName and PeriodColumn are trusted constants, not user input
+	query := fmt.Sprintf("SELECT value FROM %s WHERE register_key = ? AND %s = ?", //nolint:gosec
+		cfg.TableName, cfg.PeriodColumn)
+	err := tx.QueryRow(query, key, period).Scan(&existingValue)
 
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed to query daily value: %w", err)
+		return fmt.Errorf("failed to query %s value: %w", cfg.TableName, err)
 	}
 
 	decodedValue := value.RawValue * reg.Scale
 
-	// For most energy registers, we want the MAXIMUM value seen during the day
-	// (they reset at midnight, so the highest value is the end-of-day total).
+	// For most energy registers, we want the MAXIMUM value seen during the period
 	// However, for NET energy registers (grid_energy_*), we want the LATEST value
 	// because net values can be negative or decreasing.
 	isNetRegister := solis.IsNetRegister(key)
 
 	if err == sql.ErrNoRows {
-		// New day, insert new record
-		_, err = tx.Exec(`
-			INSERT INTO daily_values (date, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?)
-		`, date, key, decodedValue, value.RawValue)
+		// New period, insert new record
+		// TableName and PeriodColumn are trusted constants, not user input
+		insertQuery := fmt.Sprintf( //nolint:gosec
+			"INSERT INTO %s (%s, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
+			cfg.TableName, cfg.PeriodColumn)
+		_, err = tx.Exec(insertQuery, period, key, decodedValue, value.RawValue)
 	} else {
 		// For net registers, always update to latest value
 		// For other registers, only update if new value is higher
 		if isNetRegister || decodedValue > existingValue {
-			_, err = tx.Exec(`
-				UPDATE daily_values
-				SET value = ?, raw_value = ?
-				WHERE register_key = ? AND date = ?
-			`, decodedValue, value.RawValue, key, date)
+			// TableName and PeriodColumn are trusted constants, not user input
+			updateQuery := fmt.Sprintf( //nolint:gosec
+				"UPDATE %s SET value = ?, raw_value = ? WHERE register_key = ? AND %s = ?",
+				cfg.TableName, cfg.PeriodColumn)
+			_, err = tx.Exec(updateQuery, decodedValue, value.RawValue, key, period)
 		}
 	}
 
 	return err
+}
+
+// storeDailyValue updates the daily value for a register.
+// Creates a new entry for the current date if none exists, or updates the existing one
+// with the maximum value seen so far that day.
+//
+//nolint:dupl // Different configuration (daily table/format) from storeMonthlyValue/storeYearlyValue
+func (s *Storage) storeDailyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+	return s.storePeriodicValue(tx, key, value, timestamp, PeriodicValueConfig{
+		Format:       solis.DateFormat,
+		TableName:    "daily_values",
+		PeriodColumn: "date",
+	})
 }
 
 // storeMonthlyValue updates the monthly value for a register.
 // Creates a new entry for the current month if none exists, or updates the existing one
 // with the maximum value seen so far that month.
+//
+//nolint:dupl // Different configuration (monthly table/format) from storeDailyValue/storeYearlyValue
 func (s *Storage) storeMonthlyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	month := timestamp.Format(solis.MonthFormat)
-	reg, ok := solis.RegisterMapByKey[key]
-	if !ok {
-		return nil
-	}
-
-	// Get existing value for this month
-	var existingValue float64
-	err := tx.QueryRow(`
-		SELECT value FROM monthly_values
-		WHERE register_key = ? AND month = ?
-	`, key, month).Scan(&existingValue)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed to query monthly value: %w", err)
-	}
-
-	decodedValue := value.RawValue * reg.Scale
-
-	// For most energy registers, we want the MAXIMUM value seen during the month
-	// (they reset at the start of a new month, so the highest value is the end-of-month total).
-	// However, for NET energy registers (grid_energy_*), we want the LATEST value
-	// because net values can be negative or decreasing.
-	isNetRegister := solis.IsNetRegister(key)
-
-	if err == sql.ErrNoRows {
-		// New month, insert new record
-		_, err = tx.Exec(`
-			INSERT INTO monthly_values (month, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?)
-		`, month, key, decodedValue, value.RawValue)
-	} else {
-		// For net registers, always update to latest value
-		// For other registers, only update if new value is higher
-		if isNetRegister || decodedValue > existingValue {
-			_, err = tx.Exec(`
-				UPDATE monthly_values
-				SET value = ?, raw_value = ?
-				WHERE register_key = ? AND month = ?
-			`, decodedValue, value.RawValue, key, month)
-		}
-	}
-
-	return err
+	return s.storePeriodicValue(tx, key, value, timestamp, PeriodicValueConfig{
+		Format:       solis.MonthFormat,
+		TableName:    "monthly_values",
+		PeriodColumn: "month",
+	})
 }
 
 // storeYearlyValue updates the yearly value for a register.
 // Creates a new entry for the current year if none exists, or updates the existing one
 // with the maximum value seen so far that year.
+//
+//nolint:dupl // Different configuration (yearly table/format) from storeDailyValue/storeMonthlyValue
 func (s *Storage) storeYearlyValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
-	year := timestamp.Format(solis.YearFormat)
-	reg, ok := solis.RegisterMapByKey[key]
-	if !ok {
-		return nil
-	}
-
-	// Get existing value for this year
-	var existingValue float64
-	err := tx.QueryRow(`
-		SELECT value FROM yearly_values
-		WHERE register_key = ? AND year = ?
-	`, key, year).Scan(&existingValue)
-
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed to query yearly value: %w", err)
-	}
-
-	decodedValue := value.RawValue * reg.Scale
-
-	// For most energy registers, we want the MAXIMUM value seen during the year
-	// (they reset at the start of a new year, so the highest value is the end-of-year total).
-	// However, for NET energy registers (grid_energy_*), we want the LATEST value
-	// because net values can be negative or decreasing.
-	isNetRegister := solis.IsNetRegister(key)
-
-	if err == sql.ErrNoRows {
-		// New year, insert new record
-		_, err = tx.Exec(`
-			INSERT INTO yearly_values (year, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?)
-		`, year, key, decodedValue, value.RawValue)
-	} else {
-		// For net registers, always update to latest value
-		// For other registers, only update if new value is higher
-		if isNetRegister || decodedValue > existingValue {
-			_, err = tx.Exec(`
-				UPDATE yearly_values
-				SET value = ?, raw_value = ?
-				WHERE register_key = ? AND year = ?
-			`, decodedValue, value.RawValue, key, year)
-		}
-	}
-
-	return err
+	return s.storePeriodicValue(tx, key, value, timestamp, PeriodicValueConfig{
+		Format:       solis.YearFormat,
+		TableName:    "yearly_values",
+		PeriodColumn: "year",
+	})
 }
 
 // storeTotalValue updates the total (lifetime) value for a register.
 // Always updates with the latest value since total registers only increase.
-func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+func (s *Storage) storeTotalValue(
+	tx *sql.Tx,
+	key string,
+	value *solis.Value,
+	timestamp time.Time,
+) error {
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return nil
@@ -536,7 +491,12 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 }
 
 // storeSingleRegister stores a single register value
-func (s *Storage) storeSingleRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+func (s *Storage) storeSingleRegister(
+	tx *sql.Tx,
+	key string,
+	value *solis.Value,
+	timestamp time.Time,
+) error {
 	// Look up the register definition
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
@@ -581,7 +541,12 @@ func (s *Storage) storeSingleRegister(tx *sql.Tx, key string, value *solis.Value
 }
 
 // storeStatusRegister stores a status register value in error_data table
-func (s *Storage) storeStatusRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+func (s *Storage) storeStatusRegister(
+	tx *sql.Tx,
+	key string,
+	value *solis.Value,
+	timestamp time.Time,
+) error {
 	// Only store if value has changed
 	lastValue, err := s.getLastErrorValue(tx, key)
 	if err != nil {
@@ -604,7 +569,11 @@ func (s *Storage) storeStatusRegister(tx *sql.Tx, key string, value *solis.Value
 }
 
 // storeDailyRegister stores a daily register value
-func (s *Storage) storeDailyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+//
+//nolint:dupl // Different periodic type (daily) from storeMonthlyRegister/storeYearlyRegister/storeTotalRegister
+func (s *Storage) storeDailyRegister(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	if err := s.storeDailyValue(tx, key, value, timestamp); err != nil {
 		logger.Error().Msgf("Failed to store daily value for %s: %v", key, err)
 		return err
@@ -614,7 +583,11 @@ func (s *Storage) storeDailyRegister(tx *sql.Tx, key string, value *solis.Value,
 }
 
 // storeMonthlyRegister stores a monthly register value
-func (s *Storage) storeMonthlyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+//
+//nolint:dupl // Different periodic type (monthly) from storeDailyRegister/storeYearlyRegister/storeTotalRegister
+func (s *Storage) storeMonthlyRegister(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	if err := s.storeMonthlyValue(tx, key, value, timestamp); err != nil {
 		logger.Error().Msgf("Failed to store monthly value for %s: %v", key, err)
 		return err
@@ -624,7 +597,11 @@ func (s *Storage) storeMonthlyRegister(tx *sql.Tx, key string, value *solis.Valu
 }
 
 // storeYearlyRegister stores a yearly register value
-func (s *Storage) storeYearlyRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+//
+//nolint:dupl // Different periodic type (yearly) from storeDailyRegister/storeMonthlyRegister/storeTotalRegister
+func (s *Storage) storeYearlyRegister(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	if err := s.storeYearlyValue(tx, key, value, timestamp); err != nil {
 		logger.Error().Msgf("Failed to store yearly value for %s: %v", key, err)
 		return err
@@ -634,7 +611,11 @@ func (s *Storage) storeYearlyRegister(tx *sql.Tx, key string, value *solis.Value
 }
 
 // storeTotalRegister stores a total register value
-func (s *Storage) storeTotalRegister(tx *sql.Tx, key string, value *solis.Value, timestamp time.Time) error {
+//
+//nolint:dupl // Different periodic type (total) from storeDailyRegister/storeMonthlyRegister/storeYearlyRegister
+func (s *Storage) storeTotalRegister(
+	tx *sql.Tx, key string, value *solis.Value, timestamp time.Time,
+) error {
 	if err := s.storeTotalValue(tx, key, value, timestamp); err != nil {
 		logger.Error().Msgf("Failed to store total value for %s: %v", key, err)
 		return err
@@ -644,6 +625,8 @@ func (s *Storage) storeTotalRegister(tx *sql.Tx, key string, value *solis.Value,
 }
 
 // CleanupDailyData removes daily data older than the configured retention period.
+//
+//nolint:dupl // Different periodic type (daily) from CleanupMonthlyData/CleanupYearlyData
 func (s *Storage) CleanupDailyData() error {
 	logger.Info().Msgf("Cleaning up daily data older than %s", s.config.DailyRetention)
 
@@ -669,6 +652,8 @@ func (s *Storage) CleanupDailyData() error {
 }
 
 // CleanupMonthlyData removes monthly data older than the configured retention period.
+//
+//nolint:dupl // Different periodic type (monthly) from CleanupDailyData/CleanupYearlyData
 func (s *Storage) CleanupMonthlyData() error {
 	logger.Info().Msgf("Cleaning up monthly data older than %s", s.config.MonthlyRetention)
 
@@ -694,6 +679,8 @@ func (s *Storage) CleanupMonthlyData() error {
 }
 
 // CleanupYearlyData removes yearly data older than the configured retention period.
+//
+//nolint:dupl // Different periodic type (yearly) from CleanupDailyData/CleanupMonthlyData
 func (s *Storage) CleanupYearlyData() error {
 	logger.Info().Msgf("Cleaning up yearly data older than %s", s.config.YearlyRetention)
 
@@ -805,7 +792,12 @@ type CleanupConfig struct {
 }
 
 // cleanupWithQuery cleans up a table with a specific query
-func (s *Storage) cleanupWithQuery(cfg CleanupConfig, retention time.Duration, totalRowsDeleted *int64, errs *[]error) {
+func (s *Storage) cleanupWithQuery(
+	cfg CleanupConfig,
+	retention time.Duration,
+	totalRowsDeleted *int64,
+	errs *[]error,
+) {
 	if err := s.cleanupTable(cfg.Table, cfg.Column, retention,
 		func(cutoff string) (sql.Result, error) {
 			return s.db.Exec(cfg.Query, cutoff)
@@ -828,7 +820,7 @@ func (s *Storage) runVacuumIfNeeded(totalRowsDeleted int64) {
 				s.mu.Lock()
 				s.lastVacuumTime = time.Now()
 				s.mu.Unlock()
-				logger.Info().Msgf("Database VACUUM completed, reclaimed space from %d deleted rows", totalRowsDeleted)
+				logger.Info().Msgf("VACUUM complete, reclaimed space from %d rows", totalRowsDeleted)
 			}
 		}
 	}
@@ -846,7 +838,7 @@ func (s *Storage) completeCleanup(cleanupStart time.Time, totalRowsDeleted int64
 		return fmt.Errorf("%d cleanup errors occurred", len(errs))
 	}
 
-	logger.Info().Msgf("Retention cleanup completed successfully, total rows deleted: %d", totalRowsDeleted)
+	logger.Info().Msgf("Cleanup complete, %d rows deleted", totalRowsDeleted)
 	return nil
 }
 
@@ -872,7 +864,7 @@ func (s *Storage) cleanupTable(tableName, dateColumn string, retention time.Dura
 		cutoffStr = cutoff.Format(solis.DateFormat)
 	}
 
-	logger.Info().Msgf("Cleaning up %s data older than %s (cutoff: %s)", tableName, retention, cutoffStr)
+	logger.Info().Msgf("Cleaning %s data older than %s", tableName, cutoffStr)
 
 	result, err := deleteFunc(cutoffStr)
 	if err != nil {
@@ -1002,6 +994,8 @@ func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON implements json.Marshaler for DailyDataPoint to ensure float64 values are rounded.
+//
+//nolint:dupl // Different type (DailyDataPoint) from MonthlyDataPoint/YearlyDataPoint/TotalDataPoint
 func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias DailyDataPoint
 	return json.Marshal(struct {
@@ -1018,6 +1012,8 @@ func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON implements json.Marshaler for MonthlyDataPoint to ensure float64 values are rounded.
+//
+//nolint:dupl // Different type (MonthlyDataPoint) from DailyDataPoint/YearlyDataPoint/TotalDataPoint
 func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias MonthlyDataPoint
 	return json.Marshal(struct {
@@ -1034,6 +1030,8 @@ func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON implements json.Marshaler for YearlyDataPoint to ensure float64 values are rounded.
+//
+//nolint:dupl // Different type (YearlyDataPoint) from DailyDataPoint/MonthlyDataPoint/TotalDataPoint
 func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias YearlyDataPoint
 	return json.Marshal(struct {
@@ -1050,6 +1048,8 @@ func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON implements json.Marshaler for TotalDataPoint to ensure float64 values are rounded.
+//
+//nolint:dupl // Different type (TotalDataPoint) from DailyDataPoint/MonthlyDataPoint/YearlyDataPoint
 func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias TotalDataPoint
 	return json.Marshal(struct {
@@ -1082,6 +1082,8 @@ func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 }
 
 // GetErrorHistory retrieves historical error data for a specific register key.
+//
+//nolint:dupl // Different table/type (error) from GetDailyHistory/GetMonthlyHistory/GetYearlyHistory
 func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDataPoint, error) {
 	rows, err := s.db.Query(`
 		SELECT timestamp, raw_value, string_value
@@ -1116,6 +1118,8 @@ func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDat
 }
 
 // GetDailyHistory retrieves daily values for a specific register key.
+//
+//nolint:dupl // Different table/type (daily) from GetErrorHistory/GetMonthlyHistory/GetYearlyHistory
 func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*DailyDataPoint, error) {
 	start := startDate.Format(solis.DateFormat)
 	end := endDate.Format(solis.DateFormat)
@@ -1153,6 +1157,8 @@ func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*
 }
 
 // GetMonthlyHistory retrieves monthly values for a specific register key.
+//
+//nolint:dupl // Different table/type (monthly) from GetErrorHistory/GetDailyHistory/GetYearlyHistory
 func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) ([]*MonthlyDataPoint, error) {
 	start := startMonth.Format(solis.MonthFormat)
 	end := endMonth.Format(solis.MonthFormat)
@@ -1190,6 +1196,8 @@ func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) 
 }
 
 // GetYearlyHistory retrieves yearly values for a specific register key.
+//
+//nolint:dupl // Different table/type (yearly) from GetErrorHistory/GetDailyHistory/GetMonthlyHistory
 func (s *Storage) GetYearlyHistory(key string, startYear, endYear time.Time) ([]*YearlyDataPoint, error) {
 	start := startYear.Format(solis.YearFormat)
 	end := endYear.Format(solis.YearFormat)
@@ -1416,6 +1424,8 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 
 // GetTotalHistory retrieves the total (lifetime) value for a specific register key.
 // Returns the latest stored value.
+//
+//nolint:dupl // Different query (total) from GetMonthlySum/GetYearlySum
 func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {
 	var dp TotalDataPoint
 	err := s.db.QueryRow(`
@@ -1438,6 +1448,8 @@ func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {
 
 // GetMonthlySum returns the sum of daily values for a given register key and month.
 // This is used for computing monthly energy values from daily accumulations.
+//
+//nolint:dupl // Different period (monthly) from GetYearlySum
 func (s *Storage) GetMonthlySum(key string, month string) (float64, float64, error) {
 	// Query to sum all daily values for this register and month
 	// month format is "2006-01", so LIKE "2006-01%" matches all dates in that month
@@ -1467,6 +1479,8 @@ func (s *Storage) GetMonthlySum(key string, month string) (float64, float64, err
 
 // GetYearlySum returns the sum of daily values for a given register key and year.
 // This is used for computing yearly energy values from daily accumulations.
+//
+//nolint:dupl // Different period (yearly) from GetMonthlySum
 func (s *Storage) GetYearlySum(key string, year string) (float64, float64, error) {
 	// Query to sum all daily values for this register and year
 	// year format is "2006", so LIKE "2006%" matches all dates in that year

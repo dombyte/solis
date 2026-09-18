@@ -113,11 +113,21 @@ var statusDecoders = map[string]func(uint16) interface{}{
 // Handler wrappers for status decoding
 func decodeSolisStatusHandler(value uint16) interface{}     { return DecodeSolisStatus(value) }
 func decodeOperatingStatusHandler(value uint16) interface{} { return DecodeOperatingStatus(value) }
-func decodeGridFault01Handler(value uint16) interface{}     { return DecodeGridFaultStatus01(value) }
-func decodeBackupFault02Handler(value uint16) interface{}   { return DecodeBackupFaultStatus02(value) }
-func decodeBatteryFault03Handler(value uint16) interface{}  { return DecodeBatteryFaultStatus03(value) }
-func decodeDeviceFault04Handler(value uint16) interface{}   { return DecodeDeviceFaultStatus04(value) }
-func decodeDeviceFault05Handler(value uint16) interface{}   { return DecodeDeviceFaultStatus05(value) }
+func decodeGridFault01Handler(value uint16) interface{} {
+	return DecodeGridFaultStatus01(value)
+}
+func decodeBackupFault02Handler(value uint16) interface{} {
+	return DecodeBackupFaultStatus02(value)
+}
+func decodeBatteryFault03Handler(value uint16) interface{} {
+	return DecodeBatteryFaultStatus03(value)
+}
+func decodeDeviceFault04Handler(value uint16) interface{} {
+	return DecodeDeviceFaultStatus04(value)
+}
+func decodeDeviceFault05Handler(value uint16) interface{} {
+	return DecodeDeviceFaultStatus05(value)
+}
 func decodeBatteryFault1BmsHandler(value uint16) interface{} {
 	return DecodeBatteryFaultStatus1Bms(value)
 }

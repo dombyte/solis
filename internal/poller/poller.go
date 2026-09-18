@@ -272,7 +272,12 @@ func (p *Poller) filterComputedRegisters(values map[string]*solis.Value) map[str
 }
 
 // storePollResults stores poll results and updates poll info.
-func (p *Poller) storePollResults(rawValues map[string]*solis.Value, pollStart time.Time, pollDuration time.Duration, registersRead int) {
+func (p *Poller) storePollResults(
+	rawValues map[string]*solis.Value,
+	pollStart time.Time,
+	pollDuration time.Duration,
+	registersRead int,
+) {
 	if p.storage != nil {
 		if err := p.storage.StoreAllRegisters(rawValues, pollStart); err != nil {
 			logger.Error().Msgf("Failed to store values: %v", err)

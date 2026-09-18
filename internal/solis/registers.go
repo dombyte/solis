@@ -917,6 +917,8 @@ var ReadRanges = [5]struct {
 }
 
 // STATUS_MAP maps raw status code values (from register 33095) to short status names.
+//
+//nolint:dupl // Intentionally separate from STATUS_DESCRIPTION - different purposes (short names vs descriptions)
 var STATUS_MAP = map[uint16]string{
 	// Normal operation states
 	0x0000: "Waiting",
@@ -997,6 +999,8 @@ var STATUS_MAP = map[uint16]string{
 
 // STATUS_DESCRIPTION maps raw status code values to detailed human-readable descriptions.
 // This provides more context than STATUS_MAP for API responses and logging.
+//
+//nolint:dupl // Intentionally separate from STATUS_MAP - different purposes (descriptions vs short names)
 var STATUS_DESCRIPTION = map[uint16]string{
 	// Normal operation states
 	0x0000: "Normal operation / Waiting",

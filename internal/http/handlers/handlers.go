@@ -35,9 +35,12 @@ func getHTTPStatusCode(err error) int {
 		return validationErr.statusCode
 	}
 
-	// Check error message for common patterns
-	errStr := err.Error()
+	// Check error message for common patterns to determine status code
+	return getStatusCodeFromErrorString(err.Error())
+}
 
+// getStatusCodeFromErrorString determines the HTTP status code based on error message patterns.
+func getStatusCodeFromErrorString(errStr string) int {
 	// 404 - Resource not found
 	if strings.Contains(errStr, "unknown register key") ||
 		strings.Contains(errStr, "not found") ||
@@ -54,7 +57,6 @@ func getHTTPStatusCode(err error) int {
 	}
 
 	// 500 - Internal server error (database, storage, etc.)
-	// Default for all other errors
 	return http.StatusInternalServerError
 }
 
@@ -75,31 +77,42 @@ func sanitizeErrorMessage(err error) string {
 
 	// Remove potentially sensitive information
 	// Database paths, file paths, internal details
-	sanitized := errStr
+	sanitized := removeSensitivePaths(errStr)
 
+	// Generic messages for common error types
+	return getSanitizedErrorMessage(sanitized, err)
+}
+
+// removeSensitivePaths removes file paths and database extensions from error strings.
+func removeSensitivePaths(errStr string) string {
+	sanitized := errStr
 	// Remove file paths (common in SQLite errors)
 	sanitized = strings.ReplaceAll(sanitized, "./data/", "")
 	sanitized = strings.ReplaceAll(sanitized, "/data/", "/")
-
 	// Remove database file extensions
 	sanitized = strings.ReplaceAll(sanitized, ".db", "")
 	sanitized = strings.ReplaceAll(sanitized, ".sqlite", "")
+	return sanitized
+}
 
-	// Generic messages for common error types
-	// Use sanitized error string for pattern matching
-	sanitizedErrStr := sanitized
+// getSanitizedErrorMessage returns a sanitized error message based on patterns.
+func getSanitizedErrorMessage(sanitizedErrStr string, originalErr error) string {
 	switch {
-	case strings.Contains(sanitizedErrStr, "no rows") || strings.Contains(sanitizedErrStr, "not found"):
+	case strings.Contains(sanitizedErrStr, "no rows") ||
+		strings.Contains(sanitizedErrStr, "not found"):
 		return "resource not found"
-	case strings.Contains(sanitizedErrStr, "database") || strings.Contains(sanitizedErrStr, "sqlite"):
+	case strings.Contains(sanitizedErrStr, "database") ||
+		strings.Contains(sanitizedErrStr, "sqlite"):
 		return "database error"
-	case strings.Contains(sanitizedErrStr, "timeout") || strings.Contains(sanitizedErrStr, "context"):
+	case strings.Contains(sanitizedErrStr, "timeout") ||
+		strings.Contains(sanitizedErrStr, "context"):
 		return "request timeout"
-	case strings.Contains(sanitizedErrStr, "connection") || strings.Contains(sanitizedErrStr, "network"):
+	case strings.Contains(sanitizedErrStr, "connection") ||
+		strings.Contains(sanitizedErrStr, "network"):
 		return "service unavailable"
 	default:
 		// Return a generic message but log the full error
-		logger.Warn().Msgf("Returning sanitized error to client, full error: %v", err)
+		logger.Warn().Msgf("Returning sanitized error to client, full error: %v", originalErr)
 		return "internal server error"
 	}
 }
@@ -241,7 +254,9 @@ func GetKeysHandler(deps HandlerDeps) http.HandlerFunc {
 				description := fmt.Sprintf("%s (%s)", reg.Name, reg.Unit)
 
 				// Append usage note for history-only registers
-				if solis.IsDailyRegister(key) || solis.IsMonthlyRegister(key) || solis.IsYearlyRegister(key) || solis.IsTotalRegister(key) {
+				isPeriodic := solis.IsDailyRegister(key) || solis.IsMonthlyRegister(key) ||
+					solis.IsYearlyRegister(key) || solis.IsTotalRegister(key)
+				if isPeriodic {
 					description += " - Use with start/end query parameters for historical data"
 				}
 
@@ -283,8 +298,7 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 
 		if hasQueryParams && keyType == "current" {
 			WriteError(w,
-				fmt.Sprintf("historical queries are not supported for register %s - only daily, monthly, yearly, and total registers support historical data",
-					key),
+				fmt.Sprintf("historical queries not supported for %s - only periodic registers", key),
 				http.StatusBadRequest)
 			return
 		}
@@ -315,96 +329,101 @@ func (e *registerValidationError) Error() string {
 }
 
 // validateAndGetRegister validates the request and returns the register key and metadata
-func validateAndGetRegister(r *http.Request, service ReadServiceInterface) (string, *solis.Register, *registerValidationError) {
+func validateAndGetRegister(
+	r *http.Request,
+	service ReadServiceInterface,
+) (string, *solis.Register, *registerValidationError) {
 	key := chi.URLParam(r, "key")
 	if key == "" {
-		return "", nil, &registerValidationError{message: "register key is required", statusCode: http.StatusBadRequest}
+		return "", nil,
+			&registerValidationError{message: "register key is required", statusCode: http.StatusBadRequest}
 	}
 
 	if !service.IsRegisterEnabled(key) {
-		return "", nil, &registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
+		return "", nil,
+			&registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
 	}
 
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
-		return "", nil, &registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
+		return "", nil,
+			&registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
 	}
 
 	return key, reg, nil
 }
 
 // handleDailyRegister handles daily register requests
+//
+//nolint:dupl // Different interval (daily) from handleMonthlyRegister/handleYearlyRegister
 func handleDailyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	if hasQueryParams {
-		handleDailyWithParams(w, r, key, service)
-		return
-	}
-	handleCurrentValue(w, key, service)
-}
-
-// handleDailyWithParams handles daily register requests with time range parameters
-func handleDailyWithParams(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface) {
-	timeRange, err := ParseTimeRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
-	if err != nil {
-		WriteError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	history, err := service.GetDailyHistory(key, timeRange.Start, timeRange.End)
-	if err != nil {
-		// Storage/database errors should return 500, not 404
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	WriteJSON(w, history, http.StatusOK)
+	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
+		HasQueryParams: hasQueryParams,
+		GetHistory:     getDailyHistory,
+	})
 }
 
 // handleMonthlyRegister handles monthly register requests
+//
+//nolint:dupl // Different interval (monthly) from handleDailyRegister/handleYearlyRegister
 func handleMonthlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	if hasQueryParams {
-		handleMonthlyWithParams(w, r, key, service)
-		return
-	}
-	handleCurrentValue(w, key, service)
-}
-
-// handleMonthlyWithParams handles monthly register requests with time range parameters
-func handleMonthlyWithParams(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface) {
-	timeRange, err := ParseTimeRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
-	if err != nil {
-		WriteError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	history, err := service.GetMonthlyHistory(key, timeRange.Start, timeRange.End)
-	if err != nil {
-		// Storage/database errors should return 500, not 404
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	WriteJSON(w, history, http.StatusOK)
+	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
+		HasQueryParams: hasQueryParams,
+		GetHistory:     getMonthlyHistory,
+	})
 }
 
 // handleYearlyRegister handles yearly register requests
+//
+//nolint:dupl // Different interval (yearly) from handleDailyRegister/handleMonthlyRegister
 func handleYearlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	if hasQueryParams {
-		handleYearlyWithParams(w, r, key, service)
-		return
-	}
-	handleCurrentValue(w, key, service)
+	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
+		HasQueryParams: hasQueryParams,
+		GetHistory:     getYearlyHistory,
+	})
 }
 
-// handleYearlyWithParams handles yearly register requests with time range parameters
-func handleYearlyWithParams(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface) {
+// getDailyHistory returns the daily history for a register
+//
+//nolint:dupl // Different interval (daily) from getMonthlyHistory/getYearlyHistory
+func getDailyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
+	return s.GetDailyHistory(k, start, end)
+}
+
+// getMonthlyHistory returns the monthly history for a register
+//
+//nolint:dupl // Different interval (monthly) from getDailyHistory/getYearlyHistory
+func getMonthlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
+	return s.GetMonthlyHistory(k, start, end)
+}
+
+// getYearlyHistory returns the yearly history for a register
+//
+//nolint:dupl // Different interval (yearly) from getDailyHistory/getMonthlyHistory
+func getYearlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
+	return s.GetYearlyHistory(k, start, end)
+}
+
+// RegisterHistoryConfig holds configuration for handling register history requests
+type RegisterHistoryConfig struct {
+	GetHistory func(ReadServiceInterface, string, time.Time, time.Time) (interface{}, error)
+}
+
+// handleHistoryWithParams is a generic handler for history requests with time range parameters
+func handleHistoryWithParams(
+	w http.ResponseWriter,
+	r *http.Request,
+	key string,
+	service ReadServiceInterface,
+	cfg RegisterHistoryConfig,
+) {
 	timeRange, err := ParseTimeRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
 	if err != nil {
 		WriteError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	history, err := service.GetYearlyHistory(key, timeRange.Start, timeRange.End)
+	history, err := cfg.GetHistory(service, key, timeRange.Start, timeRange.End)
 	if err != nil {
 		// Storage/database errors should return 500, not 404
 		WriteErrorWithCode(w, err)
@@ -412,6 +431,29 @@ func handleYearlyWithParams(w http.ResponseWriter, r *http.Request, key string, 
 	}
 
 	WriteJSON(w, history, http.StatusOK)
+}
+
+// RegisterHandlerConfig holds configuration for handling register requests
+type RegisterHandlerConfig struct {
+	HasQueryParams bool
+	GetHistory     func(ReadServiceInterface, string, time.Time, time.Time) (interface{}, error)
+}
+
+// handleRegisterWithOptionalHistory handles register requests with optional history query parameters.
+// If HasQueryParams is true, it retrieves history using the provided getHistory function.
+// Otherwise, it returns the current value.
+func handleRegisterWithOptionalHistory(
+	w http.ResponseWriter,
+	r *http.Request,
+	key string,
+	service ReadServiceInterface,
+	cfg RegisterHandlerConfig,
+) {
+	if cfg.HasQueryParams {
+		handleHistoryWithParams(w, r, key, service, RegisterHistoryConfig{cfg.GetHistory})
+		return
+	}
+	handleCurrentValue(w, key, service)
 }
 
 // handleTotalRegister handles total register requests

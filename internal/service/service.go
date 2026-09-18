@@ -123,7 +123,11 @@ func (s *ReadService) GetRegister(key string) (*solis.Value, error) {
 
 // validateRegisterType checks if a register has the specified type.
 // Returns an error if the register is not of the expected type.
-func (s *ReadService) validateRegisterType(key string, checkFunc func(string) bool, typeName string) error {
+func (s *ReadService) validateRegisterType(
+	key string,
+	checkFunc func(string) bool,
+	typeName string,
+) error {
 	if !checkFunc(key) {
 		return fmt.Errorf("register %s is not a %s register", key, typeName)
 	}
@@ -136,7 +140,11 @@ func (s *ReadService) validateRegisterType(key string, checkFunc func(string) bo
 // - start: start time (optional, default: 24 hours ago)
 // - end: end time (optional, default: now)
 // - interval: only "raw" is supported (aggregated intervals removed)
-func (s *ReadService) GetHistoricalData(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error) {
+func (s *ReadService) GetHistoricalData(
+	key string,
+	start, end time.Time,
+	interval storage.Interval,
+) (*storage.HistoryResult, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}
@@ -176,7 +184,10 @@ func (s *ReadService) validateRegisterStatus(key string) error {
 }
 
 // GetErrorHistory returns historical error data for a specific register key.
-func (s *ReadService) GetErrorHistory(key string, start, end time.Time) ([]*storage.ErrorDataPoint, error) {
+func (s *ReadService) GetErrorHistory(
+	key string,
+	start, end time.Time,
+) ([]*storage.ErrorDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}
@@ -188,7 +199,10 @@ func (s *ReadService) GetErrorHistory(key string, start, end time.Time) ([]*stor
 }
 
 // GetDailyHistory returns daily values for a specific register key.
-func (s *ReadService) GetDailyHistory(key string, start, end time.Time) ([]*storage.DailyDataPoint, error) {
+func (s *ReadService) GetDailyHistory(
+	key string,
+	start, end time.Time,
+) ([]*storage.DailyDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}
@@ -274,6 +288,8 @@ func (s *ReadService) HealthCheck() (map[string]string, error) {
 }
 
 // GetMonthlyHistory returns monthly values for a specific register key.
+//
+//nolint:dupl // Different return type and validation logic from GetYearlyHistory
 func (s *ReadService) GetMonthlyHistory(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
@@ -284,34 +300,22 @@ func (s *ReadService) GetMonthlyHistory(key string, start, end time.Time) ([]*st
 
 	// All computed monthly registers are now handled by the aggregator
 	// which stores them in the database. Simply retrieve from storage.
-	// This includes:
-	// - grid_energy_monthly (net value)
-	// - energy_consumption_monthly (computed from daily)
-	// - grid_export_monthly (computed from daily)
-	// - grid_import_monthly (computed from daily)
-	// - battery_discharge_monthly (computed from daily)
-	// - battery_charge_monthly (computed from daily)
 	return s.storage.GetMonthlyHistory(key, start, end)
 }
 
 // GetYearlyHistory returns yearly values for a specific register key.
+//
+//nolint:dupl // Different return type and validation logic from GetMonthlyHistory
 func (s *ReadService) GetYearlyHistory(key string, start, end time.Time) ([]*storage.YearlyDataPoint, error) {
 	if err := s.validateRegisterKey(key); err != nil {
 		return nil, err
 	}
+	// All computed yearly registers are now handled by the aggregator
+	// which stores them in the database. Simply retrieve from storage.
 	if err := s.validateRegisterType(key, solis.IsYearlyRegister, "yearly energy"); err != nil {
 		return nil, err
 	}
 
-	// All computed yearly registers are now handled by the aggregator
-	// which stores them in the database. Simply retrieve from storage.
-	// This includes:
-	// - grid_energy_yearly (net value)
-	// - energy_consumption_yearly (computed from daily)
-	// - grid_export_yearly (computed from daily)
-	// - grid_import_yearly (computed from daily)
-	// - battery_discharge_yearly (computed from daily)
-	// - battery_charge_yearly (computed from daily)
 	return s.storage.GetYearlyHistory(key, start, end)
 }
 
