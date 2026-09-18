@@ -60,12 +60,11 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Add common middleware
-	r.Use(middleware.Recoverer)
+	// Use custom panic recovery middleware for better logging instead of chi's Recoverer
+	r.Use(handlers.PanicRecoveryMiddleware)
 	r.Use(middleware.Logger)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.RequestID)
-	// Add panic recovery middleware (redundant with Recoverer but more specific logging)
-	r.Use(handlers.PanicRecoveryMiddleware)
 	// Add cache headers middleware
 	r.Use(cacheMiddleware)
 

@@ -76,9 +76,9 @@ type Client struct {
 	config *config.ModbusSettings
 
 	// Connection state
-	state   State
-	stateMu sync.RWMutex
-	stateCond *sync.Cond  // Condition variable for state changes
+	state     State
+	stateMu   sync.RWMutex
+	stateCond *sync.Cond // Condition variable for state changes
 
 	// simonvetter client (handles actual Modbus communication)
 	modbusClient *modbus.ModbusClient
@@ -114,7 +114,7 @@ func NewClient(cfg *config.ModbusSettings) (*Client, error) {
 		maxReconnectDelay:     30 * time.Second,
 		maxReconnectAttempts:  3,
 		readTimeout:           cfg.Timeout,
-		modbusClient:         nil,
+		modbusClient:          nil,
 	}
 
 	// Initialize condition variable for state synchronization
@@ -282,7 +282,7 @@ func (c *Client) waitForState(ctx context.Context, desired ...State) error {
 				return nil
 			}
 		}
-		
+
 		// Check if context is already canceled
 		select {
 		case <-ctx.Done():

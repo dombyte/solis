@@ -117,7 +117,7 @@ func (a *Aggregator) IsRunning() bool {
 func (a *Aggregator) SignalFirstPollDone(err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	
+
 	// Prevent double-close of channel
 	if a.firstPollSignaled {
 		return
@@ -328,7 +328,7 @@ func (a *Aggregator) computeAndStoreGridEnergyTotal() {
 	// Store in database
 	totalDp := &storage.TotalDataPoint{
 		Value:     netValue,
-		RawValue:  netValue,  // Use decoded value to prevent double-scaling
+		RawValue:  netValue, // Use decoded value to prevent double-scaling
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 	if storeErr := a.storage.StoreTotalDataPoint("grid_energy_total", totalDp); storeErr != nil {
@@ -381,7 +381,7 @@ func (a *Aggregator) computeAndStoreGridEnergyDaily() {
 		"grid_energy_daily": {
 			Key:          "grid_energy_daily",
 			Name:         reg.Name,
-			RawValue:     netValue,  // Use decoded value to prevent double-scaling
+			RawValue:     netValue, // Use decoded value to prevent double-scaling
 			DecodedValue: netValue,
 			Unit:         reg.Unit,
 			Timestamp:    time.Now(),
@@ -439,7 +439,7 @@ func (a *Aggregator) computeAndStoreGridEnergyMonthly() {
 	monthlyDp := &storage.MonthlyDataPoint{
 		Month:    currentMonth,
 		Value:    netValue,
-		RawValue: netValue,  // RawValue should match Value for computed registers
+		RawValue: netValue, // RawValue should match Value for computed registers
 	}
 	if storeErr := a.storage.StoreMonthlyDataPoint("grid_energy_monthly", monthlyDp); storeErr != nil {
 		logger.Warn().Msgf("Failed to store monthly value for grid_energy_monthly: %v", storeErr)
@@ -489,7 +489,7 @@ func (a *Aggregator) computeAndStoreGridEnergyYearly() {
 	yearlyDp := &storage.YearlyDataPoint{
 		Year:     currentYear,
 		Value:    netValue,
-		RawValue: netValue,  // RawValue should match Value for computed registers
+		RawValue: netValue, // RawValue should match Value for computed registers
 	}
 	if storeErr := a.storage.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp); storeErr != nil {
 		logger.Warn().Msgf("Failed to store yearly value for grid_energy_yearly: %v", storeErr)

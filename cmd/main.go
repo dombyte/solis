@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,20 +38,41 @@ func runApp() error {
 		return err
 	}
 
+	// Create root context for the application
+	// This allows proper cancellation of all background services
+	appCtx, appCancel := context.WithCancel(context.Background())
+
+	// WaitGroup for tracking background services
+	bgWg := &sync.WaitGroup{}
+
 	dbManager, st, err := initializeDatabase(cfg)
 	if err != nil {
+		appCancel()
 		return err
 	}
 	defer func() {
+		// Cancel context first to stop background services
+		appCancel()
+		// Then wait for them to finish
+		logger.Info().Msg("Waiting for background services to complete...")
+		bgWg.Wait()
+		logger.Info().Msg("All background services completed")
+		// Finally close database
 		if err := dbManager.Close(); err != nil {
 			logger.Error().Msgf("Error closing database manager: %v", err)
 		}
 	}()
 
-	startBackgroundServices(cfg, dbManager, st)
+	// Start background services with cancellable context and wait group for tracking
+	bgErrs := startBackgroundServices(appCtx, bgWg, cfg, dbManager, st)
+	// Log any background service initialization errors
+	for _, err := range bgErrs {
+		logger.Error().Msgf("Background service initialization error: %v", err)
+	}
 
 	ca, wsHub, agg, err := initializeApplicationServices(cfg, st)
 	if err != nil {
+		appCancel()
 		return err
 	}
 	// Ensure aggregator is stopped on exit
@@ -62,6 +84,7 @@ func runApp() error {
 
 	modbusClient, pl, err := initializeModbusAndPoller(cfg, st, ca, agg)
 	if err != nil {
+		appCancel()
 		return err
 	}
 	// Ensure poller and modbus client are stopped on exit
@@ -77,6 +100,7 @@ func runApp() error {
 
 	httpServer, err := initializeHTTPServices(cfg, st, ca, wsHub, pl, agg, modbusClient)
 	if err != nil {
+		appCancel()
 		return err
 	}
 	// Ensure HTTP server is stopped on exit
@@ -131,27 +155,48 @@ func initializeDatabase(cfg *config.AppConfig) (*database.DatabaseManager, *stor
 	return dbManager, st, nil
 }
 
-// startBackgroundServices starts background database services
-func startBackgroundServices(cfg *config.AppConfig, dbManager *database.DatabaseManager, st *storage.Storage) {
+// startBackgroundServices starts background database services with proper context and tracking.
+// The context allows graceful cancellation of background operations.
+// The wait group allows the caller to wait for all background goroutines to complete.
+// Returns a list of errors encountered during initialization (for services that don't start goroutines).
+func startBackgroundServices(
+	ctx context.Context,
+	wg *sync.WaitGroup,
+	cfg *config.AppConfig,
+	dbManager *database.DatabaseManager,
+	st *storage.Storage,
+) []error {
+	var errors []error
+
 	if cfg.Storage.EnableBackup && cfg.Storage.BackupInterval > 0 {
-		ctx := context.Background()
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
 			if err := dbManager.StartPeriodicBackups(ctx); err != nil {
-				logger.Error().Msgf("Failed to start periodic backups: %v", err)
+				logger.Error().Msgf("Periodic backups failed: %v", err)
 			}
 		}()
-		logger.Info().Msgf("Periodic backups started (interval: %s)", cfg.Storage.BackupInterval)
+	} else if !cfg.Storage.EnableBackup {
+		logger.Info().Msg("Periodic backups disabled by configuration")
+	} else {
+		logger.Info().Msg("Periodic backups disabled: backup interval not configured")
 	}
 
 	if cfg.Storage.CleanupInterval > 0 {
-		ctx := context.Background()
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			logger.Info().Msgf("Periodic retention cleanup started (interval: %s)", cfg.Storage.CleanupInterval)
 			if err := dbManager.StartPeriodicCleanup(ctx); err != nil {
-				logger.Error().Msgf("Failed to start periodic cleanup: %v", err)
+				logger.Error().Msgf("Periodic cleanup failed: %v", err)
 			}
 		}()
-		logger.Info().Msgf("Periodic retention cleanup started (interval: %s)", cfg.Storage.CleanupInterval)
+	} else {
+		logger.Info().Msg("Periodic retention cleanup disabled: cleanup interval not configured")
 	}
+
+	return errors
 }
 
 // initializeApplicationServices initializes cache, websocket hub, and aggregator
@@ -288,21 +333,35 @@ func waitForShutdown(pl *poller.Poller, httpServer *server.Server, cfg *config.A
 }
 
 func main() {
+	// Maximum number of restarts to prevent infinite restart loops
+	// This helps with debugging during development
+	const maxRestarts = 100
+	var restartCount int
+
 	// Run app in a loop with panic recovery - app never exits unless signal received
 	for {
+		// Check restart count
+		if restartCount >= maxRestarts {
+			// Re-initialize logging in case it failed
+			logging.Init(os.Stderr, true, "ERROR")
+			logger.Error().Msgf("Maximum restart count (%d) reached - stopping to prevent infinite loop", maxRestarts)
+			os.Exit(1)
+		}
+		restartCount++
+
 		// Recover from panics in runApp itself
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
 					// Re-initialize logging in case it failed
 					logging.Init(os.Stderr, true, "ERROR")
-					logger.Error().Msgf("PANIC in runApp: %v - restarting in 5 seconds...", r)
+					logger.Error().Msgf("PANIC in runApp (restart #%d): %v - restarting in 5 seconds...", restartCount, r)
 					time.Sleep(5 * time.Second)
 				}
 			}()
 
 			if err := runApp(); err != nil {
-				logger.Error().Msgf("App failed: %v - restarting in 5 seconds...", err)
+				logger.Error().Msgf("App failed (restart #%d): %v - restarting in 5 seconds...", restartCount, err)
 				// Re-initialize logging in case it failed
 				logging.Init(os.Stderr, true, "ERROR")
 				logger.Error().Msg("Waiting 5 seconds before restart...")

@@ -115,10 +115,14 @@ func createStorageDirectory(dbPath string) error {
 	return nil
 }
 
-// configureConnectionPool configures the database connection pool
+// configureConnectionPool configures the database connection pool.
+// For SQLite, we use a conservative pool size to avoid "database is locked" errors.
+// MaxOpenConns=1 is recommended for SQLite to prevent concurrent write conflicts.
 func configureConnectionPool(db *sql.DB) {
-	db.SetMaxOpenConns(3)
-	db.SetMaxIdleConns(3)
+	// SQLite works best with a single connection when using WAL mode
+	// Multiple connections can cause "database is locked" errors
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 }
 
@@ -789,7 +793,7 @@ func (s *Storage) runVacuumIfNeeded(totalRowsDeleted int64) {
 		s.mu.Lock()
 		lastVacuumTime := s.lastVacuumTime
 		s.mu.Unlock()
-		
+
 		if lastVacuumTime.IsZero() || time.Since(lastVacuumTime) > 72*time.Hour {
 			if _, err := s.db.Exec("VACUUM;"); err != nil {
 				logger.Warn().Msgf("VACUUM failed: %v", err)

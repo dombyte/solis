@@ -146,11 +146,11 @@ func (c *Cache) Set(values map[string]*solis.Value) {
 	c.lastUpdate = time.Now()
 
 	logger.Debug().Msgf("Cache updated with %d values", len(values))
-	
+
 	// Check if we need to notify (outside the lock to avoid blocking)
 	needNotify := c.wsHub != nil
 	c.mu.Unlock()
-	
+
 	// Notify WebSocket clients if hub is configured and has clients
 	// Use throttling to prevent unbounded goroutine creation
 	// This is done OUTSIDE the lock to prevent the notification goroutine from
@@ -178,11 +178,11 @@ func (c *Cache) Merge(values map[string]*solis.Value) {
 	c.lastUpdate = time.Now()
 
 	logger.Debug().Msgf("Cache merged with %d values", len(values))
-	
+
 	// Check if we need to notify (outside the lock to avoid blocking)
 	needNotify := c.wsHub != nil
 	c.mu.Unlock()
-	
+
 	// Notify WebSocket clients if hub is configured and has clients
 	// Use throttling to prevent unbounded goroutine creation
 	// This is done OUTSIDE the lock to prevent the notification goroutine from

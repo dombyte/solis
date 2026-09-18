@@ -127,6 +127,61 @@ var DailyToMonthlyMap = map[string]string{
 // BackfillDailyToMonthlyMap includes ALL daily-to-monthly mappings, including
 // directly-polled registers. Used by the backfill to recompute ALL monthly values
 // from daily data, overriding any polled values for the current year.
+
+// ValidateRegister validates that a register has valid Modbus address and count values.
+// This prevents reading outside valid Modbus address space (0-65535).
+func ValidateRegister(reg *Register) error {
+	// Validate address is within valid Modbus range (0-65535)
+	if reg.Address > 65535 {
+		return fmt.Errorf("invalid register address %d: must be <= 65535", reg.Address)
+	}
+
+	// Validate count is reasonable (at least 1, not excessively large)
+	if reg.Count == 0 {
+		return fmt.Errorf("invalid register count %d: must be at least 1", reg.Count)
+	}
+
+	// Maximum reasonable count for a single read (Modbus typically limits to 125)
+	// But allow larger values for defined ranges
+	const maxCount = 200
+	if reg.Count > maxCount {
+		return fmt.Errorf("invalid register count %d: exceeds maximum of %d", reg.Count, maxCount)
+	}
+
+	// Validate that the register doesn't overflow the address space
+	// address + count - 1 should not exceed 65535
+	if reg.Address > 0 && reg.Count > 0 {
+		endAddr := reg.Address + reg.Count - 1
+		if endAddr > 65535 {
+			return fmt.Errorf("register range %d-%d exceeds Modbus address space (max 65535)", reg.Address, endAddr)
+		}
+	}
+
+	return nil
+}
+
+// ValidateRegisterAddress validates a single address value.
+// Useful for validating user input.
+func ValidateRegisterAddress(address uint16) error {
+	if address > 65535 {
+		return fmt.Errorf("invalid address %d: must be <= 65535", address)
+	}
+	return nil
+}
+
+// ValidateRegisterCount validates a register count value.
+// Useful for validating user input.
+func ValidateRegisterCount(count uint16) error {
+	if count == 0 {
+		return fmt.Errorf("invalid count %d: must be at least 1", count)
+	}
+	const maxCount = 200
+	if count > maxCount {
+		return fmt.Errorf("invalid count %d: exceeds maximum of %d", count, maxCount)
+	}
+	return nil
+}
+
 var BackfillDailyToMonthlyMap = map[string]string{
 	"energy_consumption_daily": "energy_consumption_monthly",
 	"grid_export_daily":        "grid_export_monthly",

@@ -3,9 +3,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/dombyte/solis/internal/logging"
@@ -16,6 +18,89 @@ import (
 
 // logger is the package-level logger for handler operations.
 var logger = logging.NewComponentLogger("http.handlers")
+
+// getHTTPStatusCode determines the appropriate HTTP status code for an error.
+// This ensures proper REST API semantics:
+// - 400 for bad requests/validation errors
+// - 404 for resource not found
+// - 500 for internal server errors
+func getHTTPStatusCode(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
+
+	// Check if it's a validation error (already has status code)
+	var validationErr *registerValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.statusCode
+	}
+
+	// Check error message for common patterns
+	errStr := err.Error()
+
+	// 404 - Resource not found
+	if strings.Contains(errStr, "unknown register key") ||
+		strings.Contains(errStr, "not found") ||
+		strings.Contains(errStr, "no rows") ||
+		strings.Contains(errStr, "no data") {
+		return http.StatusNotFound
+	}
+
+	// 400 - Bad request (validation, parsing errors)
+	if strings.Contains(errStr, "invalid") ||
+		strings.Contains(errStr, "bad request") ||
+		strings.Contains(errStr, "parse") {
+		return http.StatusBadRequest
+	}
+
+	// 500 - Internal server error (database, storage, etc.)
+	// Default for all other errors
+	return http.StatusInternalServerError
+}
+
+// sanitizeErrorMessage removes sensitive information from error messages.
+// This prevents information disclosure in HTTP responses.
+func sanitizeErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	// For validation errors, return the message as-is (it's already safe)
+	var validationErr *registerValidationError
+	if errors.As(err, &validationErr) {
+		return validationErr.message
+	}
+
+	errStr := err.Error()
+
+	// Remove potentially sensitive information
+	// Database paths, file paths, internal details
+	sanitized := errStr
+
+	// Remove file paths (common in SQLite errors)
+	sanitized = strings.ReplaceAll(sanitized, "./data/", "")
+	sanitized = strings.ReplaceAll(sanitized, "/data/", "/")
+
+	// Remove database file extensions
+	sanitized = strings.ReplaceAll(sanitized, ".db", "")
+	sanitized = strings.ReplaceAll(sanitized, ".sqlite", "")
+
+	// Generic messages for common error types
+	switch {
+	case strings.Contains(errStr, "no rows") || strings.Contains(errStr, "not found"):
+		return "resource not found"
+	case strings.Contains(errStr, "database") || strings.Contains(errStr, "sqlite"):
+		return "database error"
+	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context"):
+		return "request timeout"
+	case strings.Contains(errStr, "connection") || strings.Contains(errStr, "network"):
+		return "service unavailable"
+	default:
+		// Return a generic message but log the full error
+		logger.Warn().Msgf("Returning sanitized error to client, full error: %v", err)
+		return "internal server error"
+	}
+}
 
 // ReadServiceInterface defines the methods from service.ReadService that handlers need.
 // This allows for easier testing with mocks.
@@ -89,7 +174,8 @@ func PanicRecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// WriteError writes an error response as JSON.
+// WriteError writes an error response as JSON with proper status code.
+// It uses the message for both error and message fields for backward compatibility.
 func WriteError(w http.ResponseWriter, message string, statusCode int) {
 	response := map[string]any{
 		"error":   message,
@@ -97,6 +183,14 @@ func WriteError(w http.ResponseWriter, message string, statusCode int) {
 		"message": message,
 	}
 	WriteJSON(w, response, statusCode)
+}
+
+// WriteErrorWithCode writes an error response with automatic status code determination.
+// It uses getHTTPStatusCode to determine the appropriate status code based on the error.
+func WriteErrorWithCode(w http.ResponseWriter, err error) {
+	statusCode := getHTTPStatusCode(err)
+	sanitizedMsg := sanitizeErrorMessage(err)
+	WriteError(w, sanitizedMsg, statusCode)
 }
 
 // GetHealthHandler returns a handler for the health check endpoint.
@@ -174,7 +268,8 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key, reg, err := validateAndGetRegister(r, deps.Service)
 		if err != nil {
-			WriteError(w, err.Error(), err.statusCode)
+			// Validation errors already have the correct status code
+			WriteError(w, err.message, err.statusCode)
 			return
 		}
 
@@ -252,7 +347,8 @@ func handleDailyWithParams(w http.ResponseWriter, r *http.Request, key string, s
 
 	history, err := service.GetDailyHistory(key, timeRange.Start, timeRange.End)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// Storage/database errors should return 500, not 404
+		WriteErrorWithCode(w, err)
 		return
 	}
 
@@ -278,7 +374,8 @@ func handleMonthlyWithParams(w http.ResponseWriter, r *http.Request, key string,
 
 	history, err := service.GetMonthlyHistory(key, timeRange.Start, timeRange.End)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// Storage/database errors should return 500, not 404
+		WriteErrorWithCode(w, err)
 		return
 	}
 
@@ -304,7 +401,8 @@ func handleYearlyWithParams(w http.ResponseWriter, r *http.Request, key string, 
 
 	history, err := service.GetYearlyHistory(key, timeRange.Start, timeRange.End)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// Storage/database errors should return 500, not 404
+		WriteErrorWithCode(w, err)
 		return
 	}
 
@@ -315,10 +413,12 @@ func handleYearlyWithParams(w http.ResponseWriter, r *http.Request, key string, 
 func handleTotalRegister(w http.ResponseWriter, key string, reg *solis.Register, service ReadServiceInterface) {
 	history, err := service.GetTotalHistory(key)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// Storage/database errors should return 500, not 404
+		WriteErrorWithCode(w, err)
 		return
 	}
 	if history == nil {
+		// This is a genuine "not found" case
 		WriteError(w, fmt.Sprintf("no total data found for register %s", key), http.StatusNotFound)
 		return
 	}
@@ -339,7 +439,8 @@ func handleTotalRegister(w http.ResponseWriter, key string, reg *solis.Register,
 func handleCurrentValue(w http.ResponseWriter, key string, service ReadServiceInterface) {
 	value, err := service.GetRegister(key)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// GetRegister can fail for various reasons - determine appropriate status code
+		WriteErrorWithCode(w, err)
 		return
 	}
 
@@ -355,7 +456,8 @@ func handleDefaultRegister(w http.ResponseWriter, r *http.Request, key string, r
 
 	value, err := service.GetRegister(key)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// GetRegister can fail for various reasons - determine appropriate status code
+		WriteErrorWithCode(w, err)
 		return
 	}
 
@@ -371,6 +473,7 @@ func handleStatusRegister(w http.ResponseWriter, r *http.Request, key string, re
 	entries := make([]StatusHistoryEntry, 0, len(errorHistory)+1)
 
 	if err != nil {
+		// Log the error but don't fail the request - we can still return the current value
 		logger.Warn().Msgf("Failed to get error history for %s: %v", key, err)
 	} else {
 		addErrorHistoryEntries(&entries, errorHistory, reg)
@@ -378,7 +481,8 @@ func handleStatusRegister(w http.ResponseWriter, r *http.Request, key string, re
 
 	value, err := service.GetRegister(key)
 	if err != nil {
-		WriteError(w, err.Error(), http.StatusNotFound)
+		// GetRegister can fail for various reasons - determine appropriate status code
+		WriteErrorWithCode(w, err)
 		return
 	}
 
