@@ -91,8 +91,9 @@ func (h *Hub) handleRegister(client *Client) {
 	h.mu.Lock()
 	h.clients[client] = true
 	h.lastActivity[client] = time.Now()
+	clientCount := len(h.clients)
 	h.mu.Unlock()
-	logger.Debug().Msgf("Client registered, total clients: %d", len(h.clients))
+	logger.Debug().Msgf("Client registered, total clients: %d", clientCount)
 }
 
 // handleUnregister handles a client unregistration
@@ -103,8 +104,9 @@ func (h *Hub) handleUnregister(client *Client) {
 		delete(h.clients, client)
 		delete(h.lastActivity, client)
 	}
+	clientCount := len(h.clients)
 	h.mu.Unlock()
-	logger.Debug().Msgf("Client unregistered, total clients: %d", len(h.clients))
+	logger.Debug().Msgf("Client unregistered, total clients: %d", clientCount)
 }
 
 // handleBroadcast handles a broadcast message to all clients

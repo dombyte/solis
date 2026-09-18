@@ -44,8 +44,6 @@ type Storage struct {
 	path string
 	// lastVacuumTime tracks when the last VACUUM was performed.
 	lastVacuumTime time.Time
-	// lastAggregatedCleanupTime tracks when the last aggregated data cleanup was performed.
-	lastAggregatedCleanupTime time.Time
 	// lastCleanupTime tracks when the last full retention cleanup was performed.
 	lastCleanupTime time.Time
 	// mu protects the cleanup time tracking.
@@ -148,11 +146,10 @@ func configurePragmas(db *sql.DB, cfg *config.StorageSettings) {
 // createStorageInstance creates a new Storage instance
 func createStorageInstance(cfg *config.StorageSettings, db *sql.DB) *Storage {
 	return &Storage{
-		db:                        db,
-		config:                    cfg,
-		path:                      cfg.Path,
-		lastAggregatedCleanupTime: time.Now(),
-		lastCleanupTime:           time.Time{},
+		db:              db,
+		config:          cfg,
+		path:            cfg.Path,
+		lastCleanupTime: time.Time{},
 	}
 }
 
@@ -496,6 +493,7 @@ func (s *Storage) storeTotalValue(tx *sql.Tx, key string, value *solis.Value, ti
 // Monthly registers go to monthly_values table.
 // Yearly registers go to yearly_values table.
 // Total registers go to total_values table.
+// If a single register fails, it logs the error and continues with the remaining registers.
 func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp time.Time) error {
 	if len(values) == 0 {
 		return nil
@@ -507,9 +505,13 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	}
 	defer tx.Rollback()
 
+	var firstErr error
 	for key, value := range values {
 		if err := s.storeSingleRegister(tx, key, value, timestamp); err != nil {
-			return err
+			logger.Warn().Msgf("Failed to store register %s: %v", key, err)
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 
@@ -518,7 +520,7 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	}
 
 	logger.Debug().Msgf("Stored register values successfully")
-	return nil
+	return firstErr
 }
 
 // storeSingleRegister stores a single register value
@@ -784,11 +786,17 @@ func (s *Storage) cleanupWithQuery(table, column string, retention time.Duration
 // runVacuumIfNeeded runs VACUUM if conditions are met
 func (s *Storage) runVacuumIfNeeded(totalRowsDeleted int64) {
 	if totalRowsDeleted > 0 {
-		if s.lastVacuumTime.IsZero() || time.Since(s.lastVacuumTime) > 72*time.Hour {
+		s.mu.Lock()
+		lastVacuumTime := s.lastVacuumTime
+		s.mu.Unlock()
+		
+		if lastVacuumTime.IsZero() || time.Since(lastVacuumTime) > 72*time.Hour {
 			if _, err := s.db.Exec("VACUUM;"); err != nil {
 				logger.Warn().Msgf("VACUUM failed: %v", err)
 			} else {
+				s.mu.Lock()
 				s.lastVacuumTime = time.Now()
+				s.mu.Unlock()
 				logger.Info().Msgf("Database VACUUM completed, reclaimed space from %d deleted rows", totalRowsDeleted)
 			}
 		}
@@ -949,9 +957,8 @@ func (h HistoryDataPoint) MarshalJSON() ([]byte, error) {
 	}{
 		Alias: (*Alias)(&h),
 	}
-	if h.Value != 0 {
-		aux.Value = utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(h.Value))
-	}
+	// Always round Value for consistency, including 0
+	aux.Value = utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(h.Value))
 	if h.Min != nil {
 		rounded := utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(*h.Min))
 		aux.Min = &rounded

@@ -73,12 +73,13 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRes
 
     // Set up periodic connection check and keepalive
     // Note: The backend might close idle connections, so we need to send periodic messages
-    // We use 'request_initial_data' as it's a known message type that the backend understands
+    // Use a lightweight ping message instead of request_initial_data to avoid unnecessary data transfers
     const heartbeatInterval = setInterval(() => {
       if (websocketClient.isConnected()) {
         try {
-          // Send a known message type to keep the connection alive
-          websocketClient.send({ type: 'request_initial_data' } as unknown);
+          // Send a lightweight ping message to keep the connection alive
+          // Using a simple ping type that the backend can handle without sending full cache
+          websocketClient.send({ type: 'ping' } as unknown);
         } catch {
           console.log('Keepalive failed, WebSocket might be disconnected');
         }
@@ -96,7 +97,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRes
       unsubscribeDisconnect();
       if (autoConnect) websocketClient.disconnect();
     };
-  }, [autoConnect, handleMessage, setConnected]);
+  }, [autoConnect, handleMessage, setConnected, requestInitialData]);
 
   const connect = useCallback(() => {
     setError(null);

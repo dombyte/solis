@@ -312,7 +312,8 @@ func (a *Aggregator) computeAndStoreGridEnergyTotal() {
 	}
 
 	netValue := fedTotal.DecodedValue - importTotal.DecodedValue
-	netRawValue := fedTotal.RawValue - importTotal.RawValue
+	// For computed net registers, RawValue should be the decoded difference
+	// This prevents double-scaling in storage (StoreTotalDataPoint multiplies RawValue * Scale)
 	computedValue := &solis.Value{
 		Key:          "grid_energy_total",
 		Name:         reg.Name,
@@ -327,7 +328,7 @@ func (a *Aggregator) computeAndStoreGridEnergyTotal() {
 	// Store in database
 	totalDp := &storage.TotalDataPoint{
 		Value:     netValue,
-		RawValue:  netRawValue,
+		RawValue:  netValue,  // Use decoded value to prevent double-scaling
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 	if storeErr := a.storage.StoreTotalDataPoint("grid_energy_total", totalDp); storeErr != nil {
@@ -359,7 +360,10 @@ func (a *Aggregator) computeAndStoreGridEnergyDaily() {
 	}
 
 	netValue := fedDaily.DecodedValue - importDaily.DecodedValue
-	netRawValue := fedDaily.RawValue - importDaily.RawValue
+	// For computed net registers, RawValue should be the decoded difference
+	// This prevents double-scaling in storage (which multiplies RawValue * Scale)
+	// Since grid_energy_daily is computed from already-decoded values, we store
+	// RawValue = DecodedValue to avoid double-scaling
 	computedValue := &solis.Value{
 		Key:          "grid_energy_daily",
 		Name:         reg.Name,
@@ -377,7 +381,7 @@ func (a *Aggregator) computeAndStoreGridEnergyDaily() {
 		"grid_energy_daily": {
 			Key:          "grid_energy_daily",
 			Name:         reg.Name,
-			RawValue:     netRawValue,
+			RawValue:     netValue,  // Use decoded value to prevent double-scaling
 			DecodedValue: netValue,
 			Unit:         reg.Unit,
 			Timestamp:    time.Now(),
@@ -416,7 +420,9 @@ func (a *Aggregator) computeAndStoreGridEnergyMonthly() {
 	}
 
 	netValue := fedMonth.DecodedValue - importMonth.DecodedValue
-	netRawValue := fedMonth.RawValue - importMonth.RawValue
+	// For computed net registers, Value should be the decoded difference.
+	// StoreMonthlyDataPoint will compute raw_value from Value and register's Scale.
+	// RawValue field is not used by StoreMonthlyDataPoint, but set it correctly for clarity.
 	computedValue := &solis.Value{
 		Key:          "grid_energy_monthly",
 		Name:         reg.Name,
@@ -433,7 +439,7 @@ func (a *Aggregator) computeAndStoreGridEnergyMonthly() {
 	monthlyDp := &storage.MonthlyDataPoint{
 		Month:    currentMonth,
 		Value:    netValue,
-		RawValue: netRawValue,
+		RawValue: netValue,  // RawValue should match Value for computed registers
 	}
 	if storeErr := a.storage.StoreMonthlyDataPoint("grid_energy_monthly", monthlyDp); storeErr != nil {
 		logger.Warn().Msgf("Failed to store monthly value for grid_energy_monthly: %v", storeErr)
@@ -464,7 +470,9 @@ func (a *Aggregator) computeAndStoreGridEnergyYearly() {
 	}
 
 	netValue := fedYear.DecodedValue - importYear.DecodedValue
-	netRawValue := fedYear.RawValue - importYear.RawValue
+	// For computed net registers, Value should be the decoded difference.
+	// StoreYearlyDataPoint will compute raw_value from Value and register's Scale.
+	// RawValue field is not used by StoreYearlyDataPoint, but set it correctly for clarity.
 	computedValue := &solis.Value{
 		Key:          "grid_energy_yearly",
 		Name:         reg.Name,
@@ -481,7 +489,7 @@ func (a *Aggregator) computeAndStoreGridEnergyYearly() {
 	yearlyDp := &storage.YearlyDataPoint{
 		Year:     currentYear,
 		Value:    netValue,
-		RawValue: netRawValue,
+		RawValue: netValue,  // RawValue should match Value for computed registers
 	}
 	if storeErr := a.storage.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp); storeErr != nil {
 		logger.Warn().Msgf("Failed to store yearly value for grid_energy_yearly: %v", storeErr)

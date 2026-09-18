@@ -78,6 +78,7 @@ type Client struct {
 	// Connection state
 	state   State
 	stateMu sync.RWMutex
+	stateCond *sync.Cond  // Condition variable for state changes
 
 	// simonvetter client (handles actual Modbus communication)
 	modbusClient *modbus.ModbusClient
@@ -113,7 +114,11 @@ func NewClient(cfg *config.ModbusSettings) (*Client, error) {
 		maxReconnectDelay:     30 * time.Second,
 		maxReconnectAttempts:  3,
 		readTimeout:           cfg.Timeout,
+		modbusClient:         nil,
 	}
+
+	// Initialize condition variable for state synchronization
+	c.stateCond = sync.NewCond(&c.stateMu)
 
 	// Create simonvetter client configuration
 	url := fmt.Sprintf("tcp://%s:%d", cfg.Host, cfg.Port)
@@ -153,21 +158,18 @@ func NewClient(cfg *config.ModbusSettings) (*Client, error) {
 // Connect establishes a connection to the Modbus device.
 func (c *Client) Connect(ctx context.Context) error {
 	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
 
 	if c.state == Connected {
 		logger.Debug().Msg("Already connected")
-		c.stateMu.Unlock()
 		return nil
 	}
 
 	if c.state == Connecting {
 		logger.Debug().Msg("Connection already in progress")
-		// Wait for state change
-		c.stateMu.Unlock()
+		// Wait for state change - waitForState now handles the lock internally
 		return c.waitForState(ctx, Connected, Error, Disconnected)
 	}
-
-	defer c.stateMu.Unlock()
 
 	c.setState(Connecting)
 
@@ -257,7 +259,7 @@ func (c *Client) Config() *config.ModbusSettings {
 	return c.config
 }
 
-// setState changes the state with logging.
+// setState changes the state with logging and notifies waiting goroutines.
 // This method MUST be called with c.stateMu.Lock() held by the caller.
 func (c *Client) setState(newState State) {
 	oldState := c.state
@@ -265,27 +267,30 @@ func (c *Client) setState(newState State) {
 
 	if oldState != newState {
 		logger.Info().Msgf("State: %s -> %s", oldState.String(), newState.String())
+		c.stateCond.Broadcast()
 	}
 }
 
 // waitForState blocks until the state changes to one of the desired states or context is canceled.
+// Uses condition variable for proper synchronization instead of busy-waiting.
+// Must be called with c.stateMu.Lock() held.
 func (c *Client) waitForState(ctx context.Context, desired ...State) error {
 	for {
+		// Check if current state is desired
+		for _, d := range desired {
+			if c.state == d {
+				return nil
+			}
+		}
+		
+		// Check if context is already canceled
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			c.stateMu.RLock()
-			currentState := c.state
-			c.stateMu.RUnlock()
-
-			for _, d := range desired {
-				if currentState == d {
-					return nil
-				}
-			}
-
-			time.Sleep(50 * time.Millisecond)
+			// Context is still valid, wait for state change
+			// Wait() will release the lock and block until Broadcast() is called
+			c.stateCond.Wait()
 		}
 	}
 }
@@ -427,6 +432,8 @@ func (c *Client) reconnectionLoop() {
 			c.stateMu.RUnlock()
 
 			if connected {
+				// External connection succeeded, reset backoff
+				backoff = c.initialReconnectDelay
 				time.Sleep(5 * time.Second)
 				continue
 			}

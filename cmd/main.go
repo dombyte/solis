@@ -53,16 +53,40 @@ func runApp() error {
 	if err != nil {
 		return err
 	}
+	// Ensure aggregator is stopped on exit
+	defer func() {
+		if agg != nil {
+			agg.Stop()
+		}
+	}()
 
 	modbusClient, pl, err := initializeModbusAndPoller(cfg, st, ca, agg)
 	if err != nil {
 		return err
 	}
+	// Ensure poller and modbus client are stopped on exit
+	defer func() {
+		if pl != nil {
+			pl.Stop()
+		}
+		if modbusClient != nil {
+			modbusClient.StopReconnectionLoop()
+			modbusClient.Close()
+		}
+	}()
 
 	httpServer, err := initializeHTTPServices(cfg, st, ca, wsHub, pl, agg, modbusClient)
 	if err != nil {
 		return err
 	}
+	// Ensure HTTP server is stopped on exit
+	defer func() {
+		if httpServer != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			httpServer.Stop(ctx)
+		}
+	}()
 
 	logStartupInfo(cfg, modbusClient, pl)
 
@@ -178,14 +202,9 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 
 		go modbusClient.StartReconnectionLoop(context.Background())
 
-		logger.Info().Msg("Triggering first poll...")
-		go func() {
-			if _, err := pl.PollNow(); err != nil {
-				logger.Error().Msgf("First poll failed: %v", err)
-			} else {
-				logger.Info().Msg("First poll completed")
-			}
-		}()
+		// Note: First poll will be triggered automatically by the poller's run loop
+		// We don't use PollNow() to avoid sharing Modbus connection with background poller
+		// (see AGENTS.md Lesson #1: separate connections for HTTP and poller)
 		logger.Info().Msg("Poller and reconnection loop started")
 	} else {
 		// Start aggregator even in serve-only mode (it will compute from existing storage)

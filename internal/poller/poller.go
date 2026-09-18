@@ -249,14 +249,14 @@ func (p *Poller) handlePollError(err error, pollDuration time.Duration) {
 
 // signalAggregatorFirstPoll signals the aggregator that the first poll has completed.
 // This is called after every poll, but only has effect on the first poll.
+// Uses single exit point with defer to ensure lock is always released.
 func (p *Poller) signalAggregatorFirstPoll(err error) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	
 	if !p.firstPollDone && p.aggregator != nil {
 		p.firstPollDone = true
-		p.mu.Unlock()
 		p.aggregator.SignalFirstPollDone(err)
-	} else {
-		p.mu.Unlock()
 	}
 }
 
