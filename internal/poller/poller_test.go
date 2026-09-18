@@ -349,9 +349,9 @@ func TestPoller_Stop_NotRunning(t *testing.T) {
 
 	p := New(cfg, nil)
 
-	// Try to stop when not running - should return error
-	if err := p.Stop(); err == nil {
-		t.Error("Stop() should return error when poller is not running")
+	// Try to stop when not running - should return nil (idempotent)
+	if err := p.Stop(); err != nil {
+		t.Errorf("Stop() should return nil when poller is not running (idempotent), got: %v", err)
 	}
 }
 

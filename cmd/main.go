@@ -114,16 +114,6 @@ func runApp() error {
 		appCancel()
 		return err
 	}
-	// Ensure HTTP server is stopped on exit
-	defer func() {
-		if httpServer != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := httpServer.Stop(ctx); err != nil {
-				logger.Error().Msgf("Error stopping HTTP server: %v", err)
-			}
-		}
-	}()
 
 	logStartupInfo(cfg, modbusClient, pl)
 

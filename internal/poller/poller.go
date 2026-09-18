@@ -120,11 +120,12 @@ func (p *Poller) Start() error {
 }
 
 // Stop stops the poller's background goroutine.
+// This method is idempotent - it returns nil if the poller is already stopped.
 func (p *Poller) Stop() error {
 	p.mu.Lock()
 	if !p.running {
 		p.mu.Unlock()
-		return fmt.Errorf("poller is not running")
+		return nil
 	}
 	p.running = false
 	p.mu.Unlock()

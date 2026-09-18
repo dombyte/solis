@@ -1334,9 +1334,11 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 		return fmt.Errorf("failed to store monthly data point: %w", err)
 	}
 
-	err = tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit monthly data point: %w", err)
+	}
 	committed = true
-	return err
+	return nil
 }
 
 // StoreYearlyDataPoint stores a computed yearly data point in the yearly_values table.
@@ -1404,7 +1406,11 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 		return fmt.Errorf("failed to store yearly data point: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit yearly data point: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // StoreTotalDataPoint stores a total (lifetime) data point in the total_values table.
@@ -1468,7 +1474,11 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 		return fmt.Errorf("failed to store total data point: %w", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit total data point: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 // GetTotalHistory retrieves the total (lifetime) value for a specific register key.
