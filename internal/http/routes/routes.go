@@ -102,17 +102,44 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 			w.Header().Set("Content-Type", "application/javascript")
 			http.ServeFile(w, r, filepath.Join(frontendDist, "sw.js"))
 		}))
-		r.Handle("/vite.svg", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/vite.svg", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "vite.svg"))
+		}))
 
 		// Serve icon files
-		r.Handle("/favicon.ico", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/favicon.svg", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/pwa-64x64.png", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/pwa-192x192.png", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/pwa-512x512.png", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/maskable-icon-512x512.png", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/apple-touch-icon-180x180.png", http.FileServer(http.Dir(frontendDist)))
-		r.Handle("/apple-touch-icon.png", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/favicon.ico", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/x-icon")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "favicon.ico"))
+		}))
+		r.Handle("/favicon.svg", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "favicon.svg"))
+		}))
+		r.Handle("/pwa-64x64.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "pwa-64x64.png"))
+		}))
+		r.Handle("/pwa-192x192.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "pwa-192x192.png"))
+		}))
+		r.Handle("/pwa-512x512.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "pwa-512x512.png"))
+		}))
+		r.Handle("/maskable-icon-512x512.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "maskable-icon-512x512.png"))
+		}))
+		r.Handle("/apple-touch-icon-180x180.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "apple-touch-icon-180x180.png"))
+		}))
+		r.Handle("/apple-touch-icon.png", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "image/png")
+			http.ServeFile(w, r, filepath.Join(frontendDist, "apple-touch-icon.png"))
+		}))
 
 		// For all other root-level requests, serve index.html
 		// This allows the frontend router to handle client-side routing
@@ -171,6 +198,35 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 					w.WriteHeader(http.StatusNotFound)
 					return
 				}
+			}
+
+			// Try to serve the requested file from frontend/dist first
+			filePath := filepath.Join(frontendDist, filepath.Clean(strings.TrimPrefix(path, "/")))
+			if _, err := os.Stat(filePath); err == nil {
+				// File exists, serve it with appropriate content type
+				ext := filepath.Ext(filePath)
+				switch ext {
+				case ".svg":
+					w.Header().Set("Content-Type", "image/svg+xml")
+				case ".png":
+					w.Header().Set("Content-Type", "image/png")
+				case ".ico":
+					w.Header().Set("Content-Type", "image/x-icon")
+				case ".js":
+					w.Header().Set("Content-Type", "application/javascript")
+				case ".css":
+					w.Header().Set("Content-Type", "text/css")
+				case ".json":
+					w.Header().Set("Content-Type", "application/json")
+				case ".html":
+					w.Header().Set("Content-Type", "text/html")
+				default:
+					// Try to detect content type from file
+					contentType := http.DetectContentType([]byte{})
+					w.Header().Set("Content-Type", contentType)
+				}
+				http.ServeFile(w, r, filePath)
+				return
 			}
 
 			// This is a frontend route, serve index.html for SPA routing

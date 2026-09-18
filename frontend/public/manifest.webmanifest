@@ -38,5 +38,20 @@
       "sizes": "180x180",
       "type": "image/png"
     }
+  ],
+  "screenshots": [
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Solis Monitor Desktop View"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "label": "Solis Monitor Mobile View"
+    }
   ]
 }
