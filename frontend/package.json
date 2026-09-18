@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "prebuild": "node -e \"const fs=require('fs');const hash=process.env.VITE_GIT_COMMIT_HASH||'dev';fs.mkdirSync('public/data',{recursive:true});fs.writeFileSync('public/data/version.json',JSON.stringify({version:hash}))\"",
-    "build": "npm run prebuild && tsc -b && vite build",
+    "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
