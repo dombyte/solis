@@ -86,14 +86,16 @@ func sanitizeErrorMessage(err error) string {
 	sanitized = strings.ReplaceAll(sanitized, ".sqlite", "")
 
 	// Generic messages for common error types
+	// Use sanitized error string for pattern matching
+	sanitizedErrStr := sanitized
 	switch {
-	case strings.Contains(errStr, "no rows") || strings.Contains(errStr, "not found"):
+	case strings.Contains(sanitizedErrStr, "no rows") || strings.Contains(sanitizedErrStr, "not found"):
 		return "resource not found"
-	case strings.Contains(errStr, "database") || strings.Contains(errStr, "sqlite"):
+	case strings.Contains(sanitizedErrStr, "database") || strings.Contains(sanitizedErrStr, "sqlite"):
 		return "database error"
-	case strings.Contains(errStr, "timeout") || strings.Contains(errStr, "context"):
+	case strings.Contains(sanitizedErrStr, "timeout") || strings.Contains(sanitizedErrStr, "context"):
 		return "request timeout"
-	case strings.Contains(errStr, "connection") || strings.Contains(errStr, "network"):
+	case strings.Contains(sanitizedErrStr, "connection") || strings.Contains(sanitizedErrStr, "network"):
 		return "service unavailable"
 	default:
 		// Return a generic message but log the full error
@@ -280,7 +282,10 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 		keyType := GetKeyType(key)
 
 		if hasQueryParams && keyType == "current" {
-			WriteError(w, fmt.Sprintf("historical queries are not supported for register %s - only daily, monthly, yearly, and total registers support historical data", key), http.StatusBadRequest)
+			WriteError(w,
+				fmt.Sprintf("historical queries are not supported for register %s - only daily, monthly, yearly, and total registers support historical data",
+					key),
+				http.StatusBadRequest)
 			return
 		}
 
@@ -294,7 +299,7 @@ func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
 		case "total":
 			handleTotalRegister(w, key, reg, deps.Service)
 		default:
-			handleDefaultRegister(w, r, key, reg, deps.Service, hasQueryParams)
+			handleDefaultRegister(w, r, key, reg, deps.Service)
 		}
 	}
 }
@@ -448,7 +453,7 @@ func handleCurrentValue(w http.ResponseWriter, key string, service ReadServiceIn
 }
 
 // handleDefaultRegister handles default case (status and current registers)
-func handleDefaultRegister(w http.ResponseWriter, r *http.Request, key string, reg *solis.Register, service ReadServiceInterface, hasQueryParams bool) {
+func handleDefaultRegister(w http.ResponseWriter, r *http.Request, key string, reg *solis.Register, service ReadServiceInterface) {
 	if reg.Status {
 		handleStatusRegister(w, r, key, reg, service)
 		return

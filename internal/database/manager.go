@@ -17,9 +17,9 @@ import (
 // logger is the package-level logger for database manager operations.
 var managerLogger = logging.NewComponentLogger("database.manager")
 
-// DatabaseManager manages the complete lifecycle of the application database,
+// Manager manages the complete lifecycle of the application database,
 // including migrations, backups, cleanup, and online backup scheduling.
-type DatabaseManager struct {
+type Manager struct {
 	// config contains the storage configuration.
 	config *config.StorageSettings
 	// backupConfig contains the backup-specific configuration.
@@ -38,8 +38,8 @@ type DatabaseManager struct {
 	isInitialized bool
 }
 
-// NewDatabaseManager creates a new DatabaseManager.
-func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *BackupConfig) *DatabaseManager {
+// NewManager creates a new Manager.
+func NewManager(storageConfig *config.StorageSettings, backupConfig *BackupConfig) *Manager {
 	// Create migration registry
 	registry := NewMigrationRegistry()
 
@@ -47,7 +47,7 @@ func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *Bac
 	registry.Register(migrations.GetV1Migration())
 	registry.Register(migrations.GetV2Migration())
 
-	return &DatabaseManager{
+	return &Manager{
 		config:        storageConfig,
 		backupConfig:  backupConfig,
 		registry:      registry,
@@ -64,7 +64,7 @@ func NewDatabaseManager(storageConfig *config.StorageSettings, backupConfig *Bac
 // 4. Applying pending migrations
 // 5. Cleaning up old backups
 // 6. Returning the initialized Storage
-func (m *DatabaseManager) Initialize() (*storage.Storage, error) {
+func (m *Manager) Initialize() (*storage.Storage, error) {
 	if m.isInitialized {
 		return m.storage, nil
 	}
@@ -119,7 +119,7 @@ func (m *DatabaseManager) Initialize() (*storage.Storage, error) {
 }
 
 // checkDatabaseFileExists checks if the database file exists
-func (m *DatabaseManager) checkDatabaseFileExists() bool {
+func (m *Manager) checkDatabaseFileExists() bool {
 	_, statErr := os.Stat(m.dbPath)
 	if statErr == nil {
 		return true
@@ -131,7 +131,7 @@ func (m *DatabaseManager) checkDatabaseFileExists() bool {
 }
 
 // openAndVerifyDatabase opens the database and verifies the connection
-func (m *DatabaseManager) openAndVerifyDatabase() (*sql.DB, error) {
+func (m *Manager) openAndVerifyDatabase() (*sql.DB, error) {
 	db, err := sql.Open("sqlite", m.dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -149,7 +149,7 @@ func (m *DatabaseManager) openAndVerifyDatabase() (*sql.DB, error) {
 }
 
 // createBackupIfNeeded creates a backup if the database file exists
-func (m *DatabaseManager) createBackupIfNeeded() {
+func (m *Manager) createBackupIfNeeded() {
 	backupPath, err := CreateBackup(m.dbPath, m.backupConfig)
 	if err != nil {
 		managerLogger.Error().Msgf("Failed to create backup: %v", err)
@@ -160,7 +160,7 @@ func (m *DatabaseManager) createBackupIfNeeded() {
 }
 
 // applyPendingMigrations applies any pending migrations
-func (m *DatabaseManager) applyPendingMigrations(db *sql.DB, currentVersion int) error {
+func (m *Manager) applyPendingMigrations(db *sql.DB, currentVersion int) error {
 	if currentVersion < CurrentSchemaVersion {
 		managerLogger.Info().Msgf("Database needs migration (current: %d, target: %d)", currentVersion, CurrentSchemaVersion)
 
@@ -176,7 +176,7 @@ func (m *DatabaseManager) applyPendingMigrations(db *sql.DB, currentVersion int)
 }
 
 // cleanupOldBackups cleans up old backup files
-func (m *DatabaseManager) cleanupOldBackups() {
+func (m *Manager) cleanupOldBackups() {
 	if m.backupConfig.Enabled && m.backupConfig.MaxBackups > 0 {
 		if err := CleanupBackups(m.dbPath, m.backupConfig.MaxBackups); err != nil {
 			managerLogger.Warn().Msgf("Failed to cleanup old backups: %v", err)
@@ -185,7 +185,7 @@ func (m *DatabaseManager) cleanupOldBackups() {
 }
 
 // createStorageInstance creates a new Storage instance
-func (m *DatabaseManager) createStorageInstance() (*storage.Storage, error) {
+func (m *Manager) createStorageInstance() (*storage.Storage, error) {
 	managerLogger.Info().Msg("Creating Storage instance")
 
 	st, err := storage.New(m.config)
@@ -201,7 +201,7 @@ func (m *DatabaseManager) createStorageInstance() (*storage.Storage, error) {
 }
 
 // runStartupCleanup runs retention cleanup on startup
-func (m *DatabaseManager) runStartupCleanup(st *storage.Storage) {
+func (m *Manager) runStartupCleanup(st *storage.Storage) {
 	managerLogger.Info().Msg("Running retention cleanup on startup")
 	if err := st.CleanupAll(); err != nil {
 		managerLogger.Warn().Msgf("Startup retention cleanup failed (will retry later via poller): %v", err)
@@ -211,7 +211,7 @@ func (m *DatabaseManager) runStartupCleanup(st *storage.Storage) {
 }
 
 // getCurrentSchemaVersion retrieves the current schema version from the database.
-func (m *DatabaseManager) getCurrentSchemaVersion(db *sql.DB) (int, error) {
+func (m *Manager) getCurrentSchemaVersion(db *sql.DB) (int, error) {
 	// First create the executor if not already done
 	if m.executor == nil {
 		m.executor = NewMigrationExecutor(m.registry, m.backupConfig, m.dbPath)
@@ -221,7 +221,7 @@ func (m *DatabaseManager) getCurrentSchemaVersion(db *sql.DB) (int, error) {
 }
 
 // applyMigrations applies all pending migrations.
-func (m *DatabaseManager) applyMigrations(db *sql.DB, currentVersion int) (int, error) {
+func (m *Manager) applyMigrations(db *sql.DB, currentVersion int) (int, error) {
 	// Handle legacy database case
 	if currentVersion == 0 {
 		managerLogger.Info().Msg("Legacy database detected, marking as V1")
@@ -237,7 +237,7 @@ func (m *DatabaseManager) applyMigrations(db *sql.DB, currentVersion int) (int, 
 
 // StartPeriodicBackups starts a background goroutine that creates online backups
 // at the configured interval. It stops when the context is cancelled.
-func (m *DatabaseManager) StartPeriodicBackups(ctx context.Context) error {
+func (m *Manager) StartPeriodicBackups(ctx context.Context) error {
 	if !m.backupConfig.Enabled || m.backupConfig.BackupInterval <= 0 {
 		managerLogger.Debug().Msg("Periodic backups disabled or interval not configured")
 		return nil
@@ -273,9 +273,9 @@ func (m *DatabaseManager) StartPeriodicBackups(ctx context.Context) error {
 }
 
 // createOnlineBackup creates a backup of the current database.
-func (m *DatabaseManager) createOnlineBackup() {
+func (m *Manager) createOnlineBackup() {
 	if m.storage == nil || m.db == nil {
-		managerLogger.Warn().Msg("Cannot create backup: DatabaseManager not initialized")
+		managerLogger.Warn().Msg("Cannot create backup: Manager not initialized")
 		return
 	}
 
@@ -300,7 +300,7 @@ func (m *DatabaseManager) createOnlineBackup() {
 
 // StartPeriodicCleanup starts a background goroutine that runs retention cleanup
 // at the configured interval. It should be called if the poller is not running (serve-only mode).
-func (m *DatabaseManager) StartPeriodicCleanup(ctx context.Context) error {
+func (m *Manager) StartPeriodicCleanup(ctx context.Context) error {
 	if m.storage == nil || m.storage.Config() == nil || m.storage.Config().CleanupInterval <= 0 {
 		managerLogger.Debug().Msg("Periodic cleanup disabled or not configured")
 		return nil
@@ -331,7 +331,7 @@ func (m *DatabaseManager) StartPeriodicCleanup(ctx context.Context) error {
 }
 
 // runCleanup executes the retention cleanup.
-func (m *DatabaseManager) runCleanup() {
+func (m *Manager) runCleanup() {
 	if m.storage == nil {
 		managerLogger.Warn().Msg("Cannot run cleanup: storage not configured")
 		return
@@ -346,7 +346,7 @@ func (m *DatabaseManager) runCleanup() {
 }
 
 // Close closes the database connection and cleans up resources.
-func (m *DatabaseManager) Close() error {
+func (m *Manager) Close() error {
 	if m.storage != nil {
 		return m.storage.Close()
 	}

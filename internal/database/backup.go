@@ -89,11 +89,16 @@ type backuper interface {
 
 // calculateSHA256 calculates the SHA256 checksum of a file.
 func calculateSHA256(filePath string) (string, error) {
-	file, err := os.Open(filePath)
+	// filePath is generated from GenerateBackupFilename, which uses controlled inputs
+	file, err := os.Open(filePath) //nolint:gosec
 	if err != nil {
 		return "", fmt.Errorf("failed to open file for checksum: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close file: %w", closeErr)
+		}
+	}()
 
 	hasher := sha256.New()
 	if _, err := io.Copy(hasher, file); err != nil {
@@ -111,7 +116,11 @@ func createSQLiteBackup(sourcePath, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer srcDB.Close()
+	defer func() {
+		if closeErr := srcDB.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close source database: %w", closeErr)
+		}
+	}()
 
 	if err := ensureDestinationDirectory(destPath); err != nil {
 		return err
@@ -121,7 +130,11 @@ func createSQLiteBackup(sourcePath, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close connection: %w", closeErr)
+		}
+	}()
 
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
@@ -132,6 +145,7 @@ func createSQLiteBackup(sourcePath, destPath string) error {
 	}
 
 	return nil
+
 }
 
 // openSourceDatabase opens the source database for backup
@@ -172,7 +186,7 @@ func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
 func performBackupCopy(conn *sql.Conn, destPath string) error {
 	var backupErr error
 
-	conn.Raw(func(driverConn any) error {
+	if err := conn.Raw(func(driverConn any) error {
 		bkp, err := driverConn.(backuper).NewBackup(destPath)
 		if err != nil {
 			backupErr = fmt.Errorf("failed to create backup object: %w", err)
@@ -193,7 +207,9 @@ func performBackupCopy(conn *sql.Conn, destPath string) error {
 		}
 
 		return nil
-	})
+	}); err != nil && backupErr == nil {
+		backupErr = fmt.Errorf("SQLite backup connection error: %w", err)
+	}
 
 	if backupErr != nil {
 		return fmt.Errorf("SQLite backup failed: %w", backupErr)
@@ -206,7 +222,9 @@ func performBackupCopy(conn *sql.Conn, destPath string) error {
 func verifyBackupFile(destPath string) error {
 	backupChecksum, err := calculateSHA256(destPath)
 	if err != nil {
-		os.Remove(destPath)
+		if removeErr := os.Remove(destPath); removeErr != nil {
+			backupLogger.Warn().Msgf("Failed to remove incomplete backup file: %v", removeErr)
+		}
 		return fmt.Errorf("failed to verify backup file: %w", err)
 	}
 
@@ -218,7 +236,9 @@ func verifyBackupFile(destPath string) error {
 	}
 
 	if backupInfo.Size() == 0 {
-		os.Remove(destPath)
+		if removeErr := os.Remove(destPath); removeErr != nil {
+			backupLogger.Warn().Msgf("Failed to remove empty backup file: %v", removeErr)
+		}
 		return fmt.Errorf("backup file is empty")
 	}
 

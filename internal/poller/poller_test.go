@@ -373,7 +373,7 @@ func TestPoller_PollNow_NilModbus(t *testing.T) {
 	}
 }
 
-func TestPoller_pollOnce_NilModbusError(t *testing.T) {
+func TestPoller_pollOnce_NilClientError(t *testing.T) {
 	cfg := &config.PollerSettings{
 		Interval:        5 * time.Second,
 		BlockAttempts:   2,

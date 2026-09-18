@@ -188,9 +188,9 @@ func TestState_String(t *testing.T) {
 	}
 }
 
-func TestModbusError_IsReconnectable(t *testing.T) {
-	// Test that ModbusError.IsReconnectable works correctly
-	connectionError := &ModbusError{
+func TestClientError_IsReconnectable(t *testing.T) {
+	// Test that ClientError.IsReconnectable works correctly
+	connectionError := &ClientError{
 		Type:    ErrTypeConnection,
 		Message: "connection refused",
 		Cause:   nil,
@@ -200,7 +200,7 @@ func TestModbusError_IsReconnectable(t *testing.T) {
 		t.Error("ErrTypeConnection should be reconnectable")
 	}
 
-	timeoutError := &ModbusError{
+	timeoutError := &ClientError{
 		Type:    ErrTypeTimeout,
 		Message: "timeout",
 		Cause:   nil,
@@ -210,7 +210,7 @@ func TestModbusError_IsReconnectable(t *testing.T) {
 		t.Error("ErrTypeTimeout should be reconnectable")
 	}
 
-	unknownError := &ModbusError{
+	unknownError := &ClientError{
 		Type:    ErrTypeUnknown,
 		Message: "unknown",
 		Cause:   nil,
@@ -400,7 +400,7 @@ func TestClassifyError_NetworkErrors(t *testing.T) {
 	}
 }
 
-func TestModbusError_Types(t *testing.T) {
+func TestClientError_Types(t *testing.T) {
 	// Test all error types
 	errorTypes := []struct {
 		errType   ErrorType
@@ -412,7 +412,7 @@ func TestModbusError_Types(t *testing.T) {
 	}
 
 	for _, tt := range errorTypes {
-		modbusErr := &ModbusError{
+		modbusErr := &ClientError{
 			Type:    tt.errType,
 			Message: "test error",
 			Cause:   nil,

@@ -34,15 +34,15 @@ const (
 	ErrTypeTimeout
 )
 
-// ModbusError is a structured error with type information.
-type ModbusError struct {
+// ClientError is a structured error with type information.
+type ClientError struct {
 	Type    ErrorType
 	Message string
 	Cause   error
 }
 
 // IsReconnectable returns true if this error should trigger a reconnection attempt.
-func (e *ModbusError) IsReconnectable() bool {
+func (e *ClientError) IsReconnectable() bool {
 	return e.Type == ErrTypeConnection || e.Type == ErrTypeTimeout
 }
 
@@ -50,9 +50,13 @@ func (e *ModbusError) IsReconnectable() bool {
 type State int
 
 const (
+	// Disconnected indicates the connection is not established.
 	Disconnected State = iota
+	// Connecting indicates the connection is being established.
 	Connecting
+	// Connected indicates the connection is active.
 	Connected
+	// Error indicates the connection encountered an error.
 	Error
 )
 
@@ -306,7 +310,7 @@ func (c *Client) WaitForConnection(ctx context.Context) error {
 // connection resets, etc. should ALL trigger reconnection attempts.
 // Only explicit user cancellation (context.Canceled) should NOT trigger reconnection.
 // Note: context.DeadlineExceeded IS reconnectable as it may indicate device timeout.
-func classifyError(err error) *ModbusError {
+func classifyError(err error) *ClientError {
 	if err == nil {
 		return nil
 	}
@@ -315,7 +319,7 @@ func classifyError(err error) *ModbusError {
 	// All other errors (including context.DeadlineExceeded from simonvetter timeouts)
 	// are reconnectable
 	if errors.Is(err, context.Canceled) {
-		return &ModbusError{
+		return &ClientError{
 			Type:    ErrTypeUnknown,
 			Message: "context canceled",
 			Cause:   err,
@@ -324,7 +328,7 @@ func classifyError(err error) *ModbusError {
 
 	// All other errors are reconnectable
 	// Use ErrTypeConnection as the default (ErrTypeTimeout is also reconnectable)
-	return &ModbusError{
+	return &ClientError{
 		Type:    ErrTypeConnection,
 		Message: err.Error(),
 		Cause:   err,

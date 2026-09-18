@@ -36,12 +36,19 @@ linters:
       - mocks/
       - reff/
       - vendor/
+      - frontend/node_modules/
     rules:
       - linters: [revive]
         path: _test\.go
       - linters: [revive]
         path: mocks/
       - linters: [dupl]
+        path: _test\.go
+      - linters: [errcheck]
+        path: _test\.go
+      - linters: [gosec]
+        path: _test\.go
+      - linters: [lll]
         path: _test\.go
 
 

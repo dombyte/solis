@@ -239,7 +239,7 @@ func TestStartPeriodicBackups(t *testing.T) {
 	}
 
 	// Test that StartPeriodicBackups doesn't error
-	manager := &DatabaseManager{
+	manager := &Manager{
 		backupConfig:  config,
 		dbPath:        dbPath,
 		isInitialized: true,

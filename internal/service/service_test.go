@@ -44,7 +44,7 @@ func TestNewReadService(t *testing.T) {
 	}
 
 	// Create service with nil dependencies (should still create the struct)
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	if service == nil {
 		t.Fatal("NewReadService() returned nil")
@@ -81,7 +81,7 @@ func TestNewReadService_WithDependencies(t *testing.T) {
 	st := &storage.Storage{}
 	pl := &poller.Poller{}
 
-	service := NewReadService(cfg, modbusClient, st, pl, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, ModbusClient: modbusClient, Storage: st, Poller: pl})
 
 	if service == nil {
 		t.Fatal("NewReadService() returned nil")
@@ -104,7 +104,7 @@ func TestReadService_HealthCheck_NoDependencies(t *testing.T) {
 	cfg := &config.AppConfig{}
 
 	// Create service with no dependencies
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// HealthCheck should return ok status even with nil dependencies
 	status, err := service.HealthCheck()
@@ -127,7 +127,7 @@ func TestReadService_HealthCheck_WithModbusClient(t *testing.T) {
 	// Create a modbus client (will fail to connect, but we can create the struct)
 	modbusClient := &modbus.Client{}
 
-	service := NewReadService(cfg, modbusClient, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, ModbusClient: modbusClient})
 
 	// HealthCheck should handle nil or disconnected modbus client
 	status, err := service.HealthCheck()
@@ -151,7 +151,7 @@ func TestReadService_HealthCheck_WithStorage(t *testing.T) {
 
 	// Create a storage (will fail to initialize, but we can test the struct)
 	// We'll pass nil for storage in the service
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	status, err := service.HealthCheck()
 	if err != nil {
@@ -175,7 +175,7 @@ func TestReadService_HealthCheck_WithPoller(t *testing.T) {
 	// Create a poller (not running)
 	pl := &poller.Poller{}
 
-	service := NewReadService(cfg, nil, nil, pl, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Poller: pl})
 
 	status, err := service.HealthCheck()
 	if err != nil {
@@ -197,7 +197,7 @@ func TestReadService_GetRegister_NoModbusClient(t *testing.T) {
 	cfg := &config.AppConfig{}
 
 	// Create service with no modbus client
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// GetRegister should return error when storage is nil
 	_, err := service.GetRegister("test_key")
@@ -210,7 +210,7 @@ func TestReadService_GetValues_NoStorage(t *testing.T) {
 	cfg := &config.AppConfig{}
 
 	// Create service with no dependencies
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// GetValues with no storage should return empty map
 	values, err := service.GetValues([]string{"test_key"})
@@ -232,7 +232,7 @@ func TestReadService_GetValues_NoStorage(t *testing.T) {
 func TestReadService_GetHistoricalData_NoStorage(t *testing.T) {
 	cfg := &config.AppConfig{}
 
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// GetHistoricalData with no storage should return error
 	_, err := service.GetHistoricalData("test_key", time.Now().Add(-1*time.Hour), time.Now(), storage.IntervalRaw)
@@ -251,7 +251,7 @@ func TestReadService_GetHistoricalData_NoStorage(t *testing.T) {
 func TestReadService_GetHistoricalData_InvalidKey(t *testing.T) {
 	cfg := &config.AppConfig{}
 
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// GetHistoricalData with invalid key should return error
 	// But it will fail first on storage being nil
@@ -264,7 +264,7 @@ func TestReadService_GetHistoricalData_InvalidKey(t *testing.T) {
 func TestReadService_GetValues_EmptyKeys(t *testing.T) {
 	cfg := &config.AppConfig{}
 
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// GetValues with empty keys should return empty map
 	values, err := service.GetValues([]string{})
@@ -337,7 +337,7 @@ func TestService_GetComputedDailyGridEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Insert test data for today_energy_fed_into_grid
 	timestamp := time.Now()
@@ -448,7 +448,7 @@ func TestService_GetComputedTotalGridEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Insert test data for total_energy_fed_into_grid
 	timestamp := time.Now()
@@ -554,7 +554,7 @@ func TestService_GetComputedMonthlyEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Insert test daily data for today_energy_consumption
 	timestamp := time.Now()
@@ -637,7 +637,7 @@ func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store test data directly using StoreMonthlyDataPoint
 	// This simulates having pre-computed monthly values
@@ -720,7 +720,7 @@ func TestService_GetComputedYearlyEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Insert test daily data for today_energy_consumption
 	timestamp := time.Now()
@@ -802,7 +802,7 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store test data directly using StoreYearlyDataPoint
 	// For computed registers, scale is 1, so Value = RawValue * 1 = RawValue
@@ -863,7 +863,7 @@ func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
 // TestService_ValidateRegisterType tests the validateRegisterType method
 func TestService_ValidateRegisterType(t *testing.T) {
 	cfg := &config.AppConfig{}
-	service := NewReadService(cfg, nil, nil, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg})
 
 	// Test with valid daily register
 	err := service.validateRegisterType("energy_consumption_daily", solis.IsDailyRegister, "daily energy")
@@ -938,7 +938,7 @@ func TestService_DecemberMonthlyCalculation(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store daily values for December
 	dailyValues := []struct {
@@ -1017,7 +1017,7 @@ func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store daily values across year boundary (Dec 2024 and Jan 2025)
 	dailyValues := []struct {
@@ -1097,7 +1097,7 @@ func TestService_NetRegisterDecreasingValues(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// First, store a higher value for grid_energy_yearly
 	yearlyDp1 := &storage.YearlyDataPoint{
@@ -1166,7 +1166,7 @@ func TestService_DailyGridEnergyMissingData(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store only fed values (no import values)
 	fedValues := []struct {
@@ -1246,7 +1246,7 @@ func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store only fed values (no import values) for a month
 	fedValues := []struct {
@@ -1324,7 +1324,7 @@ func TestService_FebruaryLeapYear(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Store daily values for February 2024 (leap year - 29 days)
 	// Test with Feb 29
@@ -1403,7 +1403,7 @@ func TestService_InvalidDateRange(t *testing.T) {
 		os.RemoveAll(tempDir)
 	}()
 
-	service := NewReadService(cfg, nil, st, nil, nil, nil)
+	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
 
 	// Test monthly with end before start - returns empty, not error
 	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)

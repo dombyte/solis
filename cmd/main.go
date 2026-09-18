@@ -1,6 +1,5 @@
-// main.go is the application entry point for the Solis monitor.
+// Package main is the application entry point for the Solis monitor.
 // It initializes all components and starts the background poller and HTTP server.
-
 package main
 
 import (
@@ -90,15 +89,27 @@ func runApp() error {
 	// Ensure poller and modbus client are stopped on exit
 	defer func() {
 		if pl != nil {
-			pl.Stop()
+			if err := pl.Stop(); err != nil {
+				logger.Error().Msgf("Error stopping poller: %v", err)
+			}
 		}
 		if modbusClient != nil {
 			modbusClient.StopReconnectionLoop()
-			modbusClient.Close()
+			if err := modbusClient.Close(); err != nil {
+				logger.Error().Msgf("Error closing modbus client: %v", err)
+			}
 		}
 	}()
 
-	httpServer, err := initializeHTTPServices(cfg, st, ca, wsHub, pl, agg, modbusClient)
+	httpServer, err := initializeHTTPServices(HTTPDeps{
+		Config:       cfg,
+		Storage:      st,
+		Cache:        ca,
+		WebSocketHub: wsHub,
+		Poller:       pl,
+		Aggregator:   agg,
+		ModbusClient: modbusClient,
+	})
 	if err != nil {
 		appCancel()
 		return err
@@ -108,7 +119,9 @@ func runApp() error {
 		if httpServer != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			httpServer.Stop(ctx)
+			if err := httpServer.Stop(ctx); err != nil {
+				logger.Error().Msgf("Error stopping HTTP server: %v", err)
+			}
 		}
 	}()
 
@@ -136,8 +149,8 @@ func loadAndInitConfig() (*config.AppConfig, error) {
 }
 
 // initializeDatabase initializes the database manager and storage
-func initializeDatabase(cfg *config.AppConfig) (*database.DatabaseManager, *storage.Storage, error) {
-	dbManager := database.NewDatabaseManager(
+func initializeDatabase(cfg *config.AppConfig) (*database.Manager, *storage.Storage, error) {
+	dbManager := database.NewManager(
 		&cfg.Storage,
 		&database.BackupConfig{
 			Enabled:        cfg.Storage.EnableBackup,
@@ -163,7 +176,7 @@ func startBackgroundServices(
 	ctx context.Context,
 	wg *sync.WaitGroup,
 	cfg *config.AppConfig,
-	dbManager *database.DatabaseManager,
+	dbManager *database.Manager,
 	st *storage.Storage,
 ) []error {
 	var errors []error
@@ -237,7 +250,9 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 
 		// Pass aggregator to poller so poller can signal when first poll completes
 		pl = poller.New(&cfg.Poller, modbusClient, poller.WithStorage(st), poller.WithCache(ca), poller.WithAggregator(agg))
-		pl.Start()
+		if err := pl.Start(); err != nil {
+			return nil, nil, fmt.Errorf("failed to start poller: %v", err)
+		}
 
 		// Start aggregator now that poller has a reference to it
 		if agg != nil {
@@ -263,25 +278,35 @@ func initializeModbusAndPoller(cfg *config.AppConfig, st *storage.Storage, ca *c
 	return modbusClient, pl, nil
 }
 
+// HTTPDeps holds dependencies for HTTP service initialization.
+type HTTPDeps struct {
+	Config       *config.AppConfig
+	Storage      *storage.Storage
+	Cache        *cache.Cache
+	WebSocketHub *websocket.Hub
+	Poller       *poller.Poller
+	Aggregator   *aggregator.Aggregator
+	ModbusClient *modbus.Client
+}
+
 // initializeHTTPServices initializes HTTP server
-func initializeHTTPServices(
-	cfg *config.AppConfig,
-	st *storage.Storage,
-	ca *cache.Cache,
-	wsHub *websocket.Hub,
-	pl *poller.Poller,
-	agg *aggregator.Aggregator,
-	modbusClient *modbus.Client,
-) (*server.Server, error) {
-	readService := service.NewReadService(cfg, modbusClient, st, pl, ca, agg)
+func initializeHTTPServices(deps HTTPDeps) (*server.Server, error) {
+	readService := service.NewReadService(service.ReadServiceConfig{
+		Config:       deps.Config,
+		ModbusClient: deps.ModbusClient,
+		Storage:      deps.Storage,
+		Poller:       deps.Poller,
+		Cache:        deps.Cache,
+		Aggregator:   deps.Aggregator,
+	})
 
 	handlerDeps := routes.HandlerDeps{
 		Service:      readService,
-		WebSocketHub: wsHub,
+		WebSocketHub: deps.WebSocketHub,
 	}
 
 	router := routes.SetupRoutes(handlerDeps)
-	httpServer := server.New(&cfg.App, router)
+	httpServer := server.New(&deps.Config.App, router)
 
 	go func() {
 		if err := httpServer.Start(); err != nil {
@@ -318,7 +343,9 @@ func waitForShutdown(pl *poller.Poller, httpServer *server.Server, cfg *config.A
 
 	if pl != nil {
 		logger.Info().Msg("Stopping poller...")
-		pl.Stop()
+		if err := pl.Stop(); err != nil {
+			logger.Error().Msgf("Error stopping poller: %v", err)
+		}
 	}
 
 	logger.Info().Msg("Stopping HTTP server...")

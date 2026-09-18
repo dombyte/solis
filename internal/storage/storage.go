@@ -175,7 +175,11 @@ func (s *Storage) initSchema() error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	// Create daily_values table for daily energy totals
 	// Stores one value per day per key, updated with the maximum value seen during the day
@@ -507,7 +511,11 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	var firstErr error
 	for key, value := range values {
@@ -754,14 +762,26 @@ func (s *Storage) CleanupAll() error {
 	var totalRowsDeleted int64
 	var errs []error
 
-	s.cleanupWithQuery("daily_values", "date", s.config.DailyRetention,
-		"DELETE FROM daily_values WHERE date < ?", &totalRowsDeleted, &errs)
-	s.cleanupWithQuery("monthly_values", "month", s.config.MonthlyRetention,
-		"DELETE FROM monthly_values WHERE month < ?", &totalRowsDeleted, &errs)
-	s.cleanupWithQuery("yearly_values", "year", s.config.YearlyRetention,
-		"DELETE FROM yearly_values WHERE year < ?", &totalRowsDeleted, &errs)
-	s.cleanupWithQuery("error_data", "timestamp", s.config.ErrorRetention,
-		"DELETE FROM error_data WHERE timestamp < ?", &totalRowsDeleted, &errs)
+	s.cleanupWithQuery(CleanupConfig{
+		Table:  "daily_values",
+		Column: "date",
+		Query:  "DELETE FROM daily_values WHERE date < ?",
+	}, s.config.DailyRetention, &totalRowsDeleted, &errs)
+	s.cleanupWithQuery(CleanupConfig{
+		Table:  "monthly_values",
+		Column: "month",
+		Query:  "DELETE FROM monthly_values WHERE month < ?",
+	}, s.config.MonthlyRetention, &totalRowsDeleted, &errs)
+	s.cleanupWithQuery(CleanupConfig{
+		Table:  "yearly_values",
+		Column: "year",
+		Query:  "DELETE FROM yearly_values WHERE year < ?",
+	}, s.config.YearlyRetention, &totalRowsDeleted, &errs)
+	s.cleanupWithQuery(CleanupConfig{
+		Table:  "error_data",
+		Column: "timestamp",
+		Query:  "DELETE FROM error_data WHERE timestamp < ?",
+	}, s.config.ErrorRetention, &totalRowsDeleted, &errs)
 
 	s.runVacuumIfNeeded(totalRowsDeleted)
 
@@ -777,11 +797,18 @@ func (s *Storage) startCleanup() time.Time {
 	return cleanupStart
 }
 
+// CleanupConfig holds configuration for a cleanup operation.
+type CleanupConfig struct {
+	Table  string
+	Column string
+	Query  string
+}
+
 // cleanupWithQuery cleans up a table with a specific query
-func (s *Storage) cleanupWithQuery(table, column string, retention time.Duration, query string, totalRowsDeleted *int64, errs *[]error) {
-	if err := s.cleanupTable(table, column, retention,
+func (s *Storage) cleanupWithQuery(cfg CleanupConfig, retention time.Duration, totalRowsDeleted *int64, errs *[]error) {
+	if err := s.cleanupTable(cfg.Table, cfg.Column, retention,
 		func(cutoff string) (sql.Result, error) {
-			return s.db.Exec(query, cutoff)
+			return s.db.Exec(cfg.Query, cutoff)
 		}, totalRowsDeleted); err != nil {
 		*errs = append(*errs, err)
 	}
@@ -1066,7 +1093,11 @@ func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDat
 	if err != nil {
 		return nil, fmt.Errorf("failed to query error history: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			logger.Warn().Msgf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	result := make([]*ErrorDataPoint, 0)
 	for rows.Next() {
@@ -1099,7 +1130,11 @@ func (s *Storage) GetDailyHistory(key string, startDate, endDate time.Time) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily history: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			logger.Warn().Msgf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	result := make([]*DailyDataPoint, 0)
 	for rows.Next() {
@@ -1132,7 +1167,11 @@ func (s *Storage) GetMonthlyHistory(key string, startMonth, endMonth time.Time) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to query monthly history: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			logger.Warn().Msgf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	result := make([]*MonthlyDataPoint, 0)
 	for rows.Next() {
@@ -1165,7 +1204,11 @@ func (s *Storage) GetYearlyHistory(key string, startYear, endYear time.Time) ([]
 	if err != nil {
 		return nil, fmt.Errorf("failed to query yearly history: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			logger.Warn().Msgf("Failed to close rows: %v", closeErr)
+		}
+	}()
 
 	result := make([]*YearlyDataPoint, 0)
 	for rows.Next() {
@@ -1190,7 +1233,11 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
@@ -1250,7 +1297,11 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
@@ -1310,7 +1361,11 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+		}
+	}()
 
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {

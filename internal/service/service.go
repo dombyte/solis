@@ -33,22 +33,25 @@ type ReadService struct {
 	// registerFilter removed per v2 plan - all registers are always enabled
 }
 
+// ReadServiceConfig holds dependencies for creating a ReadService.
+type ReadServiceConfig struct {
+	Config       *config.AppConfig
+	ModbusClient *modbus.Client
+	Storage      *storage.Storage
+	Poller       *poller.Poller
+	Cache        *cache.Cache
+	Aggregator   *aggregator.Aggregator
+}
+
 // NewReadService creates a new ReadService instance.
-func NewReadService(
-	cfg *config.AppConfig,
-	modbusClient *modbus.Client,
-	st *storage.Storage,
-	pl *poller.Poller,
-	ca *cache.Cache,
-	ag *aggregator.Aggregator,
-) *ReadService {
+func NewReadService(cfg ReadServiceConfig) *ReadService {
 	return &ReadService{
-		config:       cfg,
-		modbusClient: modbusClient,
-		storage:      st,
-		poller:       pl,
-		aggregator:   ag,
-		cache:        ca,
+		config:       cfg.Config,
+		modbusClient: cfg.ModbusClient,
+		storage:      cfg.Storage,
+		poller:       cfg.Poller,
+		aggregator:   cfg.Aggregator,
+		cache:        cfg.Cache,
 	}
 }
 
