@@ -361,7 +361,7 @@ func validateAndGetRegister(
 
 // handleDailyRegister handles daily register requests
 //
-//nolint:dupl // Different interval (daily) from handleMonthlyRegister/handleYearlyRegister
+
 func handleDailyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
 	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
 		HasQueryParams: hasQueryParams,
@@ -371,7 +371,7 @@ func handleDailyRegister(w http.ResponseWriter, r *http.Request, key string, ser
 
 // handleMonthlyRegister handles monthly register requests
 //
-//nolint:dupl // Different interval (monthly) from handleDailyRegister/handleYearlyRegister
+
 func handleMonthlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
 	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
 		HasQueryParams: hasQueryParams,
@@ -381,7 +381,7 @@ func handleMonthlyRegister(w http.ResponseWriter, r *http.Request, key string, s
 
 // handleYearlyRegister handles yearly register requests
 //
-//nolint:dupl // Different interval (yearly) from handleDailyRegister/handleMonthlyRegister
+
 func handleYearlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
 	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
 		HasQueryParams: hasQueryParams,
@@ -391,21 +391,21 @@ func handleYearlyRegister(w http.ResponseWriter, r *http.Request, key string, se
 
 // getDailyHistory returns the daily history for a register
 //
-//nolint:dupl // Different interval (daily) from getMonthlyHistory/getYearlyHistory
+
 func getDailyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
 	return s.GetDailyHistory(k, start, end)
 }
 
 // getMonthlyHistory returns the monthly history for a register
 //
-//nolint:dupl // Different interval (monthly) from getDailyHistory/getYearlyHistory
+
 func getMonthlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
 	return s.GetMonthlyHistory(k, start, end)
 }
 
 // getYearlyHistory returns the yearly history for a register
 //
-//nolint:dupl // Different interval (yearly) from getDailyHistory/getMonthlyHistory
+
 func getYearlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
 	return s.GetYearlyHistory(k, start, end)
 }

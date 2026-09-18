@@ -72,7 +72,7 @@ type HandlerDeps struct {
 func serveFileHandler(basePath, filePath, contentType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentType)
-		// nolint:gosec - filePath is a constant string, safe from path traversal
+		//nolint:gosec - filePath is a constant string, safe from path traversal
 		http.ServeFile(w, r, filepath.Join(basePath, filePath))
 	})
 }
@@ -163,7 +163,6 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 
 	// New API endpoints at /api/
 	r.Route("/api", func(r chi.Router) {
-
 		// All register  keys with metadata (excludes daily, monthly, yearly, total)
 		r.Get("/keys", handlers.GetKeysHandler(handlerDeps))
 

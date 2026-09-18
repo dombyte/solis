@@ -76,7 +76,7 @@ func ParseTimeRange(startStr, endStr string) (TimeRange, error) {
 // Tries to parse as date (YYYY-MM-DD), month (YYYY-MM), or year (YYYY).
 // Returns the default value if the input string is empty.
 //
-//nolint:dupl // Helper function used by ParseTimeRange - intentionally similar parsing logic
+
 func parseTimeString(timeStr string, defaultTime time.Time) (time.Time, error) {
 	if timeStr == "" {
 		return defaultTime, nil

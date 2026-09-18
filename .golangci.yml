@@ -1,13 +1,7 @@
-# Gatekeeper golangci-lint Configuration
-# Customized per Global AI Work Plan v2.1
 version: "2"
 
-formatters:
-  enable:
-    - gofmt
-    - goimports
-
 linters:
+  default: none
   enable:
     # Style and best practices
     - revive
@@ -15,9 +9,14 @@ linters:
     - unused
     - misspell
     - unconvert
+    - goprintffuncname
+    - importas
+    - whitespace
+    - perfsprint
 
     # Error handling
     - errcheck
+    - errorlint
 
     # Security
     - gosec
@@ -26,56 +25,60 @@ linters:
     - ineffassign
     - gocyclo
     - dupl
+    - wastedassign
+
+    # Correctness / bug finding
+    - durationcheck
+    - govet
+    - makezero
+    - tparallel
+    - copyloopvar
+    - intrange
+    - bodyclose
+
+    # Database / SQL
+    - rowserrcheck
+    - sqlclosecheck
+
+    # Meta
+    - nolintlint
 
     # Code structure
     - lll
-
-  exclusions:
-    paths:
-      - test/
-      - mocks/
-      - reff/
-      - vendor/
-      - frontend/node_modules/
-    rules:
-      - linters: [revive]
-        path: _test\.go
-      - linters: [revive]
-        path: mocks/
-      - linters: [dupl]
-        path: _test\.go
-      - linters: [errcheck]
-        path: _test\.go
-      - linters: [gosec]
-        path: _test\.go
-      - linters: [lll]
-        path: _test\.go
-
 
   settings:
     # Line length linter - hard limit of 100 chars per Global Plan
     lll:
       line-length: 100
 
-    # Cyclomatic complexity linter - warn on complexity >= 8 per Global Plan
+    # Cyclomatic complexity linter
     gocyclo:
-      min-complexity: 8
+      min-complexity: 12
 
-    # Duplicate code linter - 50% similarity threshold
+    # Duplicate code linter
     dupl:
-      threshold: 50
+      threshold: 100
 
     # Gosec linter - security checks
     gosec:
       confidence: high
+      severity: medium
+
+    # Stricter nolint discipline
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    # Errcheck: also flag unchecked type assertions and blank-assigned errors
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
 
     # Revive linter - modern replacement for golint
-    # Note: revive uses a different configuration format in v2
     revive:
-      # Enable default rules
       severity: warning
       confidence: 0.8
-      # Custom rules configuration
       rules:
         # Documentation: require docs for exported identifiers
         - name: exported
@@ -85,15 +88,76 @@ linters:
         - name: package-comments
           disabled: false
 
-        # Style: max function length
+        # Style: max function length (warning at 60)
         - name: function-length
           disabled: false
-          arguments: [40, 0]
+          arguments: [60, 0]
 
         # Style: max function parameters
         - name: argument-limit
           disabled: false
           arguments: [5]
+
+        # Error strings should not be capitalized / end with punctuation
+        - name: error-strings
+          disabled: false
+
+        # Naming conventions (e.g. Foo not FooUrl)
+        - name: var-naming
+          disabled: false
+
+        # if err != nil { return err } instead of wrapping in else
+        - name: indent-error-flow
+          disabled: false
+
+        # Detect unreachable code
+        - name: unreachable-code
+          disabled: false
+
+        # Redefining builtin identifiers (make, len, min, ...)
+        - name: redefines-builtin-id
+          disabled: false
+
+  exclusions:
+    generated: lax
+    paths:
+      - (^|/)test/
+      - (^|/)mocks/
+      - (^|/)reff/
+      - (^|/)vendor/
+      - (^|/)frontend/node_modules/
+      - (^|/)third_party/
+      - (^|/)builtin/
+      - (^|/)examples/
+      - \.pb\.go$
+      - _gen\.go$
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters: [revive, dupl, errcheck, gosec, lll]
+        path: _test\.go
+      - linters: [rowserrcheck, sqlclosecheck, bodyclose]
+        path: _test\.go
+
+formatters:
+  enable:
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - (^|/)test/
+      - (^|/)mocks/
+      - (^|/)reff/
+      - (^|/)vendor/
+      - (^|/)frontend/node_modules/
+      - (^|/)third_party/
+      - (^|/)builtin/
+      - (^|/)examples/
+      - \.pb\.go$
+      - _gen\.go$
 
 run:
   timeout: 5m

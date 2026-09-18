@@ -373,7 +373,7 @@ func (a *Aggregator) computeGridEnergyTotal() {
 
 // computeGridEnergyDaily computes grid_energy_daily = grid_export_daily - grid_import_daily.
 //
-//nolint:dupl // Different target (daily) from computeGridEnergyTotal/computeGridEnergyMonthly/computeGridEnergyYearly
+
 func (a *Aggregator) computeGridEnergyDaily() {
 	a.computeGridEnergy(GridEnergyConfig{
 		ExportKey:  "grid_export_daily",

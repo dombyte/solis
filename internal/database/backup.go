@@ -90,7 +90,7 @@ type backuper interface {
 // calculateSHA256 calculates the SHA256 checksum of a file.
 func calculateSHA256(filePath string) (string, error) {
 	// filePath is generated from GenerateBackupFilename, which uses controlled inputs
-	file, err := os.Open(filePath) //nolint:gosec
+	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file for checksum: %w", err)
 	}
@@ -145,7 +145,6 @@ func createSQLiteBackup(sourcePath, destPath string) error {
 	}
 
 	return nil
-
 }
 
 // openSourceDatabase opens the source database for backup

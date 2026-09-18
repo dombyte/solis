@@ -176,6 +176,15 @@ func (s *Storage) initSchema() error {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+			}
+		}
+	}()
+
 	// Create daily_values table for daily energy totals
 	// Stores one value per day per key, updated with the maximum value seen during the day
 	dailySQL := `
@@ -192,7 +201,6 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(dailySQL); err != nil {
-		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create daily_values table: %w", err)
 	}
 
@@ -212,7 +220,6 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(monthlySQL); err != nil {
-		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create monthly_values table: %w", err)
 	}
 
@@ -232,7 +239,6 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(yearlySQL); err != nil {
-		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create yearly_values table: %w", err)
 	}
 
@@ -250,7 +256,6 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(totalSQL); err != nil {
-		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create total_values table: %w", err)
 	}
 
@@ -270,13 +275,13 @@ func (s *Storage) initSchema() error {
 	`
 
 	if _, err := tx.Exec(errorSQL); err != nil {
-		// Rollback will be handled automatically by sql package when tx goes out of scope
 		return fmt.Errorf("failed to create error_data table: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit schema transaction: %w", err)
 	}
+	committed = true
 
 	logger.Info().Msg("Database schema initialized")
 	return nil
@@ -475,6 +480,15 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+			}
+		}
+	}()
+
 	var firstErr error
 	for key, value := range values {
 		if err := s.storeSingleRegister(tx, key, value, timestamp); err != nil {
@@ -489,6 +503,7 @@ func (s *Storage) StoreAllRegisters(values map[string]*solis.Value, timestamp ti
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+	committed = true
 
 	logger.Debug().Msgf("Stored register values successfully")
 	return firstErr
@@ -851,7 +866,6 @@ func (s *Storage) completeCleanup(
 // cleanupTable is a helper function for CleanupAll that handles the common cleanup pattern.
 func (s *Storage) cleanupTable(tableName, dateColumn string, retention time.Duration,
 	deleteFunc func(cutoff string) (sql.Result, error), totalDeleted *int64) error {
-
 	cutoff := time.Now().Add(-retention)
 	var cutoffStr string
 
@@ -1058,7 +1072,7 @@ func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 
 // MarshalJSON implements json.Marshaler for TotalDataPoint to ensure float64 values are rounded.
 //
-//nolint:dupl // Different type (TotalDataPoint) from DailyDataPoint/MonthlyDataPoint/YearlyDataPoint
+
 func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 	type Alias TotalDataPoint
 	return json.Marshal(struct {
@@ -1092,7 +1106,7 @@ func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 
 // GetErrorHistory retrieves historical error data for a specific register key.
 //
-//nolint:dupl // Different table/type (error) from GetDailyHistory/GetMonthlyHistory/GetYearlyHistory
+
 func (s *Storage) GetErrorHistory(key string, start, end time.Time) ([]*ErrorDataPoint, error) {
 	rows, err := s.db.Query(`
 		SELECT timestamp, raw_value, string_value
@@ -1263,6 +1277,15 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+			}
+		}
+	}()
+
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
@@ -1311,7 +1334,9 @@ func (s *Storage) StoreMonthlyDataPoint(key string, dp *MonthlyDataPoint) error 
 		return fmt.Errorf("failed to store monthly data point: %w", err)
 	}
 
-	return tx.Commit()
+	err = tx.Commit()
+	committed = true
+	return err
 }
 
 // StoreYearlyDataPoint stores a computed yearly data point in the yearly_values table.
@@ -1321,6 +1346,15 @@ func (s *Storage) StoreYearlyDataPoint(key string, dp *YearlyDataPoint) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+			}
+		}
+	}()
 
 	// Validate that the register exists
 	reg, ok := solis.RegisterMapByKey[key]
@@ -1381,6 +1415,15 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
+	committed := false
+	defer func() {
+		if !committed {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Warn().Msgf("Transaction rollback failed: %v", rollbackErr)
+			}
+		}
+	}()
+
 	reg, ok := solis.RegisterMapByKey[key]
 	if !ok {
 		return fmt.Errorf("register %s not found", key)
@@ -1431,7 +1474,7 @@ func (s *Storage) StoreTotalDataPoint(key string, dp *TotalDataPoint) error {
 // GetTotalHistory retrieves the total (lifetime) value for a specific register key.
 // Returns the latest stored value.
 //
-//nolint:dupl // Different query (total) from GetMonthlySum/GetYearlySum
+
 func (s *Storage) GetTotalHistory(key string) (*TotalDataPoint, error) {
 	var dp TotalDataPoint
 	err := s.db.QueryRow(`
