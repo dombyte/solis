@@ -1,7 +1,6 @@
 import path from "path"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
-import { VitePWA } from "vite-plugin-pwa"
 import license from "rollup-plugin-license"
 import { defineConfig } from "vite"
 import { copyFileSync, existsSync, mkdirSync } from "fs"
@@ -47,64 +46,30 @@ export default defineConfig({
         },
       },
     }),
-   // Copy licenses.json to dist after build so it's available
+   // Copy data files to dist after build so they're available
     {
-      name: 'copy-licenses-to-dist',
+      name: 'copy-data-to-dist',
       apply: 'build',
       closeBundle: () => {
-        const src = path.join(__dirname, 'public', 'data', 'licenses.json');
+        const dataDir = path.join(__dirname, 'public', 'data');
         const destDir = path.join(__dirname, 'dist', 'data');
-        const dest = path.join(destDir, 'licenses.json');
 
         // Ensure dist/data directory exists
         if (!existsSync(destDir)) {
           mkdirSync(destDir, { recursive: true });
         }
 
-        // Copy file if it exists
-        if (existsSync(src)) {
-          copyFileSync(src, dest);
-        }
+        // Copy all files from public/data to dist/data
+        const files = ['licenses.json', 'version.json'];
+        files.forEach(file => {
+          const src = path.join(dataDir, file);
+          const dest = path.join(destDir, file);
+          if (existsSync(src)) {
+            copyFileSync(src, dest);
+          }
+        });
       },
     },
-    VitePWA({
-      manifest: {
-        name: "Solis Monitor",
-        short_name: "Solis",
-        description: "Monitor your Solis inverter",
-        theme_color: "#000000",
-        background_color: "#000000",
-        display: "standalone",
-      },
-      includeAssets: ["favicon.svg"],
-      strategies: "generateSW",
-      // Use manual registration with workbox-window
-      injectRegister: false,
-      pwaAssets: {
-        disabled: false,
-        preset: "minimal-2023",
-        image: "public/favicon.svg",
-      },
-      workbox: {
-        clientsClaim: true,
-        skipWaiting: false,
-        globPatterns: [
-          "**/*.{js,css,html,svg,png,jpg,jpeg,webp,woff2,ttf,eot,json,ico}"
-        ],
-        runtimeCaching: [],
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [
-          /^\/api\//,
-          /^\/docs/,
-          /^\/health/,
-          /^\/metrics/,
-          /^\/ws/,
-          /\.\w+$/,
-        ],
-      },
-      // Enable workbox-window for better update control
-      selfDestroying: false,
-    }),
   ],
   resolve: {
     alias: {

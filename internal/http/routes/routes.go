@@ -14,6 +14,35 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
+// cacheMiddleware sets cache headers based on the request path
+func cacheMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Assets: immutable, long cache
+		if strings.HasPrefix(path, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			// Index and SPA routes: no-store
+		} else if path == "/" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "/api/") &&
+			!strings.HasPrefix(path, "/health") && !strings.HasPrefix(path, "/ws") &&
+			!strings.HasPrefix(path, "/docs")) {
+			w.Header().Set("Cache-Control", "no-store")
+			// Manifest and data: no-cache
+		} else if strings.HasPrefix(path, "/manifest.webmanifest") || strings.HasPrefix(path, "/data/") {
+			w.Header().Set("Cache-Control", "no-cache")
+			// sw.js: no-cache with max-age=0
+		} else if strings.HasPrefix(path, "/sw.js") {
+			w.Header().Set("Cache-Control", "no-cache, max-age=0")
+			// Icons and static images: short cache
+		} else if strings.HasPrefix(path, "/favicon") || strings.HasPrefix(path, "/vite.svg") ||
+			strings.HasPrefix(path, "/pwa-") || strings.HasPrefix(path, "/apple-touch") {
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // HandlerDeps contains dependencies for HTTP handlers.
 type HandlerDeps struct {
 	// Service is the service layer for business logic.
@@ -33,6 +62,8 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 	r.Use(middleware.RequestID)
 	// Add panic recovery middleware (redundant with Recoverer but more specific logging)
 	r.Use(handlers.PanicRecoveryMiddleware)
+	// Add cache headers middleware
+	r.Use(cacheMiddleware)
 
 	// Add CORS middleware
 	r.Use(func(next http.Handler) http.Handler {
@@ -55,31 +86,23 @@ func NewRouter(deps HandlerDeps) *chi.Mux {
 		assetsFS := http.FileServer(http.Dir(filepath.Join(frontendDist, "assets")))
 		r.Handle("/assets/*", http.StripPrefix("/assets/", assetsFS))
 
-		// Serve favicon from root
-		r.Handle("/favicon.svg", http.FileServer(http.Dir(frontendDist)))
-
-		// Serve data directory (licenses.json, etc.)
+		// Serve data directory (licenses.json, version.json, etc.)
 		r.Handle("/data/*", http.StripPrefix("/data/", http.FileServer(http.Dir(filepath.Join(frontendDist, "data")))))
 
-		// Serve PWA and other root static files
-		r.Handle("/registerSW.js", http.FileServer(http.Dir(frontendDist)))
+		// Serve manifest and sw.js
 		r.Handle("/manifest.webmanifest", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/sw.js", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/vite.svg", http.FileServer(http.Dir(frontendDist)))
 
-		// Serve generated icon files
+		// Serve icon files
 		r.Handle("/favicon.ico", http.FileServer(http.Dir(frontendDist)))
+		r.Handle("/favicon.svg", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/pwa-64x64.png", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/pwa-192x192.png", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/pwa-512x512.png", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/maskable-icon-512x512.png", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/apple-touch-icon-180x180.png", http.FileServer(http.Dir(frontendDist)))
 		r.Handle("/apple-touch-icon.png", http.FileServer(http.Dir(frontendDist)))
-
-		// Serve workbox files with wildcard hash - use custom handler
-		r.Get("/workbox-{hash}.js", func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, filepath.Join(frontendDist, "workbox-"+chi.URLParam(r, "hash")+".js"))
-		})
 
 		// For all other root-level requests, serve index.html
 		// This allows the frontend router to handle client-side routing

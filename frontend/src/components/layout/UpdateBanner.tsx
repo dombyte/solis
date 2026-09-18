@@ -1,8 +1,8 @@
-import { useServiceWorkerUpdate } from '../../lib/hooks/useServiceWorkerUpdate';
+import { useVersionCheck } from '../../lib/hooks/useVersionCheck';
 import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
 
 export function UpdateBanner() {
-  const { hasUpdate, triggerUpdate } = useServiceWorkerUpdate();
+  const { hasUpdate, triggerUpdate } = useVersionCheck();
 
   if (!hasUpdate) return null;
 

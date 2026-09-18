@@ -12,30 +12,10 @@ import { App } from './App';
 // Initialize WebSocket connection as early as possible
 initWebSocket();
 
-// Initialize service worker with workbox-window for better update control
-// This must happen before the app renders so the SW can start checking for updates
-const initializeServiceWorker = () => {
-  if ('serviceWorker' in navigator) {
-    // Import workbox-window dynamically
-    import('workbox-window').then(({ Workbox }) => {
-      const wb = new Workbox('/sw.js', { scope: '/' });
-      
-      // Store globally for use in hooks
-      // Using any to avoid type mismatches between workbox-window versions
-      (window as any).__workbox = wb;
-      
-      // Auto-register
-      wb.register();
-      
-      console.log('Service Worker registered with workbox-window');
-    }).catch((err: unknown) => {
-      console.error('Failed to load workbox-window:', err);
-    });
-  }
-};
-
-// Initialize service worker
-initializeServiceWorker();
+// Register simple service worker for installability
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+}
 
 function OnlineStatusProvider({ children }: { children: React.ReactNode }) {
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);

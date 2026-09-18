@@ -1,7 +1,7 @@
 import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
 import { useWebSocket } from '../lib/hooks/useWebSocket';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
-import { useServiceWorkerUpdate } from '../lib/hooks/useServiceWorkerUpdate';
+import { useVersionCheck } from '../lib/hooks/useVersionCheck';
 import { useMobile } from '../hooks/useMobile';
 import { useState, useEffect, useCallback } from 'react';
 
@@ -15,8 +15,8 @@ export function Info() {
   const { isConnected } = useWebSocket({ autoConnect: false, requestInitialData: false });
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
 
-  // Service worker update check
-  const { hasUpdate, checkForUpdate, triggerUpdate } = useServiceWorkerUpdate();
+  // Version check
+  const { hasUpdate, checkForUpdate, triggerUpdate } = useVersionCheck();
   const [checking, setChecking] = useState(false);
   const [lastCheckTime, setLastCheckTime] = useState<number | null>(null);
   const [checkStatus, setCheckStatus] = useState<'idle' | 'checking' | 'update-available' | 'up-to-date'>('idle');
@@ -139,8 +139,7 @@ export function Info() {
                 <code className="bg-muted px-2 py-1 rounded">v{version}</code>
               </p>
             </div>
-            {'serviceWorker' in navigator && (
-              <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={handleCheckForUpdate}
                   disabled={checking}
@@ -161,7 +160,6 @@ export function Info() {
                   </button>
                 )}
               </div>
-            )}
           </div>
           {lastCheckTime && (
             <div className={`mt-3 p-3 rounded-lg transition-all duration-300 ${

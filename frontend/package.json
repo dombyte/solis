@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "prebuild": "node -e \"const fs=require('fs');const hash=process.env.VITE_GIT_COMMIT_HASH||'dev';fs.mkdirSync('public/data',{recursive:true});fs.writeFileSync('public/data/version.json',JSON.stringify({version:hash}))\"",
+    "build": "npm run prebuild && tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
@@ -41,7 +42,6 @@
     "@types/node": "^26.1.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@vite-pwa/assets-generator": "^1.0.2",
     "@vitejs/plugin-react": "^6",
     "eslint": "^10",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -53,7 +53,6 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "rollup-plugin-license": "^3.7.1",
     "typescript-eslint": "^8",
-    "vite": "^8",
-    "vite-plugin-pwa": "^1.3.0"
+    "vite": "^8"
   }
 }
