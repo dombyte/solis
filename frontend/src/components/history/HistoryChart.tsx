@@ -348,7 +348,12 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
                 size: 10,
                 family: 'Inter Variable, sans-serif'
               },
-              color: mutedForeground
+              color: mutedForeground,
+              // Pull labels toward the right edge of this narrow pinned column (i.e.
+              // toward the chart) instead of Chart.js's default of hugging the left
+              // edge, which otherwise leaves a wide gap before the bars start.
+              crossAlign: 'far',
+              padding: 4,
             },
             border: {
               display: false
@@ -397,7 +402,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const maxAbsValue = allValues.length > 0 ? Math.max(...allValues.map(v => Math.abs(v))) : 0;
   const estimatedTickMax = Math.ceil(maxAbsValue * 1.15);
   const maxLabelLength = estimatedTickMax.toLocaleString().length;
-  const yAxisWidth = Math.max(44, maxLabelLength * 10 + 30);
+  const yAxisWidth = Math.max(24, maxLabelLength * 10 + 8);
 
   // Function to get color for a dataset by index
   const getColorForDataset = (datasetIndex: number): string => {
