@@ -10,7 +10,7 @@ export function OfflineBanner({ isOnline, isChecking = false }: OfflineBannerPro
 
   return (
     <div className="fixed bottom-4 left-4 right-4 z-60 max-w-[calc(100vw-2rem)]">
-      <div className="flex items-center justify-between gap-4 p-4 bg-warning/30 border border-warning rounded-lg shadow-lg backdrop-blur-sm w-full">
+      <div className="flex items-center justify-between gap-4 p-4 bg-warning/30 border border-warning rounded-lg shadow-lg backdrop-blur-sm w-full" role="alert">
         <div className="flex items-center gap-3">
           <LineAwesomeIcon icon="la-wifi-slash" size="lg" className="text-warning" />
           <div>

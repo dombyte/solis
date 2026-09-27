@@ -158,7 +158,7 @@ export function ValueDisplay({
       {showLabel && (
         <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
       )}
-      <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
+      <div className="flex flex-wrap items-center gap-1 sm:gap-1.5" aria-live="polite" aria-atomic="true">
         <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
         {(showStatusIndicator && hasIssues && hasValue) ||
          (showStatusIndicator && !hasIssues && hasValue && statusDecoded !== undefined) ? (

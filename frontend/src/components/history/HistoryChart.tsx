@@ -17,37 +17,37 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
   const [datasetVisibility, setDatasetVisibility] = React.useState<Record<string, boolean>>({});
-  
-  // Initialize and update dataset visibility when data changes
-  useEffect(() => {
-    if (!data) return;
-    
-    // Initialize all datasets as visible
+
+  // Reset dataset visibility when a new `data` object arrives, without a dedicated
+  // effect: React's recommended pattern for state that must be re-derived from a
+  // changed prop is to adjust it during render, not inside a useEffect.
+  const [prevData, setPrevData] = React.useState<ChartData | null>(null);
+  if (data !== prevData) {
+    setPrevData(data);
     const initialVisibility: Record<string, boolean> = {};
-    data.datasets.forEach((ds, index) => {
-      initialVisibility[ds.label || `dataset-${index}`] = true;
+    data?.datasets.forEach((_ds, index) => {
+      initialVisibility[String(index)] = true;
     });
     setDatasetVisibility(initialVisibility);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }
 
   // Update chart dataset visibility when state changes
   useEffect(() => {
     if (!chartInstanceRef.current || !data) return;
-    
+
     const chart = chartInstanceRef.current;
-    data.datasets.forEach((ds, index) => {
-      const label = ds.label || `dataset-${index}`;
-      const isVisible = datasetVisibility[label] !== false;
+    data.datasets.forEach((_ds, index) => {
+      const key = String(index);
+      const isVisible = datasetVisibility[key] !== false;
       chart.setDatasetVisibility(index, isVisible);
     });
     chart.update();
   }, [datasetVisibility, data]);
 
-  const toggleDatasetVisibility = (label: string) => {
+  const toggleDatasetVisibility = (key: string) => {
     setDatasetVisibility(prev => {
       const newVisibility = { ...prev };
-      newVisibility[label] = !(prev[label] ?? true);
+      newVisibility[key] = !(prev[key] ?? true);
       return newVisibility;
     });
   };
@@ -310,7 +310,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const datasetStats = data.datasets.map((ds, index) => {
     const values = ds.data.filter((val): val is number => val !== null && val !== undefined);
     return {
-      key: ds.label || `dataset-${index}`,
+      key: String(index),
       label: ds.label,
       unit: ds.unit || '',
       datasetIndex: index,
@@ -330,12 +330,17 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         style={{ minHeight: '200px', maxHeight: '500px' }}
       >
         <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
-          <canvas ref={chartRef} />
+          <canvas
+            ref={chartRef}
+            role="img"
+            aria-label={`Bar chart of ${data.datasets.length} dataset${data.datasets.length === 1 ? '' : 's'} across ${dataPointCount} period${dataPointCount === 1 ? '' : 's'}`}
+            aria-describedby={validStats.length > 0 ? 'history-chart-stats' : undefined}
+          />
         </div>
       </div>
       {/* Statistics display per category in table format with toggle */}
       {validStats.length > 0 && (
-        <div className="mt-3 px-2 w-full overflow-x-auto">
+        <div id="history-chart-stats" className="mt-3 px-2 w-full overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-border">

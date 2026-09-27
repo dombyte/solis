@@ -97,7 +97,7 @@ export function StatusDisplay({
       {showLabel && (
         <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
       )}
-      <div className="flex-shrink-0">
+      <div className="flex-shrink-0" aria-live="polite" aria-atomic="true">
         {shouldAlert ? (
           <Badge variant="destructive" className="text-xs px-1.5 py-0.5 truncate max-w-[100px] sm:max-w-[130px] md:max-w-[160px] lg:max-w-[180px] xl:max-w-[200px]">
             {statusText}

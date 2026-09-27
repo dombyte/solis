@@ -17,9 +17,14 @@ export function useVersionCheck() {
   }, [CURRENT]);
 
   useEffect(() => {
-    const id = setInterval(check, 60_000);
-    check();
-    return () => clearInterval(id);
+    const intervalId = setInterval(check, 60_000);
+    // Defer the initial check to a timer tick rather than calling it inline, so this
+    // effect only ever sets up subscriptions instead of setting state synchronously.
+    const initialCheckId = setTimeout(check, 0);
+    return () => {
+      clearInterval(intervalId);
+      clearTimeout(initialCheckId);
+    };
   }, [check]);
 
   const triggerUpdate = useCallback(() => window.location.reload(), []);

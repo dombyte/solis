@@ -27,13 +27,13 @@ class SolisApiClient {
   }
 
   // Generic method to fetch data from any source endpoint
-  async get(source: string, params?: Record<string, string>): Promise<unknown> {
+  async get(source: string, params?: Record<string, string>, options?: { signal?: AbortSignal }): Promise<unknown> {
     let url = source;
     if (params) {
       const searchParams = new URLSearchParams(params);
       url += `?${searchParams.toString()}`;
     }
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: options?.signal });
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }

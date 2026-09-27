@@ -20,7 +20,7 @@ export function PeriodSelector({
   className = '' 
 }: PeriodSelectorProps): React.ReactElement {
   return (
-    <div className={`flex gap-2 ${className}`}>
+    <div className={`flex gap-2 ${className}`} role="tablist" aria-label="History period">
       {periods.map((p) => (
         <Button
           key={p.value}
@@ -28,6 +28,8 @@ export function PeriodSelector({
           size="sm"
           onClick={() => onPeriodChange(p.value)}
           className="flex-1 min-h-[40px] touch-target"
+          role="tab"
+          aria-selected={period === p.value}
         >
           {p.label}
         </Button>

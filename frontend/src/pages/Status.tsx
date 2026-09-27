@@ -4,6 +4,7 @@ import { useSubscription } from '../lib/hooks/useSubscription';
 import { useMobile } from '../hooks/useMobile';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '../components/ui/dialog';
 import { Clock, X } from 'lucide-react';
 import { SkeletonCard } from '../components/ui/skeleton';
 import { dashboardGroups } from '../lib/config/groups';
@@ -180,10 +181,18 @@ export function Status(): React.ReactElement {
             const displayValue = formatStatusValue(value);
             
             return (
-              <Card 
-                key={reg.id} 
+              <Card
+                key={reg.id}
                 className="w-full cursor-pointer hover:shadow-md transition-shadow"
                 onClick={() => handleStatusClick(reg.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleStatusClick(reg.id);
+                  }
+                }}
               >
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
@@ -212,88 +221,88 @@ export function Status(): React.ReactElement {
         </div>
         
         {/* Status Detail Modal - Centered Box */}
-        {selectedStatusKey && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 sm:p-6 md:p-8 overflow-x-hidden" onClick={handleCloseModal}>
-            <div 
-              className="bg-background rounded-lg shadow-xl w-full max-w-4xl max-h-[80vh] overflow-hidden max-w-[90vw]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="flex items-center justify-between p-4 border-b">
-                <h2 className="text-lg font-semibold">
-                  {getRegisterById(selectedStatusKey)?.name || selectedStatusKey}
-                </h2>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCloseModal}>
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Close</span>
-                  </Button>
-              </div>
-              
-              {/* Content - Log-style display */}
-              <div className="p-4 max-h-[calc(80vh-80px)] overflow-y-auto">
-                {historyLoading ? (
-                  <div className="flex items-center justify-center h-64">
-                    <div className="flex flex-col items-center gap-3">
-                      <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
-                      <span className="text-muted-foreground">Loading history...</span>
-                    </div>
+        <Dialog open={selectedStatusKey !== null} onOpenChange={(open) => { if (!open) handleCloseModal(); }}>
+          <DialogContent className="max-w-4xl w-[90vw] max-h-[80vh] overflow-hidden p-0">
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b">
+              <DialogTitle>
+                {(selectedStatusKey && getRegisterById(selectedStatusKey)?.name) || selectedStatusKey}
+              </DialogTitle>
+              <DialogClose asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Close</span>
+                </Button>
+              </DialogClose>
+            </div>
+            <DialogDescription>
+              History log for {(selectedStatusKey && getRegisterById(selectedStatusKey)?.name) || selectedStatusKey}
+            </DialogDescription>
+
+            {/* Content - Log-style display */}
+            <div className="p-4 max-h-[calc(80vh-80px)] overflow-y-auto">
+              {historyLoading ? (
+                <div className="flex items-center justify-center h-64">
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="animate-spin h-6 w-6 border-4 border-primary border-t-transparent rounded-full" />
+                    <span className="text-muted-foreground">Loading history...</span>
                   </div>
-                ) : historyError ? (
-                  <div className="p-4 bg-destructive/10 text-destructive rounded">
-                    {historyError}
-                  </div>
-                ) : historyData && historyData.length > 0 ? (
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-muted-foreground mb-3 pb-2 border-b">
-                      History Log
-                    </h3>
-                    <div className="font-mono text-sm space-y-1">
-                      {historyData.map((dataPoint, index) => {
-                        const date = dataPoint.date || dataPoint.month || dataPoint.year || '';
-                        const time = dataPoint.timestamp ? new Date(dataPoint.timestamp).toLocaleTimeString() : '';
-                        
-                        // Format the status value for display
-                        let displayValue: string;
-                        
-                        if (dataPoint.value === null || dataPoint.value === undefined) {
-                          displayValue = '-';
-                        } else if (typeof dataPoint.value === 'object' && dataPoint.value !== null) {
-                          // It's a status_decoded object or array
-                          const valueObj = dataPoint.value as SolisStatusDecoded | FaultStatusDecoded;
-                          if (Array.isArray(valueObj)) {
-                            displayValue = valueObj.join(', ');
-                          } else if (typeof valueObj === 'object' && valueObj !== null) {
-                            const statusObj = valueObj as { name?: string; description?: string };
-                            displayValue = statusObj.name || JSON.stringify(valueObj);
-                          } else {
-                            displayValue = String(dataPoint.value);
-                          }
+                </div>
+              ) : historyError ? (
+                <div className="p-4 bg-destructive/10 text-destructive rounded">
+                  {historyError}
+                </div>
+              ) : historyData && historyData.length > 0 ? (
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 pb-2 border-b">
+                    History Log
+                  </h3>
+                  <div className="font-mono text-sm space-y-1">
+                    {historyData.map((dataPoint) => {
+                      const date = dataPoint.date || dataPoint.month || dataPoint.year || '';
+                      const time = dataPoint.timestamp ? new Date(dataPoint.timestamp).toLocaleTimeString() : '';
+
+                      // Format the status value for display
+                      let displayValue: string;
+
+                      if (dataPoint.value === null || dataPoint.value === undefined) {
+                        displayValue = '-';
+                      } else if (typeof dataPoint.value === 'object' && dataPoint.value !== null) {
+                        // It's a status_decoded object or array
+                        const valueObj = dataPoint.value as SolisStatusDecoded | FaultStatusDecoded;
+                        if (Array.isArray(valueObj)) {
+                          displayValue = valueObj.join(', ');
+                        } else if (typeof valueObj === 'object' && valueObj !== null) {
+                          const statusObj = valueObj as { name?: string; description?: string };
+                          displayValue = statusObj.name || JSON.stringify(valueObj);
                         } else {
                           displayValue = String(dataPoint.value);
                         }
+                      } else {
+                        displayValue = String(dataPoint.value);
+                      }
 
-                        return (
-                          <div key={index} className="py-1.5 px-2 rounded hover:bg-muted/50 transition-colors break-words">
-                            <span className="text-muted-foreground">
-                              [{date} {time}]
-                            </span>
-                            <span className="ml-2">
-                              {displayValue}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                      return (
+                        <div key={dataPoint.timestamp} className="py-1.5 px-2 rounded hover:bg-muted/50 transition-colors break-words">
+                          <span className="text-muted-foreground">
+                            [{date} {time}]
+                          </span>
+                          <span className="ml-2">
+                            {displayValue}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : (
-                  <div className="flex items-center justify-center h-64 text-muted-foreground">
-                    <p>No history data available</p>
-                  </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-64 text-muted-foreground">
+                  <p>No history data available</p>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

@@ -88,11 +88,13 @@ export function DesktopNav() {
               size="icon"
               className="w-full h-8"
               onClick={() => setIsCollapsed(!isCollapsed)}
+              aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              <LineAwesomeIcon 
-                icon={isCollapsed ? 'la-angle-double-right' : 'la-angle-double-left'} 
-                size="lg" 
+              <LineAwesomeIcon
+                icon={isCollapsed ? 'la-angle-double-right' : 'la-angle-double-left'}
+                size="lg"
               />
+              <span className="sr-only">{isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}</span>
             </Button>
           </div>
         </div>

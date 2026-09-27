@@ -1,6 +1,7 @@
 import React from 'react';
+import { Sun, Factory, Home, ShieldCheck, BatteryCharging, BatteryMedium } from 'lucide-react';
 import type { FlowViewModel } from './model';
-import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus } from './model';
+import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus, buildFlowSummary } from './model';
 
 /**
  * Mobile flow diagram with card list and flow rail
@@ -26,6 +27,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-pv)',
       active: nodes.pv.active,
       stale: nodes.pv.stale,
+      Icon: Sun,
       connector: {
         active: nodes.pv.active,
         reverse: true,
@@ -40,6 +42,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-grid)',
       active: nodes.grid.active,
       stale: nodes.grid.stale,
+      Icon: Factory,
       connector: {
         active: nodes.grid.active,
         reverse: nodes.grid.value !== null ? nodes.grid.value < 0 : false,
@@ -54,6 +57,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-batt)',
       active: nodes.battery.active,
       stale: nodes.battery.stale,
+      Icon: nodes.battery.value !== null && nodes.battery.value > 0 ? BatteryCharging : BatteryMedium,
       connector: {
         active: nodes.battery.active,
         reverse: nodes.battery.value !== null ? nodes.battery.value < 0 : false,
@@ -68,6 +72,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-hh)',
       active: nodes.household.active,
       stale: nodes.household.stale,
+      Icon: Home,
       connector: {
         active: nodes.household.active,
         reverse: false,
@@ -82,6 +87,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-bk)',
       active: nodes.backup.active,
       stale: nodes.backup.stale,
+      Icon: ShieldCheck,
       connector: {
         active: nodes.backup.active,
         reverse: false,
@@ -165,11 +171,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
                   opacity: card.stale ? 0.35 : 1,
                   transition: 'opacity 0.5s ease'
                 }}
+                role="img"
+                aria-label={`${card.name}: ${card.stale ? 'no data' : card.value}${card.sub ? ` (${card.sub})` : ''}`}
               >
                 <div className="flex items-center gap-3">
-                  <span style={{ fontSize: 22 }}>
-                    {getIcon(card.key)}
-                  </span>
+                  <card.Icon size={22} color={card.color} strokeWidth={2.25} aria-hidden="true" />
                   <div>
                     <div style={{ 
                       color: 'var(--color-muted-foreground)', 
@@ -203,22 +209,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
           ))}
         </div>
       </div>
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {buildFlowSummary(viewModel)}
+      </div>
     </div>
   );
-}
-
-/**
- * Get icon for card type - returns emoji for mobile
- */
-function getIcon(key: string): string {
-  switch (key) {
-    case 'pv': return '☀️';
-    case 'grid': return '🏭';
-    case 'battery': return '🔋';
-    case 'household': return '🏠';
-    case 'backup': return '🛡️';
-    default: return '';
-  }
 }
 
 /**

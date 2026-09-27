@@ -43,7 +43,24 @@ class SolisWebSocket {
     } else {
       this.url = '/ws';
     }
+
+    // A client that exhausted its reconnect attempts (see scheduleReconnect) would
+    // otherwise stay disconnected forever even after the network recovers.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.handleOnline);
+    }
   }
+
+  private handleOnline = (): void => {
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.shouldReconnect && !this.connected) {
+      this.connect();
+    }
+  };
 
   connect(): void {
     // Don't create a new connection if we're already connected or connecting

@@ -19,6 +19,8 @@ export function LoadingScreen({
         fullPage ? "fixed inset-0 z-50 flex flex-col items-center justify-center" : "absolute inset-0 z-10 flex flex-col items-center justify-center",
         className
       )}
+      role="status"
+      aria-label={message}
     >
       {/* Backdrop for full page mode - behind content */}
       {fullPage && (
@@ -39,15 +41,6 @@ export function LoadingScreen({
           {message}
         </p>
       </div>
-    </div>
-  )
-}
-
-// Smaller loading spinner for inline use
-export function LoadingSpinner({ className }: { className?: string }) {
-  return (
-    <div className={cn("flex items-center justify-center", className)}>
-      <div className="animate-spin h-6 w-6 border-3 border-primary border-t-transparent rounded-full" />
     </div>
   )
 }

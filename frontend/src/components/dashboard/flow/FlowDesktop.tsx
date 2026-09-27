@@ -1,5 +1,6 @@
 import React from 'react';
 import type { FlowViewModel } from './model';
+import { buildFlowSummary } from './model';
 import { FlowEdge } from './FlowEdge';
 import { CircleNode, CircleBatteryNode } from './CircleNode';
 import { BatteryGauge } from './BatteryGauge';
@@ -76,9 +77,10 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
   const batteryGauge = <BatteryGauge soc={nodes.battery.soc ?? 0} />;
 
   return (
-    <svg 
-      viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`} 
-      className="w-full h-auto max-w-4xl mx-auto" 
+    <div className="w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
+    <svg
+      viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+      className="w-full h-auto"
       style={{
         opacity: stale ? 0.35 : 1,
         transition: 'opacity 0.5s ease'
@@ -156,24 +158,26 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
       />
 
       {/* Inverter box at center - use flow-inv-bg for distinct appearance */}
-      <g 
+      <g
         transform={`translate(${C.x}, ${C.y})`}
         style={{
           opacity: stale ? 0.35 : 1,
           transition: 'opacity 0.5s ease'
         }}
+        role="img"
+        aria-label={`Inverter: ${inverter.status}, ${inverter.operatingStatus}`}
       >
-        <rect 
-          x={INV.x - C.x} 
-          y={INV.y - C.y} 
-          width={INV.w} 
-          height={INV.h} 
-          rx={INV_RX} 
+        <rect
+          x={INV.x - C.x}
+          y={INV.y - C.y}
+          width={INV.w}
+          height={INV.h}
+          rx={INV_RX}
           fill="var(--color-flow-inv-bg)"  // Use distinct inverter background
           stroke="var(--color-border)"  // Add border for definition
           strokeWidth={1.5}
         />
-        <InverterStatus 
+        <InverterStatus
           status={inverter.status}
           operatingStatus={inverter.operatingStatus}
           alert={inverter.alert}
@@ -182,5 +186,9 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
         />
       </g>
     </svg>
+    <div className="sr-only" aria-live="polite" aria-atomic="true">
+      {buildFlowSummary(viewModel)}
+    </div>
+    </div>
   );
 }
