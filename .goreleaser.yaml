@@ -8,7 +8,7 @@ before:
 
 builds:
   - id: solis-multi-arch
-    main: ./cmd/main.go
+    main: ./cmd
     binary: solis
     goos:
       - linux
@@ -26,7 +26,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - "-s -w"
+      - "-s -w -X main.Version={{.Version}} -X main.Commit={{.ShortCommit}} -X main.BuildDate={{.Date}} -X main.GoVersion={{ .Env.GOVERSION }}"
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:

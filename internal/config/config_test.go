@@ -3,525 +3,154 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/period"
 )
 
-func TestValidateConfig(t *testing.T) {
-	tests := []struct {
-		name        string
-		config      *AppConfig
-		wantErr     bool
-		errContains string
-	}{
-		{
-			name: "valid TCP config",
-			config: &AppConfig{
-				App: AppSettings{Port: 8080, Timeout: 30 * time.Second, Debug: "INFO"},
-				Modbus: ModbusSettings{
-					Type:    "tcp",
-					Host:    "192.168.1.100",
-					Port:    502,
-					Timeout: 5 * time.Second,
-					UnitID:  1,
-				},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					WalMode:     true,
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid modbus type",
-			config: &AppConfig{
-				Modbus: ModbusSettings{Type: "invalid"},
-				App:    AppSettings{Port: 8080},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "invalid modbus type",
-		},
-		{
-			name: "tcp without host",
-			config: &AppConfig{
-				Modbus: ModbusSettings{Type: "tcp", Port: 502},
-				App:    AppSettings{Port: 8080},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "host is required",
-		},
-		{
-			name: "invalid tcp port",
-			config: &AppConfig{
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 0},
-				App:    AppSettings{Port: 8080},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "invalid modbus port",
-		},
-		{
-			name: "invalid server port",
-			config: &AppConfig{
-				App:    AppSettings{Port: 0},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "invalid server port",
-		},
-		{
-			name: "invalid synchronous mode",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "INVALID",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "invalid synchronous mode",
-		},
-		{
-			name: "invalid temp_store",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "INVALID",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "invalid temp_store",
-		},
-		{
-			name: "zero poller interval",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      0,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "interval must be positive",
-		},
-		{
-			name: "zero block attempts",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 0,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "block_attempts must be at least 1",
-		},
-		{
-			name: "zero poll timeout",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "./data/solis.db",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-
-					Synchronous: "NORMAL",
-					TempStore:   "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   0,
-				},
-			},
-			wantErr:     true,
-			errContains: "poll_timeout must be positive",
-		},
-		{
-			name: "empty storage path",
-			config: &AppConfig{
-				App:    AppSettings{Port: 8080},
-				Modbus: ModbusSettings{Type: "tcp", Host: "192.168.1.100", Port: 502},
-				Storage: StorageSettings{
-					Path:             "",
-					DailyRetention:   365 * 24 * time.Hour,
-					MonthlyRetention: 365 * 24 * time.Hour,
-					YearlyRetention:  365 * 24 * time.Hour,
-					ErrorRetention:   30 * 24 * time.Hour,
-					CleanupInterval:  24 * time.Hour,
-					Synchronous:      "NORMAL",
-					TempStore:        "MEMORY",
-				},
-				Poller: PollerSettings{
-					Interval:      15 * time.Minute,
-					BlockAttempts: 3,
-					PollTimeout:   30 * time.Second,
-				},
-			},
-			wantErr:     true,
-			errContains: "storage path is required",
+func validConfig() AppConfig {
+	return AppConfig{
+		App:      AppSettings{Debug: "INFO", Port: 8080, Timeout: 30 * time.Second},
+		Poller:   PollerSettings{Interval: 5 * time.Second, BlockAttempts: 2, PollTimeout: 5 * time.Second},
+		Modbus:   ModbusSettings{Type: "tcp", Host: "h", Port: 502},
+		Rollover: RolloverSettings{Time: "23:59"},
+		Storage: StorageSettings{
+			Path: "x.db", DailyRetention: time.Hour, MonthlyRetention: time.Hour,
+			YearlyRetention: time.Hour, ErrorRetention: time.Hour, CleanupInterval: time.Hour,
+			Synchronous: "NORMAL", TempStore: "MEMORY",
 		},
 	}
+}
 
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*AppConfig)
+		want   string
+	}{
+		{"valid", func(*AppConfig) {}, ""},
+		{"modbus type", func(c *AppConfig) { c.Modbus.Type = "rtu" }, "invalid modbus type"},
+		{"modbus host", func(c *AppConfig) { c.Modbus.Host = "" }, "modbus host is required"},
+		{"modbus port", func(c *AppConfig) { c.Modbus.Port = 70000 }, "invalid modbus port"},
+		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
+		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be positive"},
+		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
+		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poll_timeout"},
+		{"rollover 12h", func(c *AppConfig) { c.Rollover.Time = "11:59 PM" }, "invalid rollover"},
+		{"rollover 24:00", func(c *AppConfig) { c.Rollover.Time = "24:00" }, "invalid rollover"},
+		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
+		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "error_retention"},
+		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "synchronous"},
+		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "temp_store"},
+		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "max_backups"},
+		{"backup interval", func(c *AppConfig) { c.Storage.BackupInterval = -1 }, "backup_interval"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateConfig(tt.config)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateConfig() error = %v, wantErr %v", err, tt.wantErr)
+			cfg := validConfig()
+			tt.mutate(&cfg)
+			err := cfg.Validate()
+			if tt.want == "" {
+				require.NoError(t, err)
 				return
 			}
-			if tt.wantErr && tt.errContains != "" {
-				if err == nil || !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("validateConfig() error = %v, expected to contain %q", err, tt.errContains)
-				}
-			}
+			require.ErrorIs(t, err, ErrInvalidConfig)
+			assert.Contains(t, err.Error(), tt.want)
 		})
 	}
 }
 
-func TestLoadConfig_WithFile(t *testing.T) {
-	// Create a temporary config file
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
+func TestRolloverParsed(t *testing.T) {
+	r := RolloverSettings{Time: "23:59"}
+	p, err := r.Parsed()
+	require.NoError(t, err)
+	assert.Equal(t, "23:59", p.String())
 
-	configContent := `
+	cfg := validConfig()
+	cfg.Rollover.Time = "9:05"
+	assert.ErrorIs(t, cfg.Validate(), period.ErrInvalidRollover)
+}
+
+func writeConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	return path
+}
+
+func TestLoadConfig_WithFile(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
 app:
   debug: DEBUG
-  port: 8080
-  timeout: 30s
-
+  port: 8081
 modbus:
-  type: tcp
-  host: 192.168.1.100
-  port: 502
-  timeout: 5s
-  unit_id: 1
-
-storage:
-  path: ./data/solis.db
-  raw_retention: 168h
-  min_raw_retention: 15m
-  daily_retention: 8760h
-  error_retention: 720h
-  wal_mode: true
-  synchronous: NORMAL
-  temp_store: MEMORY
-
+  host: 10.1.1.1
 poller:
   interval: 15m
-  block_attempts: 3
-  block_retry_delay: 1s
-  block_interval: 0s
-  poll_timeout: 30s
-`
-
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load the config
-	config, err := LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
-	}
-
-	// Verify loaded values
-	if config.App.Port != 8080 {
-		t.Errorf("App.Port = %v, want %v", config.App.Port, 8080)
-	}
-	if config.App.Debug != "DEBUG" {
-		t.Errorf("App.Debug = %v, want %v", config.App.Debug, "DEBUG")
-	}
-	if config.Modbus.Host != "192.168.1.100" {
-		t.Errorf("Modbus.Host = %v, want %v", config.Modbus.Host, "192.168.1.100")
-	}
-	if config.Modbus.Type != "tcp" {
-		t.Errorf("Modbus.Type = %v, want %v", config.Modbus.Type, "tcp")
-	}
-	if config.Storage.Path != "./data/solis.db" {
-		t.Errorf("Storage.Path = %v, want %v", config.Storage.Path, "./data/solis.db")
-	}
-	if config.Poller.Interval != 15*time.Minute {
-		t.Errorf("Poller.Interval = %v, want %v", config.Poller.Interval, 15*time.Minute)
-	}
+rollover:
+  time: "00:30"
+`))
+	require.NoError(t, err)
+	assert.Equal(t, 8081, cfg.App.Port)
+	assert.Equal(t, "DEBUG", cfg.App.Debug)
+	assert.Equal(t, "10.1.1.1", cfg.Modbus.Host)
+	assert.Equal(t, 15*time.Minute, cfg.Poller.Interval)
+	assert.Equal(t, "00:30", cfg.Rollover.Time)
+	assert.Empty(t, cfg.Warnings)
 }
 
-func TestLoadConfig_WithEnvVars(t *testing.T) {
-	// Set environment variables
-	os.Setenv("SOLIS_APP_DEBUG", "DEBUG")
-	os.Setenv("SOLIS_APP_PORT", "9090")
-	os.Setenv("SOLIS_MODBUS_HOST", "10.0.0.1")
-	os.Setenv("SOLIS_MODBUS_PORT", "503")
-	defer func() {
-		os.Unsetenv("SOLIS_APP_DEBUG")
-		os.Unsetenv("SOLIS_APP_PORT")
-		os.Unsetenv("SOLIS_MODBUS_HOST")
-		os.Unsetenv("SOLIS_MODBUS_PORT")
-	}()
+func TestLoadConfig_Defaults(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.App.Port)
+	assert.Equal(t, "INFO", cfg.App.Debug)
+	assert.Equal(t, "23:59", cfg.Rollover.Time)
+	assert.Equal(t, "./data/solis.db", cfg.Storage.Path)
+	assert.Equal(t, 30*time.Second, cfg.Poller.Interval)
+}
 
-	// Create a minimal config file
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "config.yaml")
+func TestLoadConfig_MissingFileUsesDefaults(t *testing.T) {
+	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "absent.yaml"))
+	require.NoError(t, err)
+	assert.Equal(t, 8080, cfg.App.Port)
+	assert.Len(t, cfg.Warnings, 1)
+}
 
-	configContent := `
+func TestLoadConfig_EnvOverrides(t *testing.T) {
+	t.Setenv("SOLIS_APP_PORT", "9090")
+	t.Setenv("SOLIS_MODBUS_HOST", "10.0.0.1")
+	t.Setenv("SOLIS_ROLLOVER_TIME", "22:00")
+	cfg, err := LoadConfig(writeConfig(t, "modbus:\n  host: 192.168.1.1\n"))
+	require.NoError(t, err)
+	assert.Equal(t, 9090, cfg.App.Port)
+	assert.Equal(t, "10.0.0.1", cfg.Modbus.Host)
+	assert.Equal(t, "22:00", cfg.Rollover.Time)
+}
+
+func TestLoadConfig_RemovedSettingsWarn(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
 app:
-  timeout: 30s
-modbus:
-  type: tcp
-  host: 192.168.1.100
-  port: 502
-  timeout: 5s
-  unit_id: 1
-storage:
-  path: ./data/solis.db
-  raw_retention: 168h
-  min_raw_retention: 15m
-  daily_retention: 8760h
-  error_retention: 720h
-  wal_mode: true
-  synchronous: NORMAL
-  temp_store: MEMORY
-poller:
-  interval: 15m
-  block_attempts: 3
-  block_retry_delay: 1s
-  block_interval: 0s
-  poll_timeout: 30s
-`
-
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load the config
-	config, err := LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
-	}
-
-	// Verify environment variables were used
-	if config.App.Debug != "DEBUG" {
-		t.Errorf("App.Debug = %v, want %v", config.App.Debug, "DEBUG")
-	}
-	if config.App.Port != 9090 {
-		t.Errorf("App.Port = %v, want %v", config.App.Port, 9090)
-	}
-	if config.Modbus.Host != "10.0.0.1" {
-		t.Errorf("Modbus.Host = %v, want %v", config.Modbus.Host, "10.0.0.1")
-	}
-	if config.Modbus.Port != 503 {
-		t.Errorf("Modbus.Port = %v, want %v", config.Modbus.Port, 503)
-	}
+  serve_only: true
+aggregator:
+  interval: 30s
+  backfill_current_year_monthly: true
+`))
+	require.NoError(t, err)
+	assert.Len(t, cfg.Warnings, 2)
 }
 
-func TestLoadConfig_WithDefaults(t *testing.T) {
-	// Create an empty config file to test defaults
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "empty.yaml")
+func TestLoadConfig_Errors(t *testing.T) {
+	_, err := LoadConfig(writeConfig(t, "app:\n  port: [8080\n"))
+	require.Error(t, err)
 
-	// Write empty file
-	err := os.WriteFile(configPath, []byte(""), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write empty config file: %v", err)
-	}
+	_, err = LoadConfig(t.TempDir())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read config file")
 
-	// Load config with empty file (should use defaults)
-	config, err := LoadConfig(configPath)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
-	}
-
-	// Verify defaults
-	if config.App.Port != 8080 {
-		t.Errorf("App.Port = %v, want %v (default)", config.App.Port, 8080)
-	}
-	if config.App.Debug != "INFO" {
-		t.Errorf("App.Debug = %v, want %v (default)", config.App.Debug, "INFO")
-	}
-	if config.Modbus.Host != "192.168.1.100" {
-		t.Errorf("Modbus.Host = %v, want %v (default)", config.Modbus.Host, "192.168.1.100")
-	}
-	if config.Modbus.Port != 502 {
-		t.Errorf("Modbus.Port = %v, want %v (default)", config.Modbus.Port, 502)
-	}
-	if config.Storage.Path != "./data/solis.db" {
-		t.Errorf("Storage.Path = %v, want %v (default)", config.Storage.Path, "./data/solis.db")
-	}
-}
-
-func TestLoadConfig_InvalidYAML(t *testing.T) {
-	// Create a temporary config file with invalid YAML
-	tempDir := t.TempDir()
-	configPath := filepath.Join(tempDir, "invalid.yaml")
-
-	// Write invalid YAML
-	configContent := `
-app:
-  port: [8080
-  invalid yaml syntax
-`
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
-	}
-
-	// Load config should fail
-	_, err = LoadConfig(configPath)
-	if err == nil {
-		t.Fatal("LoadConfig() expected error for invalid YAML, got nil")
-	}
-	// The error might be from read or unmarshal, just check it's not nil
-	if err == nil {
-		t.Fatal("LoadConfig() expected error for invalid YAML, got nil")
-	}
-}
-
-func TestLoadConfig_InvalidFile(t *testing.T) {
-	// Try to load from a directory instead of a file
-	tempDir := t.TempDir()
-
-	// Load config from directory should fail
-	_, err := LoadConfig(tempDir)
-	if err == nil {
-		t.Fatal("LoadConfig() expected error for directory, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to read config file") {
-		t.Errorf("LoadConfig() error = %v, expected to contain 'failed to read config file'", err)
-	}
+	_, err = LoadConfig(writeConfig(t, "rollover:\n  time: 11:59 PM\n"))
+	assert.ErrorIs(t, err, ErrInvalidConfig)
 }

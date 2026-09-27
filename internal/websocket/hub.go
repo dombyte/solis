@@ -1,215 +1,324 @@
-// Package websocket provides WebSocket communication for real-time updates.
 package websocket
 
 import (
+	"context"
+	"errors"
+	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/dombyte/solis/internal/logging"
+	"github.com/rs/zerolog"
+
+	"github.com/dombyte/solis/internal/eventbus"
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/utils"
 )
 
-// logger is the package-level logger for websocket operations.
-var logger = logging.NewComponentLogger("websocket")
-
-// Message types for client-server communication.
+// Hub timing constants.
 const (
-	MessageTypeRequestInitial = "request_initial_data"
-	MessageTypeCacheUpdate    = "cache_update"
+	// FlushDelay coalesces poller and aggregator events into one frame (spec §9.2).
+	FlushDelay = 75 * time.Millisecond
+	// StaleClientTimeout drops clients without any activity.
+	StaleClientTimeout = 5 * time.Minute
+	eventBuffer        = 16
+	subscriberName     = "websocket"
 )
 
-// ClientMessage represents messages received from clients.
-type ClientMessage struct {
-	Type string `json:"type"`
+var (
+	// ErrHubStopped is returned when registering with a stopped hub.
+	ErrHubStopped = errors.New("websocket: hub stopped")
+	// ErrMissingDependency is returned by NewHub when a dependency is nil.
+	ErrMissingDependency = errors.New("websocket: missing dependency")
+)
+
+// Snapshotter reads current values from the cache.
+type Snapshotter interface {
+	GetMultiple(keys []string) map[string]*solis.Value
 }
 
-// Hub maintains the set of active clients and broadcasts messages to the clients.
+// KeySet validates subscription keys.
+type KeySet interface {
+	ByKey(key string) (solis.Register, bool)
+}
+
+// HubDeps are the hub's dependencies.
+type HubDeps struct {
+	Bus          eventbus.Subscriber
+	Cache        Snapshotter
+	Keys         KeySet
+	Clock        utils.Clock
+	PollInterval time.Duration
+	Reporter     health.Reporter
+	Log          zerolog.Logger
+}
+
+// Hub fans cache changes out to subscribed clients. All client state is owned by the
+// hub goroutine; clients talk to it through channels.
 type Hub struct {
-	// Registered clients.
-	clients map[*Client]bool
+	*health.Status
+	d HubDeps
 
-	// Inbound messages from the clients.
-	broadcast chan []byte
+	ops chan func(*loopState)
 
-	// Register requests from the clients.
-	register chan *Client
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	done    chan struct{}
+	stopped bool
 
-	// Unregister requests from clients.
-	unregister chan *Client
-
-	// Mutex for concurrent access to clients map.
-	mu sync.RWMutex
-
-	// Callback for when a client requests initial data.
-	onInitialDataRequest func(*Client)
-
-	// lastActivity tracks the last time each client was active (read or write).
-	// Used for cleaning up stale connections.
-	lastActivity map[*Client]time.Time
-
-	// staleClientTimeout is the duration after which a client is considered stale.
-	staleClientTimeout time.Duration
+	// events counts bus events consumed by the loop (observability, test sync point).
+	events atomic.Int64
 }
 
-// NewHub creates a new Hub instance.
-func NewHub() *Hub {
+// loopState is owned by the hub goroutine; other goroutines reach it only through ops.
+type loopState struct {
+	clients map[*Client]*clientState
+	dirty   bool
+	flush   utils.Timer
+}
+
+type clientState struct {
+	subs map[string]struct{}
+	last map[string]pushed
+}
+
+// NewHub validates dependencies and returns a stopped hub.
+func NewHub(d HubDeps) (*Hub, error) {
+	required := []bool{d.Bus != nil, d.Cache != nil, d.Keys != nil, d.Clock != nil,
+		d.Reporter != nil, d.PollInterval > 0}
+	for _, ok := range required {
+		if !ok {
+			return nil, ErrMissingDependency
+		}
+	}
 	return &Hub{
-		clients:            make(map[*Client]bool),
-		broadcast:          make(chan []byte, 256),
-		register:           make(chan *Client),
-		unregister:         make(chan *Client),
-		lastActivity:       make(map[*Client]time.Time),
-		staleClientTimeout: 5 * time.Minute,
+		Status: health.NewStatus(d.Reporter, d.Clock), d: d,
+		ops: make(chan func(*loopState)), done: make(chan struct{}),
+	}, nil
+}
+
+// Start subscribes to the bus and runs the hub loop.
+func (h *Hub) Start(ctx context.Context) error {
+	events, unsub, err := h.d.Bus.Subscribe(subscriberName, eventBuffer, eventbus.Coalesce)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	h.mu.Lock()
+	h.cancel = cancel
+	h.mu.Unlock()
+	h.Beat()
+	go func() {
+		defer unsub()
+		h.loop(ctx, events)
+	}()
+	return nil
+}
+
+// Stop disconnects every client and ends the loop (idempotent).
+func (h *Hub) Stop() error {
+	h.mu.Lock()
+	if h.stopped {
+		h.mu.Unlock()
+		return nil
+	}
+	if h.cancel == nil { // never started: release pending Register calls
+		h.stopped = true
+		close(h.done)
+		h.mu.Unlock()
+		return nil
+	}
+	h.stopped = true
+	cancel := h.cancel
+	h.mu.Unlock()
+	cancel()
+	<-h.done
+	return nil
+}
+
+// Register hands a new client to the hub loop.
+func (h *Hub) Register(c *Client) error {
+	if !h.do(func(ls *loopState) {
+		ls.clients[c] = &clientState{subs: map[string]struct{}{}, last: map[string]pushed{}}
+	}) {
+		return ErrHubStopped
+	}
+	return nil
+}
+
+func (h *Hub) unregisterClient(c *Client) {
+	h.do(func(ls *loopState) {
+		if _, ok := ls.clients[c]; ok {
+			delete(ls.clients, c)
+			c.close()
+		}
+	})
+}
+
+func (h *Hub) command(c *Client, msg ClientMessage) {
+	h.do(func(ls *loopState) { h.handle(ls.clients, c, msg) })
+}
+
+// do runs op on the hub goroutine; false when the hub has stopped.
+func (h *Hub) do(op func(*loopState)) bool {
+	select {
+	case h.ops <- op:
+		return true
+	case <-h.done:
+		return false
 	}
 }
 
-// Run starts the hub's main loop.
-func (h *Hub) Run() {
-	ticker := h.setupTicker()
-	defer ticker.Stop()
-
+// loop owns all client state.
+func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
+	defer close(h.done)
+	ls := &loopState{clients: make(map[*Client]*clientState),
+		flush: h.d.Clock.NewTimer(time.Hour)}
+	ls.flush.Stop()
+	defer ls.closeAll()
+	beat := h.d.Clock.NewTicker(h.d.PollInterval)
+	defer beat.Stop()
 	for {
 		select {
-		case client := <-h.register:
-			h.handleRegister(client)
-		case client := <-h.unregister:
-			h.handleUnregister(client)
-		case message := <-h.broadcast:
-			h.handleBroadcast(message)
-		case <-ticker.C:
-			h.cleanupStaleClients()
+		case <-ctx.Done():
+			return
+		case op := <-h.ops:
+			op(ls)
+		case e := <-events:
+			ls.onEvent(e)
+			h.events.Add(1)
+		case <-ls.flush.C():
+			ls.dirty = false
+			h.flush(ls.clients)
+		case <-beat.C():
+			h.Beat()
+			h.dropStale(ls.clients)
 		}
 	}
 }
 
-// setupTicker sets up the cleanup ticker
-func (h *Hub) setupTicker() *time.Ticker {
-	return time.NewTicker(h.staleClientTimeout / 2)
-}
-
-// handleRegister handles a new client registration
-func (h *Hub) handleRegister(client *Client) {
-	h.mu.Lock()
-	h.clients[client] = true
-	h.lastActivity[client] = time.Now()
-	clientCount := len(h.clients)
-	h.mu.Unlock()
-	logger.Debug().Msgf("Client registered, total clients: %d", clientCount)
-}
-
-// handleUnregister handles a client unregistration
-func (h *Hub) handleUnregister(client *Client) {
-	h.mu.Lock()
-	if _, ok := h.clients[client]; ok {
-		client.Close()
-		delete(h.clients, client)
-		delete(h.lastActivity, client)
+// onEvent marks the state dirty and arms one coalescing flush.
+func (ls *loopState) onEvent(e eventbus.Event) {
+	if e.Kind == eventbus.ValuesUpdated && !ls.dirty {
+		ls.dirty = true
+		ls.flush.Reset(FlushDelay)
 	}
-	clientCount := len(h.clients)
-	h.mu.Unlock()
-	logger.Debug().Msgf("Client unregistered, total clients: %d", clientCount)
 }
 
-// handleBroadcast handles a broadcast message to all clients
-func (h *Hub) handleBroadcast(message []byte) {
-	clients := h.getAllClients()
-	clientsWithFullBuffers := h.trySendToAll(clients, message)
-	h.closeClientsWithFullBuffers(clientsWithFullBuffers)
-}
-
-// getAllClients returns a slice of all registered clients
-func (h *Hub) getAllClients() []*Client {
-	h.mu.RLock()
-	clients := make([]*Client, 0, len(h.clients))
-	for client := range h.clients {
-		clients = append(clients, client)
+func (ls *loopState) closeAll() {
+	for c := range ls.clients {
+		c.close()
 	}
-	h.mu.RUnlock()
-	return clients
 }
 
-// trySendToAll tries to send a message to all clients and returns clients with full buffers
-func (h *Hub) trySendToAll(clients []*Client, message []byte) []*Client {
-	clientsWithFullBuffers := make([]*Client, 0)
-	for _, client := range clients {
-		select {
-		case client.send <- message:
-			h.updateClientActivity(client)
-		default:
-			clientsWithFullBuffers = append(clientsWithFullBuffers, client)
-			logger.Warn().Msg("Client buffer full, closing connection")
+// handle applies a subscribe/unsubscribe/ping command.
+func (h *Hub) handle(clients map[*Client]*clientState, c *Client, msg ClientMessage) {
+	st, ok := clients[c]
+	if !ok {
+		return
+	}
+	switch msg.Type {
+	case TypeSubscribe:
+		h.subscribe(clients, c, st, msg.Keys)
+	case TypeUnsubscribe:
+		for _, k := range msg.Keys {
+			delete(st.subs, k)
+			delete(st.last, k)
 		}
-	}
-	return clientsWithFullBuffers
-}
-
-// updateClientActivity updates the last activity time for a client
-func (h *Hub) updateClientActivity(client *Client) {
-	h.mu.Lock()
-	h.lastActivity[client] = time.Now()
-	h.mu.Unlock()
-}
-
-// closeClientsWithFullBuffers closes clients that have full buffers
-func (h *Hub) closeClientsWithFullBuffers(clients []*Client) {
-	for _, client := range clients {
-		client.Close()
-		h.mu.Lock()
-		delete(h.clients, client)
-		delete(h.lastActivity, client)
-		h.mu.Unlock()
-	}
-}
-
-// cleanupStaleClients removes clients that haven't been active for longer than the timeout.
-func (h *Hub) cleanupStaleClients() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	now := time.Now()
-	staleClients := make([]*Client, 0)
-	for client, lastActive := range h.lastActivity {
-		if now.Sub(lastActive) > h.staleClientTimeout {
-			staleClients = append(staleClients, client)
-		}
-	}
-
-	for _, client := range staleClients {
-		client.Close()
-		delete(h.clients, client)
-		delete(h.lastActivity, client)
-		logger.Debug().Msgf("Removed stale client, total clients: %d", len(h.clients))
-	}
-
-	if len(staleClients) > 0 {
-		logger.Info().Msgf("Cleaned up %d stale WebSocket clients", len(staleClients))
-	}
-}
-
-// UpdateLastActivity updates the last activity time for a client.
-// This should be called whenever a client sends or receives a message.
-func (h *Hub) UpdateLastActivity(client *Client) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.lastActivity[client] = time.Now()
-}
-
-// Broadcast sends a message to all connected clients.
-func (h *Hub) Broadcast(message []byte) {
-	select {
-	case h.broadcast <- message:
+	case TypePing:
 	default:
-		logger.Warn().Msg("Broadcast channel full, dropping message")
+		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeBadRequest,
+			Message: "unknown message type " + msg.Type})
 	}
 }
 
-// ClientCount returns the number of connected clients.
-func (h *Hub) ClientCount() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return len(h.clients)
+// subscribe adds known keys and answers with a snapshot of the newly added ones;
+// unknown keys get an error frame and never drop the connection.
+func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientState,
+	keys []string) {
+	var added, unknown []string
+	for _, k := range keys {
+		if _, ok := h.d.Keys.ByKey(k); !ok {
+			unknown = append(unknown, k)
+			continue
+		}
+		if _, dup := st.subs[k]; !dup {
+			st.subs[k] = struct{}{}
+			added = append(added, k)
+		}
+	}
+	if len(unknown) > 0 {
+		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeUnknownKeys,
+			Message: "unknown keys ignored", Keys: unknown})
+	}
+	snap := SnapshotMessage{Type: TypeSnapshot, Values: map[string]ValueDTO{}}
+	for k, v := range h.d.Cache.GetMultiple(added) {
+		snap.Values[k] = fullDTO(v)
+		st.last[k] = stateOf(v)
+	}
+	h.send(clients, c, snap)
 }
 
-// SetOnInitialDataRequest sets the callback for when a client requests initial data.
-func (h *Hub) SetOnInitialDataRequest(callback func(*Client)) {
-	h.onInitialDataRequest = callback
+// flush pushes the changed subscribed keys to every client (one frame per client).
+func (h *Hub) flush(clients map[*Client]*clientState) {
+	current := h.d.Cache.GetMultiple(unionKeys(clients))
+	ts := h.d.Clock.Now().Format(time.RFC3339)
+	for c, st := range clients {
+		upd := UpdateMessage{Type: TypeUpdate, TS: ts, Values: map[string]ValueDTO{}}
+		for k := range st.subs {
+			v, ok := current[k]
+			if !ok {
+				continue
+			}
+			s := stateOf(v)
+			if prev, seen := st.last[k]; seen && prev.equal(s) {
+				continue
+			}
+			st.last[k] = s
+			upd.Values[k] = updateDTO(v)
+		}
+		if len(upd.Values) > 0 {
+			h.send(clients, c, upd)
+		}
+	}
+}
+
+func unionKeys(clients map[*Client]*clientState) []string {
+	set := make(map[string]struct{})
+	for _, st := range clients {
+		for k := range st.subs {
+			set[k] = struct{}{}
+		}
+	}
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// send encodes and queues msg; a full buffer disconnects the client.
+func (h *Hub) send(clients map[*Client]*clientState, c *Client, msg any) {
+	b, err := encode(msg)
+	if err != nil {
+		h.d.Log.Error().Err(err).Msg("encode websocket frame")
+		return
+	}
+	if !c.enqueue(b) {
+		h.d.Log.Warn().Msg("websocket client buffer full, disconnecting")
+		delete(clients, c)
+		c.close()
+	}
+}
+
+func (h *Hub) dropStale(clients map[*Client]*clientState) {
+	now := h.d.Clock.Now()
+	for c := range clients {
+		if now.Sub(c.lastActivity()) > StaleClientTimeout {
+			delete(clients, c)
+			c.close()
+		}
+	}
 }

@@ -2,28 +2,21 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
-	"github.com/dombyte/solis/internal/logging"
+	"github.com/rs/zerolog"
 )
-
-// migrationLogger is the package-level logger for migration operations.
-var migrationLogger = logging.NewComponentLogger("database.migration")
 
 // MigrationExecutor handles the execution of database migrations.
 type MigrationExecutor struct {
 	registry *MigrationRegistry
-	config   *BackupConfig
-	dbPath   string
+	log      zerolog.Logger
 }
 
 // NewMigrationExecutor creates a new MigrationExecutor.
-func NewMigrationExecutor(registry *MigrationRegistry, config *BackupConfig, dbPath string) *MigrationExecutor {
-	return &MigrationExecutor{
-		registry: registry,
-		config:   config,
-		dbPath:   dbPath,
-	}
+func NewMigrationExecutor(registry *MigrationRegistry, log zerolog.Logger) *MigrationExecutor {
+	return &MigrationExecutor{registry: registry, log: log}
 }
 
 // GetCurrentVersion retrieves the current schema version from the database.
@@ -31,7 +24,8 @@ func NewMigrationExecutor(registry *MigrationRegistry, config *BackupConfig, dbP
 func (e *MigrationExecutor) GetCurrentVersion(db *sql.DB) (int, error) {
 	// Check if schema_version table exists
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'").Scan(&count)
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+		WHERE type='table' AND name='schema_version'`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to check for schema_version table: %w", err)
 	}
@@ -43,7 +37,8 @@ func (e *MigrationExecutor) GetCurrentVersion(db *sql.DB) (int, error) {
 
 	// Get the highest version from schema_version table
 	var version int
-	err = db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM schema_version WHERE success = 1").Scan(&version)
+	err = db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version
+		WHERE success = 1`).Scan(&version)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query schema version: %w", err)
 	}
@@ -57,46 +52,48 @@ func (e *MigrationExecutor) GetPendingMigrations(currentVersion int) []Migration
 	return e.registry.GetMigrationsFrom(currentVersion)
 }
 
-// ApplyMigration applies a single migration.
+// recordMigrationSQL marks a migration version as applied.
+const recordMigrationSQL = `INSERT OR REPLACE INTO schema_version
+	(version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
+
+// markLegacySQL records a legacy database as V1 unless a V1 row already exists.
+const markLegacySQL = `INSERT OR IGNORE INTO schema_version
+	(version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
+
+// ApplyMigration applies a single migration and records it in one transaction.
 func (e *MigrationExecutor) ApplyMigration(db *sql.DB, migration Migration) error {
 	version := migration.Version()
-	description := migration.Description()
-
-	migrationLogger.Info().Msgf("Applying migration (version: %d, description: %s)", version, description)
-
-	// Begin transaction
+	e.log.Info().Int("version", version).Str("description", migration.Description()).
+		Msg("applying migration")
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin migration transaction: %w", err)
 	}
-
-	// Apply the migration
-	if err := migration.Up(tx); err != nil {
-		_ = tx.Rollback() // #nosec G104
-		return fmt.Errorf("migration %d failed: %w", version, err)
+	if err := applyInTx(tx, migration); err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
+		}
+		return err
 	}
-
-	// Record successful migration in schema_version table
-	// First ensure schema_version table exists
-	if _, err := tx.Exec(SchemaVersionTableSQL); err != nil {
-		_ = tx.Rollback() // #nosec G104
-		return fmt.Errorf("failed to ensure schema_version table exists: %w", err)
-	}
-
-	// Insert or update version record
-	insertSQL := `INSERT OR REPLACE INTO schema_version (version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
-	if _, err := tx.Exec(insertSQL, version, description); err != nil {
-		_ = tx.Rollback() // #nosec G104
-		return fmt.Errorf("failed to record migration: %w", err)
-	}
-
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit migration: %w", err)
 	}
+	e.log.Info().Int("version", version).Msg("migration applied")
+	return nil
+}
 
-	migrationLogger.Info().Msgf("Migration applied successfully (version: %d)", version)
-
+// applyInTx runs the migration and records its version inside tx.
+func applyInTx(tx *sql.Tx, migration Migration) error {
+	version := migration.Version()
+	if err := migration.Up(tx); err != nil {
+		return fmt.Errorf("migration %d failed: %w", version, err)
+	}
+	if _, err := tx.Exec(SchemaVersionTableSQL); err != nil {
+		return fmt.Errorf("failed to ensure schema_version table exists: %w", err)
+	}
+	if _, err := tx.Exec(recordMigrationSQL, version, migration.Description()); err != nil {
+		return fmt.Errorf("failed to record migration: %w", err)
+	}
 	return nil
 }
 
@@ -105,11 +102,12 @@ func (e *MigrationExecutor) ApplyMigration(db *sql.DB, migration Migration) erro
 func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion int) (int, error) {
 	pending := e.GetPendingMigrations(currentVersion)
 	if len(pending) == 0 {
-		migrationLogger.Info().Msgf("No pending migrations (current_version: %d)", currentVersion)
+		e.log.Info().Msgf("No pending migrations (current_version: %d)", currentVersion)
 		return 0, nil
 	}
 
-	migrationLogger.Info().Msgf("Applying pending migrations (count: %d, current_version: %d)", len(pending), currentVersion)
+	e.log.Info().Int("count", len(pending)).Int("current_version", currentVersion).
+		Msg("applying pending migrations")
 
 	appliedCount := 0
 	for _, migration := range pending {
@@ -137,8 +135,6 @@ func (e *MigrationExecutor) MarkLegacyAsV1(db *sql.DB) error {
 		return err
 	}
 
-	// Mark as V1
-	insertSQL := `INSERT OR IGNORE INTO schema_version (version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
-	_, err := db.Exec(insertSQL, 1, "Legacy database - marked as V1")
+	_, err := db.Exec(markLegacySQL, 1, "Legacy database - marked as V1")
 	return err
 }

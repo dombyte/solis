@@ -153,8 +153,8 @@ func migrateTable(tx *sql.Tx, tableName string) error {
 		}
 
 		// Perform the update for this table
-		// tableName comes from hardcoded TablesToMigrate list, so it's safe
-		updateSQL := fmt.Sprintf("UPDATE %s SET register_key = ? WHERE register_key = ?", tableName) //nolint:gosec
+		// #nosec G201 -- tableName comes from the hardcoded TablesToMigrate list, not user input
+		updateSQL := fmt.Sprintf("UPDATE %s SET register_key = ? WHERE register_key = ?", tableName)
 		_, err = tx.Exec(updateSQL, newKey, oldKey)
 		if err != nil {
 			return fmt.Errorf("failed to update key from %s to %s in %s: %w", oldKey, newKey, tableName, err)
@@ -192,8 +192,8 @@ func (m *V2Migration) Down(tx *sql.Tx) error {
 
 		for newKey, oldKey := range reverseMapping {
 			// Perform the rollback update for this table
-			// table comes from hardcoded TablesToMigrate list, so it's safe
-			updateSQL := fmt.Sprintf("UPDATE %s SET register_key = ? WHERE register_key = ?", table) //nolint:gosec
+			// #nosec G201 -- table comes from the hardcoded TablesToMigrate list, not user input
+			updateSQL := fmt.Sprintf("UPDATE %s SET register_key = ? WHERE register_key = ?", table)
 			_, err = tx.Exec(updateSQL, oldKey, newKey)
 			if err != nil {
 				return fmt.Errorf("failed to rollback key from %s to %s in %s: %w", newKey, oldKey, table, err)

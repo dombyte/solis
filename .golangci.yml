@@ -53,7 +53,7 @@ linters:
 
     # Cyclomatic complexity linter
     gocyclo:
-      min-complexity: 12
+      min-complexity: 8
 
     # Duplicate code linter
     dupl:
@@ -88,10 +88,10 @@ linters:
         - name: package-comments
           disabled: false
 
-        # Style: max function length (warning at 60)
+        # Style: max function length (Arch_Plan: < 40 lines)
         - name: function-length
           disabled: false
-          arguments: [60, 0]
+          arguments: [40, 0]
 
         # Style: max function parameters
         - name: argument-limit
@@ -141,6 +141,9 @@ linters:
         path: _test\.go
       - linters: [rowserrcheck, sqlclosecheck, bodyclose]
         path: _test\.go
+      # Frozen v1/v2 migrations (Plan.md A2): their SQL is historical and stays unchanged.
+      - linters: [lll]
+        path: internal/database/migrations/v[12]_migrations?\.go
 
 formatters:
   enable:

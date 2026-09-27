@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,662 +10,204 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/http/handlers/mocks"
+	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/go-chi/chi/v5"
+	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
-// MockReadService is a mock implementation of ReadServiceInterface for testing
-type MockReadService struct {
-	isRegisterEnabledFunc  func(key string) bool
-	getKeysFunc            func() []string
-	getValuesFunc          func(keys []string) (map[string]*solis.Value, error)
-	getRegisterFunc        func(key string) (*solis.Value, error)
-	getHistoricalDataFunc  func(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error)
-	healthCheckFunc        func() (map[string]string, error)
-	decodeFaultBitsFunc    func(addr uint16, value uint16) []string
-	decodeOpStatusBitsFunc func(value uint16) []string
-	getErrorHistoryFunc    func(key string, start, end time.Time) ([]*storage.ErrorDataPoint, error)
-	getDailyHistoryFunc    func(key string, start, end time.Time) ([]*storage.DailyDataPoint, error)
-	getMonthlyHistoryFunc  func(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error)
-	getYearlyHistoryFunc   func(key string, start, end time.Time) ([]*storage.YearlyDataPoint, error)
-	getTotalHistoryFunc    func(key string) (*storage.TotalDataPoint, error)
+var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+
+func setup(t *testing.T) (*mocks.MockReadService, *chi.Mux) {
+	t.Helper()
+	svc := mocks.NewMockReadService(t)
+	deps := HandlerDeps{Service: svc, Errors: NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(t0)}
+	r := chi.NewRouter()
+	r.Method(http.MethodGet, "/health", GetHealthHandler(deps))
+	r.Method(http.MethodGet, "/api/keys", GetKeysHandler(deps))
+	r.Method(http.MethodGet, "/api/data/{key}", GetDataHandler(deps))
+	return svc, r
 }
 
-func (m *MockReadService) GetKeys() []string {
-	if m.getKeysFunc != nil {
-		return m.getKeysFunc()
+func do(t *testing.T, h http.Handler, url string) (int, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+	var body map[string]any
+	if rec.Body.Len() > 0 && rec.Body.Bytes()[0] == '{' {
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	}
-	return []string{}
+	return rec.Code, body
 }
 
-func (m *MockReadService) IsRegisterEnabled(key string) bool {
-	if m.isRegisterEnabledFunc != nil {
-		return m.isRegisterEnabledFunc(key)
-	}
-	return true // Default: all registers enabled
+func reg(key string, store solis.Store) solis.Register {
+	return solis.Register{Key: key, Name: key, Unit: "kWh", Store: store, Scale: 1}
 }
 
-func (m *MockReadService) HealthCheck() (map[string]string, error) {
-	if m.healthCheckFunc != nil {
-		return m.healthCheckFunc()
-	}
-	return map[string]string{"status": "ok"}, nil
-}
-
-func (m *MockReadService) GetValues(keys []string) (map[string]*solis.Value, error) {
-	if m.getValuesFunc != nil {
-		return m.getValuesFunc(keys)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetRegister(key string) (*solis.Value, error) {
-	if m.getRegisterFunc != nil {
-		return m.getRegisterFunc(key)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetHistoricalData(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error) {
-	if m.getHistoricalDataFunc != nil {
-		return m.getHistoricalDataFunc(key, start, end, interval)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetDailyHistory(key string, start, end time.Time) ([]*storage.DailyDataPoint, error) {
-	if m.getDailyHistoryFunc != nil {
-		return m.getDailyHistoryFunc(key, start, end)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetMonthlyHistory(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error) {
-	if m.getMonthlyHistoryFunc != nil {
-		return m.getMonthlyHistoryFunc(key, start, end)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetYearlyHistory(key string, start, end time.Time) ([]*storage.YearlyDataPoint, error) {
-	if m.getYearlyHistoryFunc != nil {
-		return m.getYearlyHistoryFunc(key, start, end)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetTotalHistory(key string) (*storage.TotalDataPoint, error) {
-	if m.getTotalHistoryFunc != nil {
-		return m.getTotalHistoryFunc(key)
-	}
-	return nil, nil
-}
-
-func (m *MockReadService) GetErrorHistory(key string, start, end time.Time) ([]*storage.ErrorDataPoint, error) {
-	if m.getErrorHistoryFunc != nil {
-		return m.getErrorHistoryFunc(key, start, end)
-	}
-	return nil, nil
-}
-
-// Test WriteJSON functionality
-func TestWriteJSON(t *testing.T) {
-	w := httptest.NewRecorder()
-	data := map[string]string{"key": "value"}
-	statusCode := http.StatusOK
-
-	WriteJSON(w, data, statusCode)
-
-	if w.Code != statusCode {
-		t.Errorf("WriteJSON() status code = %v, want %v", w.Code, statusCode)
-	}
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("WriteJSON() Content-Type = %v, want %v", contentType, "application/json")
-	}
-
-	var result map[string]string
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Errorf("WriteJSON() failed to decode response: %v", err)
-	}
-
-	if result["key"] != "value" {
-		t.Errorf("WriteJSON() result = %v, want %v", result, data)
-	}
-}
-
-func TestWriteJSON_NilData(t *testing.T) {
-	w := httptest.NewRecorder()
-	statusCode := http.StatusOK
-
-	WriteJSON(w, nil, statusCode)
-
-	if w.Code != statusCode {
-		t.Errorf("WriteJSON() status code = %v, want %v", w.Code, statusCode)
-	}
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("WriteJSON() Content-Type = %v, want %v", contentType, "application/json")
-	}
-}
-
-func TestWriteJSON_DifferentStatusCodes(t *testing.T) {
-	statusCodes := []int{
-		http.StatusOK,
-		http.StatusCreated,
-		http.StatusBadRequest,
-		http.StatusNotFound,
-		http.StatusInternalServerError,
-	}
-
-	for _, statusCode := range statusCodes {
-		w := httptest.NewRecorder()
-		data := map[string]string{"status": http.StatusText(statusCode)}
-
-		WriteJSON(w, data, statusCode)
-
-		if w.Code != statusCode {
-			t.Errorf("WriteJSON() status code = %v, want %v", w.Code, statusCode)
-		}
-	}
-}
-
-func TestWriteJSON_ComplexData(t *testing.T) {
-	w := httptest.NewRecorder()
-	data := struct {
-		Name     string            `json:"name"`
-		Values   []int             `json:"values"`
-		Metadata map[string]string `json:"metadata"`
+func TestHealth_FailClosed(t *testing.T) {
+	tests := []struct {
+		status string
+		code   int
 	}{
-		Name:     "test",
-		Values:   []int{1, 2, 3},
-		Metadata: map[string]string{"key": "value"},
+		{health.StatusOK, http.StatusOK},
+		{health.StatusDegraded, http.StatusOK},
+		{health.StatusFailed, http.StatusServiceUnavailable},
 	}
-	statusCode := http.StatusOK
-
-	WriteJSON(w, data, statusCode)
-
-	if w.Code != statusCode {
-		t.Errorf("WriteJSON() status code = %v, want %v", w.Code, statusCode)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("WriteJSON() failed to decode response: %v", err)
-	}
-
-	if result["name"] != "test" {
-		t.Errorf("WriteJSON() name = %v, want %v", result["name"], "test")
-	}
-}
-
-// Test WriteError functionality
-func TestWriteError(t *testing.T) {
-	w := httptest.NewRecorder()
-	message := "test error"
-	statusCode := http.StatusBadRequest
-
-	WriteError(w, message, statusCode)
-
-	if w.Code != statusCode {
-		t.Errorf("WriteError() status code = %v, want %v", w.Code, statusCode)
-	}
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("WriteError() Content-Type = %v, want %v", contentType, "application/json")
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Errorf("WriteError() failed to decode response: %v", err)
-	}
-
-	if result["error"] != message {
-		t.Errorf("WriteError() error = %v, want %v", result["error"], message)
-	}
-	if result["message"] != message {
-		t.Errorf("WriteError() message = %v, want %v", result["message"], message)
-	}
-	if result["status"] != float64(statusCode) {
-		t.Errorf("WriteError() status = %v, want %v", result["status"], float64(statusCode))
-	}
-}
-
-func TestWriteError_DifferentStatusCodes(t *testing.T) {
-	statusCodes := []int{
-		http.StatusBadRequest,
-		http.StatusUnauthorized,
-		http.StatusForbidden,
-		http.StatusNotFound,
-		http.StatusInternalServerError,
-	}
-
-	for _, statusCode := range statusCodes {
-		w := httptest.NewRecorder()
-		message := http.StatusText(statusCode)
-
-		WriteError(w, message, statusCode)
-
-		if w.Code != statusCode {
-			t.Errorf("WriteError() status code = %v, want %v for %s", w.Code, statusCode, message)
+	for _, tt := range tests {
+		svc, r := setup(t)
+		svc.EXPECT().Health().Return(health.Snapshot{Status: tt.status, Component: "poller",
+			Reason: "restart budget exhausted", Components: map[string]health.ComponentStatus{}}).Once()
+		code, body := do(t, r, "/health")
+		assert.Equal(t, tt.code, code, tt.status)
+		assert.Equal(t, tt.status, body["status"])
+		if tt.status == health.StatusFailed {
+			assert.Equal(t, "poller", body["component"])
+			assert.Equal(t, "restart budget exhausted", body["reason"])
 		}
 	}
 }
 
-func TestWriteError_EmptyMessage(t *testing.T) {
-	w := httptest.NewRecorder()
-	message := ""
-	statusCode := http.StatusInternalServerError
-
-	WriteError(w, message, statusCode)
-
-	if w.Code != statusCode {
-		t.Errorf("WriteError() status code = %v, want %v", w.Code, statusCode)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("WriteError() failed to decode response: %v", err)
-	}
-
-	if result["error"] != "" {
-		t.Errorf("WriteError() error = %v, want empty string", result["error"])
-	}
+func TestKeys(t *testing.T) {
+	svc, r := setup(t)
+	svc.EXPECT().Keys().Return([]solis.Register{
+		{Key: "grid_power", Name: "Grid Power", Address: 33130, DataType: solis.Int32, Unit: "W"},
+		{Key: "pv_energy_monthly", Name: "PV Energy Monthly", DataType: solis.Uint32,
+			Unit: "kWh", Store: solis.StoreMonthly},
+	}).Once()
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/keys", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var infos []map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &infos))
+	require.Len(t, infos, 2)
+	assert.InDelta(t, 33130.0, infos[0]["address"], 0)
+	assert.Equal(t, "none", infos[0]["store"])
+	assert.NotContains(t, infos[0], "stability")
+	assert.NotContains(t, infos[1], "address", "omitted for computed registers")
+	assert.Equal(t, "monthly", infos[1]["store"])
+	assert.Contains(t, infos[1]["description"], "start/end")
 }
 
-// Test ErrorResponse structure
-func TestErrorResponse_Structure(t *testing.T) {
-	errResp := ErrorResponse{
-		Error:   "Bad Request",
-		Message: "invalid parameter",
-		Code:    http.StatusBadRequest,
-	}
-
-	if errResp.Error != "Bad Request" {
-		t.Errorf("ErrorResponse.Error = %v, want %v", errResp.Error, "Bad Request")
-	}
-	if errResp.Message != "invalid parameter" {
-		t.Errorf("ErrorResponse.Message = %v, want %v", errResp.Message, "invalid parameter")
-	}
-	if errResp.Code != http.StatusBadRequest {
-		t.Errorf("ErrorResponse.Code = %v, want %v", errResp.Code, http.StatusBadRequest)
-	}
+func TestData_CurrentValue(t *testing.T) {
+	svc, r := setup(t)
+	svc.EXPECT().Register("grid_power").Return(reg("grid_power", solis.StoreNone), nil).Once()
+	svc.EXPECT().Current("grid_power").Return(&solis.Value{Key: "grid_power", Name: "Grid Power",
+		Unit: "W", DecodedValue: 0, RawValue: 0, Timestamp: t0}, nil).Once()
+	code, body := do(t, r, "/api/data/grid_power")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Contains(t, body, "value", "zero is present, not omitted")
+	assert.Equal(t, t0.Format(time.RFC3339), body["timestamp"])
 }
 
-// Test RegisterInfo structure
-func TestRegisterInfo_Structure(t *testing.T) {
-	info := RegisterInfo{
-		Key:         "test_key",
-		Name:        "Test Register",
-		Address:     100,
-		DataType:    "Uint16",
-		Unit:        "V",
-		Stability:   "dynamic",
-		Description: "Test Register (V)",
-	}
+func TestData_HistoryByStore(t *testing.T) {
+	svc, r := setup(t)
+	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	svc.EXPECT().Register("pv_energy_daily").Return(reg("pv_energy_daily", solis.StoreDaily), nil)
+	svc.EXPECT().DailyHistory(mock.Anything, "pv_energy_daily", start, end).
+		Return([]*storage.DailyDataPoint{{Date: "2026-08-01", Value: 1.234}}, nil).Once()
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/data/pv_energy_daily?start=2026-08-01&end=2026-08-03", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `[{"date":"2026-08-01","value":1.23,"raw_value":0}]`, rec.Body.String())
 
-	if info.Key != "test_key" {
-		t.Errorf("RegisterInfo.Key = %v, want %v", info.Key, "test_key")
-	}
-	if info.Name != "Test Register" {
-		t.Errorf("RegisterInfo.Name = %v, want %v", info.Name, "Test Register")
-	}
-	if info.Address != 100 {
-		t.Errorf("RegisterInfo.Address = %v, want %v", info.Address, 100)
-	}
-	if info.DataType != "Uint16" {
-		t.Errorf("RegisterInfo.DataType = %v, want %v", info.DataType, "Uint16")
-	}
-	if info.Unit != "V" {
-		t.Errorf("RegisterInfo.Unit = %v, want %v", info.Unit, "V")
-	}
-	if info.Stability != "dynamic" {
-		t.Errorf("RegisterInfo.Stability = %v, want %v", info.Stability, "dynamic")
-	}
-	if info.Description != "Test Register (V)" {
-		t.Errorf("RegisterInfo.Description = %v, want %v", info.Description, "Test Register (V)")
-	}
+	svc.EXPECT().Register("pv_energy_monthly").Return(reg("pv_energy_monthly",
+		solis.StoreMonthly), nil)
+	svc.EXPECT().MonthlyHistory(mock.Anything, "pv_energy_monthly", mock.Anything, t0).
+		Return(nil, nil).Once()
+	code, _ := do(t, r, "/api/data/pv_energy_monthly?start=2026-01")
+	assert.Equal(t, http.StatusOK, code)
+
+	svc.EXPECT().Register("pv_energy_yearly").Return(reg("pv_energy_yearly", solis.StoreYearly),
+		nil)
+	svc.EXPECT().YearlyHistory(mock.Anything, "pv_energy_yearly", t0.Add(-defaultHistoryWindow),
+		time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)).Return(nil, nil).Once()
+	code, _ = do(t, r, "/api/data/pv_energy_yearly?end=2027")
+	assert.Equal(t, http.StatusOK, code)
+
+	// Without params a periodic key returns its current value.
+	svc.EXPECT().Current("pv_energy_daily").Return(&solis.Value{Key: "pv_energy_daily"}, nil).Once()
+	code, _ = do(t, r, "/api/data/pv_energy_daily")
+	assert.Equal(t, http.StatusOK, code)
 }
 
-// Test HandlerDeps structure
-func TestHandlerDeps_Structure(t *testing.T) {
-	deps := HandlerDeps{}
-	if deps.Service != nil {
-		t.Errorf("HandlerDeps.Service should be nil by default")
-	}
+func TestData_TotalAndStatus(t *testing.T) {
+	svc, r := setup(t)
+	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
+	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&storage.TotalDataPoint{
+		Value: 5230.456, RawValue: 5230.456, Timestamp: "t"}, nil).Once()
+	code, body := do(t, r, "/api/data/pv_energy_total?start=2026-01-01")
+	assert.Equal(t, http.StatusOK, code)
+	assert.InDelta(t, 5230.46, body["value"], 1e-9)
+
+	svc.EXPECT().Register("grid_fault_1").Return(reg("grid_fault_1", solis.StoreStatus), nil)
+	svc.EXPECT().StatusHistory(mock.Anything, "grid_fault_1").Return(service.StatusHistory{
+		Key: "grid_fault_1", History: []service.StatusEntry{}}, nil).Once()
+	code, body = do(t, r, "/api/data/grid_fault_1")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "grid_fault_1", body["key"])
 }
 
-// Test GetHealthHandler
-func TestGetHealthHandler(t *testing.T) {
-	// Create a mock service with HealthCheck method
-	service := &MockReadService{
-		healthCheckFunc: func() (map[string]string, error) {
-			return map[string]string{"status": "ok", "timestamp": time.Now().UTC().Format(time.RFC3339)}, nil
-		},
-	}
+func TestData_Errors(t *testing.T) {
+	svc, r := setup(t)
+	svc.EXPECT().Register("nope").Return(solis.Register{},
+		&service.KeyError{Key: "nope", Err: service.ErrUnknownKey}).Once()
+	code, body := do(t, r, "/api/data/nope")
+	assert.Equal(t, http.StatusNotFound, code)
+	assert.Equal(t, "Not Found", body["error"])
+	assert.InDelta(t, 404.0, body["code"], 0)
 
-	deps := HandlerDeps{
-		Service: service,
-	}
+	svc.EXPECT().Register("grid_power").Return(reg("grid_power", solis.StoreNone), nil)
+	code, body = do(t, r, "/api/data/grid_power?start=2026-08-01")
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, body["message"], "historical queries not supported")
 
-	handler := GetHealthHandler(deps)
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	w := httptest.NewRecorder()
+	svc.EXPECT().Register("pv_energy_daily").Return(reg("pv_energy_daily", solis.StoreDaily), nil)
+	code, body = do(t, r, "/api/data/pv_energy_daily?start=yesterday")
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, body["message"], "invalid time range")
 
-	handler.ServeHTTP(w, req)
+	svc.EXPECT().Current("grid_power").Return(nil, errors.New("sqlite: disk I/O at /data/x.db")).Once()
+	code, body = do(t, r, "/api/data/grid_power")
+	assert.Equal(t, http.StatusInternalServerError, code)
+	assert.Equal(t, "Internal Server Error", body["message"], "internals never exposed")
 
-	if w.Code != http.StatusOK {
-		t.Errorf("GetHealthHandler() status code = %v, want %v", w.Code, http.StatusOK)
-	}
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("GetHealthHandler() Content-Type = %v, want %v", contentType, "application/json")
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("GetHealthHandler() failed to decode response: %v", err)
-	}
-
-	if result["status"] != "ok" {
-		t.Errorf("GetHealthHandler() status = %v, want 'ok'", result["status"])
-	}
-	if _, ok := result["timestamp"]; !ok {
-		t.Error("GetHealthHandler() response should contain timestamp")
-	}
+	svc.EXPECT().Current("grid_power").Return(nil, &service.KeyError{Key: "grid_power",
+		Err: service.ErrNoData}).Once()
+	code, _ = do(t, r, "/api/data/grid_power")
+	assert.Equal(t, http.StatusNotFound, code)
 }
 
-func TestGetHealthHandler_ServiceError(t *testing.T) {
-	// Create a mock service that returns an error
-	service := &MockReadService{
-		healthCheckFunc: func() (map[string]string, error) {
-			return nil, errors.New("health check failed")
-		},
-	}
+func TestErrorMapper(t *testing.T) {
+	m := NewErrorMapper(zerolog.Nop())
+	assert.Equal(t, http.StatusNotFound, m.Status(fmt.Errorf("x: %w", service.ErrUnknownKey)))
+	assert.Equal(t, http.StatusBadRequest, m.Status(service.ErrWrongKind))
+	assert.Equal(t, http.StatusGatewayTimeout, m.Status(context.DeadlineExceeded))
+	assert.Equal(t, http.StatusInternalServerError, m.Status(errors.New("x")))
 
-	deps := HandlerDeps{
-		Service: service,
-	}
-
-	handler := GetHealthHandler(deps)
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("GetHealthHandler() with error status code = %v, want %v", w.Code, http.StatusInternalServerError)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("GetHealthHandler() failed to decode error response: %v", err)
-	}
-
-	if _, ok := result["error"]; !ok {
-		t.Error("GetHealthHandler() error response should contain error field")
-	}
+	// Per-handler override wins without touching the default mapper.
+	teapot := errors.New("teapot")
+	o := m.With(Rule{Target: service.ErrNoData, Status: http.StatusNoContent},
+		Rule{Target: teapot, Status: http.StatusTeapot})
+	assert.Equal(t, http.StatusNoContent, o.Status(service.ErrNoData))
+	assert.Equal(t, http.StatusTeapot, o.Status(teapot))
+	assert.Equal(t, http.StatusNotFound, m.Status(service.ErrNoData))
 }
 
-// Test GetKeysHandler
-func TestGetKeysHandler(t *testing.T) {
-	// GetKeysHandler needs a service with GetKeys() method
-	// Create a mock service that returns all register keys
-	service := &MockReadService{
-		getKeysFunc: func() []string {
-			keys := make([]string, 0, len(solis.RegisterMapByKey))
-			for k := range solis.RegisterMapByKey {
-				keys = append(keys, k)
-			}
-			return keys
-		},
-	}
-	deps := HandlerDeps{Service: service}
-
-	handler := GetKeysHandler(deps)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/keys", nil)
-	w := httptest.NewRecorder()
-
-	handler.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GetKeysHandler() status code = %v, want %v", w.Code, http.StatusOK)
-	}
-
-	contentType := w.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("GetKeysHandler() Content-Type = %v, want %v", contentType, "application/json")
-	}
-
-	var result []RegisterInfo
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("GetKeysHandler() failed to decode response: %v", err)
-	}
-
-	// Should return all registers
-	if len(result) == 0 {
-		t.Error("GetKeysHandler() returned empty result, want non-empty")
-	}
-
-	// Check that at least one register has required fields (skip computed registers with address 0)
-	foundNonComputed := false
-	for _, reg := range result {
-		if reg.Address != 0 {
-			foundNonComputed = true
-			if reg.Key == "" {
-				t.Error("GetKeysHandler() register has empty key")
-			}
-			if reg.Name == "" {
-				t.Error("GetKeysHandler() register has empty name")
-			}
-			if reg.Address == 0 {
-				t.Error("GetKeysHandler() register has zero address")
-			}
-			if reg.DataType == "" {
-				t.Error("GetKeysHandler() register has empty data type")
-			}
-			break
-		}
-	}
-	if !foundNonComputed {
-		t.Error("GetKeysHandler() returned no registers with non-zero address")
-	}
-}
-
-// Test GetDataHandler - current value (no query params)
-func TestGetDataHandler_CurrentValue(t *testing.T) {
-	// Create a mock value - use a real register key from solis package
-	testValue := &solis.Value{
-		Key:          "pv_energy_daily",
-		Name:         "PV Energy Daily",
-		RawValue:     100.0,
-		DecodedValue: 100.5,
-		Unit:         "kWh",
-		Timestamp:    time.Now(),
-		Stability:    solis.Dynamic,
-	}
-
-	// Create a mock service
-	service := &MockReadService{
-		getRegisterFunc: func(key string) (*solis.Value, error) {
-			if key == "pv_energy_daily" {
-				return testValue, nil
-			}
-			return nil, fmt.Errorf("unknown register: %s", key)
-		},
-		decodeFaultBitsFunc: func(addr uint16, value uint16) []string {
-			return nil
-		},
-		decodeOpStatusBitsFunc: func(value uint16) []string {
-			return nil
-		},
-	}
-
-	deps := HandlerDeps{
-		Service: service,
-	}
-
-	handler := GetDataHandler(deps)
-
-	// Create request with chi URL param
-	r := chi.NewRouter()
-	r.Get("/api/v1/data/{key}", handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/pv_energy_daily", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GetDataHandler() status code = %v, want %v", w.Code, http.StatusOK)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("GetDataHandler() failed to decode response: %v", err)
-	}
-
-	if result["key"] != "pv_energy_daily" {
-		t.Errorf("GetDataHandler() key = %v, want 'pv_energy_daily'", result["key"])
-	}
-	if result["name"] != "PV Energy Daily" {
-		t.Errorf("GetDataHandler() name = %v, want 'PV Energy Daily'", result["name"])
-	}
-	if result["unit"] != "kWh" {
-		t.Errorf("GetDataHandler() unit = %v, want 'kWh'", result["unit"])
-	}
-	if _, ok := result["timestamp"]; !ok {
-		t.Error("GetDataHandler() response should contain timestamp")
-	}
-}
-
-func TestGetDataHandler_UnknownKey(t *testing.T) {
-	service := &MockReadService{
-		getRegisterFunc: func(key string) (*solis.Value, error) {
-			return nil, fmt.Errorf("unknown register: %s", key)
-		},
-		decodeFaultBitsFunc: func(addr uint16, value uint16) []string {
-			return nil
-		},
-		decodeOpStatusBitsFunc: func(value uint16) []string {
-			return nil
-		},
-	}
-
-	deps := HandlerDeps{
-		Service: service,
-	}
-
-	handler := GetDataHandler(deps)
-
-	r := chi.NewRouter()
-	r.Get("/api/v1/data/{key}", handler)
-
-	// Use a key that doesn't exist in solis.RegisterMapByKey
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/nonexistent_register_xyz", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("GetDataHandler() with unknown key status code = %v, want %v", w.Code, http.StatusNotFound)
-	}
-}
-
-func TestGetDataHandler_EmptyKey(t *testing.T) {
-	// Skip this test - chi routing makes it difficult to test empty key
-	// The handler checks for empty key via chi.URLParam which requires chi routing
-	// In practice, chi will return 404 for routes that don't match the pattern
-	t.Skip("Empty key test skipped - requires chi routing context")
-}
-
-// Test GetDataHandler with history query parameters
-func TestGetDataHandler_HistoryQuery(t *testing.T) {
-	// Create mock historical data - use a valid register key
-	// Use a fixed timestamp that's easy to parse
-	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-
-	historyResult := &storage.HistoryResult{
-		Key:      "solis_status",
-		Unit:     "",
-		Interval: storage.IntervalRaw,
-		Data: []storage.HistoryDataPoint{
-			{Timestamp: start.Format(time.RFC3339), Value: 100.0},
-			{Timestamp: end.Format(time.RFC3339), Value: 200.0},
-		},
-	}
-
-	service := &MockReadService{
-		getHistoricalDataFunc: func(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error) {
-			return historyResult, nil
-		},
-		decodeFaultBitsFunc: func(addr uint16, value uint16) []string {
-			return nil
-		},
-		decodeOpStatusBitsFunc: func(value uint16) []string {
-			return nil
-		},
-	}
-
-	deps := HandlerDeps{
-		Service: service,
-	}
-
-	handler := GetDataHandler(deps)
-
-	r := chi.NewRouter()
-	r.Get("/api/v1/data/{key}", handler)
-
-	// Request with start and end query parameters for a current register (not daily/monthly/yearly/total)
-	startStr := "2024-01-01T00:00:00Z"
-	endStr := "2024-01-02T00:00:00Z"
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/solis_status?start="+startStr+"&end="+endStr+"&interval=raw", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	// Historical queries are not supported for current registers in v2 API - should return 400 Bad Request
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("GetDataHandler() with history query for current register status code = %v, want %v, body: %s", w.Code, http.StatusBadRequest, w.Body.String())
-	}
-}
-
-func TestGetDataHandler_InvalidTimeFormat(t *testing.T) {
-	service := &MockReadService{
-		getHistoricalDataFunc: func(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error) {
-			return nil, nil
-		},
-		decodeFaultBitsFunc: func(addr uint16, value uint16) []string {
-			return nil
-		},
-		decodeOpStatusBitsFunc: func(value uint16) []string {
-			return nil
-		},
-	}
-
-	deps := HandlerDeps{
-		Service: service,
-	}
-
-	handler := GetDataHandler(deps)
-
-	r := chi.NewRouter()
-	r.Get("/api/v1/data/{key}", handler)
-
-	// Request with invalid time format - use valid register key
-	// With our changes, invalid time range returns 400 Bad Request
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/data/solis_status?start=invalid-time", nil)
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("GetDataHandler() with invalid time format status code = %v, want %v", w.Code, http.StatusBadRequest)
-	}
+func TestParseTimeRange(t *testing.T) {
+	tr, err := ParseTimeRange("", "", t0)
+	require.NoError(t, err)
+	assert.Equal(t, t0.Add(-defaultHistoryWindow), tr.Start)
+	assert.Equal(t, t0, tr.End)
+	_, err = ParseTimeRange("2026-08-01", "bad", t0)
+	assert.ErrorIs(t, err, service.ErrInvalidRange)
 }

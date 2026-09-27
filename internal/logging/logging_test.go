@@ -2,110 +2,47 @@ package logging
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestParseLogLevel(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected Level
-	}{
-		{"debug uppercase", "DEBUG", LevelDebug},
-		{"debug lowercase", "debug", LevelDebug},
-		{"debug mixed", "Debug", LevelDebug},
-		{"info uppercase", "INFO", LevelInfo},
-		{"info lowercase", "info", LevelInfo},
-		{"warn uppercase", "WARN", LevelWarn},
-		{"warn lowercase", "warn", LevelWarn},
-		{"error uppercase", "ERROR", LevelError},
-		{"error lowercase", "error", LevelError},
-		{"fatal uppercase", "FATAL", LevelFatal},
-		{"fatal lowercase", "fatal", LevelFatal},
-		{"unknown returns info", "UNKNOWN", LevelInfo},
-		{"empty returns info", "", LevelInfo},
-		{"random returns info", "random", LevelInfo},
+func TestParseLevel(t *testing.T) {
+	tests := map[string]zerolog.Level{
+		"DEBUG": zerolog.DebugLevel, "debug": zerolog.DebugLevel,
+		"INFO": zerolog.InfoLevel, "Warn": zerolog.WarnLevel,
+		"error": zerolog.ErrorLevel, "FATAL": zerolog.FatalLevel,
+		"": zerolog.InfoLevel, "nonsense": zerolog.InfoLevel,
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := ParseLogLevel(tt.input)
-			if result != tt.expected {
-				t.Errorf("ParseLogLevel(%q) = %v, want %v", tt.input, result, tt.expected)
-			}
-		})
+	for in, want := range tests {
+		assert.Equal(t, want, ParseLevel(in), in)
 	}
 }
 
-func TestLevel_ToZerologLevel(t *testing.T) {
-	tests := []struct {
-		name     string
-		level    Level
-		expected string
-	}{
-		{"debug", LevelDebug, "debug"},
-		{"info", LevelInfo, "info"},
-		{"warn", LevelWarn, "warn"},
-		{"error", LevelError, "error"},
-		{"fatal", LevelFatal, "fatal"},
-		{"default (unknown)", Level(99), "info"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.level.toZerologLevel()
-			resultStr := result.String()
-			// Convert to lowercase for comparison
-			if !strings.EqualFold(resultStr, tt.expected) {
-				t.Errorf("Level(%d).toZerologLevel() = %s, want %s", tt.level, resultStr, tt.expected)
-			}
-		})
-	}
-}
-
-func TestNewComponentLogger(t *testing.T) {
-	// Initialize the logger first
+func TestNew_JSONRespectsLevel(t *testing.T) {
 	var buf bytes.Buffer
-	Init(&buf, false, "INFO")
-
-	// Test that NewComponentLogger doesn't panic
-	logger := NewComponentLogger("test")
-	// Check that logger is not nil by trying to use it
-	if logger.GetLevel() == zerolog.NoLevel {
-		t.Error("NewComponentLogger returned zero-value logger")
-	}
-
-	// Test with empty component name
-	emptyLogger := NewComponentLogger("")
-	if emptyLogger.GetLevel() == zerolog.NoLevel {
-		t.Error("NewComponentLogger with empty string returned zero-value logger")
-	}
+	log := New(&buf, "WARN", false)
+	log.Info().Msg("hidden")
+	log.Warn().Msg("shown")
+	assert.NotContains(t, buf.String(), "hidden")
+	assert.Contains(t, buf.String(), `"message":"shown"`)
 }
 
-func TestInit(t *testing.T) {
-	// Test that Init doesn't panic with various configurations
-	tests := []struct {
-		name     string
-		pretty   bool
-		logLevel string
-	}{
-		{"pretty false, no level", false, ""},
-		{"pretty true, info", true, "INFO"},
-		{"pretty false, debug", false, "DEBUG"},
-		{"pretty false, warn", false, "WARN"},
-		{"pretty false, error", false, "ERROR"},
-		{"pretty false, fatal", false, "FATAL"},
-		{"all defaults", false, ""},
-	}
+func TestNew_PrettyAndComponent(t *testing.T) {
+	var buf bytes.Buffer
+	log := Component(New(&buf, "DEBUG", true), "poller")
+	log.Debug().Msg("hello")
+	assert.Contains(t, buf.String(), "hello")
+	assert.Contains(t, buf.String(), "poller")
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			// Init should not panic
-			Init(&buf, tt.pretty, tt.logLevel)
-		})
-	}
+func TestNew_IsIndependentPerInstance(t *testing.T) {
+	var a, b bytes.Buffer
+	la := New(&a, "ERROR", false)
+	lb := New(&b, "DEBUG", false)
+	la.Info().Msg("x")
+	lb.Info().Msg("y")
+	assert.Empty(t, a.String())
+	assert.Contains(t, b.String(), "y")
 }

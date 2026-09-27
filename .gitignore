@@ -42,3 +42,4 @@ config.yaml
 frontend/dev-dist/
 docs/dist/
 docs/node_modules/
+ref/

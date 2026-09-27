@@ -3,497 +3,311 @@ package poller
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
-	"github.com/dombyte/solis/internal/modbus"
+	"github.com/dombyte/solis/internal/eventbus"
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/health/mocks"
 	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/storage"
+	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
-func TestNew(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+const pollEvery = 5 * time.Second
 
-	p := New(cfg, nil)
+var bg = context.Background()
 
-	if p == nil {
-		t.Fatal("New() returned nil")
-	}
-	if p.config != cfg {
-		t.Error("New() did not set config correctly")
-	}
-	if p.running {
-		t.Error("New() should not set running to true")
-	}
+// device is a fake inverter: register address -> value.
+type device struct {
+	mu        sync.Mutex
+	regs      map[uint16]uint16
+	connected atomic.Bool
+	failNext  atomic.Int32
+	reads     atomic.Int32
 }
 
-func TestNew_WithOptions(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil, WithStorage(nil), WithCache(nil))
-
-	if p == nil {
-		t.Fatal("New() with options returned nil")
-	}
+func newDevice() *device {
+	d := &device{regs: make(map[uint16]uint16)}
+	d.connected.Store(true)
+	return d
 }
 
-func TestPoller_IsRunning(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	if p.IsRunning() {
-		t.Error("Poller should not be running after New()")
-	}
+func (d *device) set(addr uint16, v uint16) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.regs[addr] = v
 }
 
-func TestPoller_GetLastPollInfo(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
+func (d *device) ReadRegisters(_ context.Context, addr, count uint16) ([]uint16, error) {
+	d.reads.Add(1)
+	if d.failNext.Load() > 0 {
+		d.failNext.Add(-1)
+		return nil, errors.New("timeout")
 	}
-
-	p := New(cfg, nil)
-
-	info := p.GetLastPollInfo()
-	if info != nil {
-		t.Error("GetLastPollInfo() should return nil when no poll has run")
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]uint16, count)
+	for i := range out {
+		out[i] = d.regs[addr+uint16(i)]
 	}
+	return out, nil
 }
 
-func TestPoller_GetLastPollError(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+func (d *device) IsConnected() bool { return d.connected.Load() }
 
-	p := New(cfg, nil)
-
-	err := p.GetLastPollError()
-	if err != nil {
-		t.Errorf("GetLastPollError() should return nil when no error: %v", err)
-	}
+type env struct {
+	t      *testing.T
+	clk    *clocktest.Clock
+	dev    *device
+	st     *storage.Storage
+	cache  *cache.Cache
+	bus    *eventbus.Bus
+	events <-chan eventbus.Event
+	p      *Poller
+	polls  atomic.Int32
 }
 
-func TestPoller_pollOnce_NilModbus(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	startTime := time.Now()
-	_, _, err := p.pollOnce(context.Background(), startTime)
-
-	if err == nil {
-		t.Error("pollOnce() should fail with nil modbus")
-	}
+// countingCache counts completed poll cycles (cache replacement is the last step).
+type countingCache struct {
+	*cache.Cache
+	n *atomic.Int32
 }
 
-func TestPoller_readRangeWithRetry_NilModbus(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 100 * time.Millisecond,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	ctx := context.Background()
-	_, err := p.readRangeWithRetry(ctx, 0, 10)
-
-	if err == nil {
-		t.Error("readRangeWithRetry() should fail with nil modbus")
-	}
+func (c countingCache) ReplaceDomain(d string, v map[string]*solis.Value, at time.Time) {
+	defer c.n.Add(1)
+	c.Cache.ReplaceDomain(d, v, at)
 }
 
-func TestPoller_readRangeWithRetry_ContextCancelled(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 100 * time.Millisecond,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+func newEnv(t *testing.T, start time.Time) *env {
+	t.Helper()
+	reg, err := solis.NewRegistry()
+	require.NoError(t, err)
+	clk := clocktest.New(start)
+	cfg := &config.StorageSettings{Path: filepath.Join(t.TempDir(), "s.db"),
+		Synchronous: "NORMAL", TempStore: "MEMORY"}
+	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	bus := eventbus.New()
+	events, unsub, err := bus.Subscribe("test", 64, eventbus.Lossless)
+	require.NoError(t, err)
+	t.Cleanup(unsub)
 
-	p := New(cfg, nil)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
-
-	_, err := p.readRangeWithRetry(ctx, 0, 10)
-
-	if err == nil {
-		t.Error("readRangeWithRetry() should fail with context cancelled")
-	}
+	e := &env{t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus), bus: bus,
+		events: events}
+	var src utils.Slot[Reader]
+	src.Store(e.dev)
+	rep := mocks.NewMockReporter(t)
+	rep.EXPECT().Report(health.Recovering, mock.Anything).Maybe()
+	rep.EXPECT().Report(health.Healthy, "").Maybe()
+	roll := rollover(t, "23:59")
+	e.p, err = New(Deps{
+		Settings: config.PollerSettings{Interval: pollEvery, BlockAttempts: 1,
+			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second},
+		Rollover: roll, Source: &src, Store: st, Cache: countingCache{e.cache, &e.polls},
+		Bus: bus, Decoder: solis.NewDecoder(reg, zerolog.Nop()), Registry: reg, Clock: clk,
+		Timeout: time.Second, Reporter: rep, Log: zerolog.Nop(),
+	})
+	require.NoError(t, err)
+	return e
 }
 
-func TestPoller_handlePollError(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// Test with various errors
-	err := errors.New("test error")
-	p.handlePollError(err, 100*time.Millisecond)
-
-	// Check that lastPollErr was set
-	if p.GetLastPollError() == nil {
-		t.Error("handlePollError() should set lastPollErr")
-	}
+func (e *env) start() {
+	require.NoError(e.t, e.p.Start(bg))
+	e.t.Cleanup(func() { _ = e.p.Stop() })
 }
 
-func TestPoller_updatePollStats(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// This should not panic
-	p.updatePollStats(100*time.Millisecond, 10, 5)
-
-	// Check that pollCount was incremented
-	if p.pollCount != 1 {
-		t.Errorf("Expected pollCount=1, got %d", p.pollCount)
-	}
-
-	// Check that lastPollTime was set
-	if p.lastPollTime.IsZero() {
-		t.Error("updatePollStats() should set lastPollTime")
-	}
+func (e *env) waitPolls(n int32) {
+	require.Eventually(e.t, func() bool { return e.polls.Load() >= n }, 2*time.Second,
+		time.Millisecond, "want %d polls, have %d", n, e.polls.Load())
 }
 
-func TestPoller_shouldContinue(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// Initially should NOT continue (not running)
-	if p.shouldContinue() {
-		t.Error("shouldContinue() should return false initially (poller not running)")
-	}
-
-	// Start the poller
-	_ = p.Start()
-	defer p.Stop()
-
-	// Should continue when running
-	if !p.shouldContinue() {
-		t.Error("shouldContinue() should return true when running")
-	}
-
-	// Stop the poller
-	_ = p.Stop()
-
-	// Should not continue
-	if p.shouldContinue() {
-		t.Error("shouldContinue() should return false after Stop()")
-	}
+// next advances to the next scheduled poll and waits for it.
+func (e *env) next() {
+	n := e.polls.Load()
+	require.True(e.t, e.clk.BlockUntil(1))
+	e.clk.Advance(pollEvery)
+	e.waitPolls(n + 1)
 }
 
-func TestPoller_storePollResults(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// This should not panic with nil storage
-	startTime := time.Now()
-	p.storePollResults(nil, startTime, 100*time.Millisecond, 10)
+func (e *env) daily(key, day string) float64 {
+	d, _ := time.ParseInLocation("2006-01-02", day, time.Local)
+	pts, err := e.st.GetDailyHistory(bg, key, d, d)
+	require.NoError(e.t, err)
+	require.Len(e.t, pts, 1, "%s %s", key, day)
+	return pts[0].Value
 }
 
-func TestPoller_updateCache(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+func TestPoll_WritesDailyStatusAndCache(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.set(33035, 250)    // pv_energy_daily 25.0
+	e.dev.set(33058, 5230)   // pv_total_power
+	e.dev.set(33095, 0x0003) // solis_status Generating
+	e.dev.set(33130, 0xFFFF) // grid_power = -2 W (Int32)
+	e.dev.set(33131, 0xFFFE)
+	e.dev.set(33135, 1)   // discharging
+	e.dev.set(33150, 800) // battery_power
+	e.start()
+	e.waitPolls(1)
 
-	p := New(cfg, nil)
+	assert.InDelta(t, 25.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
+	assert.InDelta(t, 5230.0, e.cache.Get("pv_total_power").DecodedValue, 1e-9)
+	assert.InDelta(t, -2.0, e.cache.Get("grid_power").DecodedValue, 1e-9)
+	assert.InDelta(t, -800.0, e.cache.Get(solis.KeyBatteryPowerSigned).DecodedValue, 1e-9)
+	assert.Equal(t, "Generating",
+		e.cache.Get("solis_status").StatusDecoded.(map[string]string)["name"])
+	assert.Nil(t, e.cache.Get("pv_energy_monthly"), "computed keys are not the poller's")
+	assert.Equal(t, health.Healthy, e.p.State())
 
-	// This should not panic with nil cache
-	p.updateCache(nil)
+	// Status is written on change only.
+	e.next()
+	e.dev.set(33095, 0x000F)
+	e.next()
+	hist, err := e.st.GetErrorHistory(bg, "solis_status", time.Time{}, e.clk.Now())
+	require.NoError(t, err)
+	assert.Len(t, hist, 2)
 }
 
-func TestPoller_decodedRange(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// This should not panic
-	// p.decodeRange(0, []uint16{1, 2, 3}, time.Now(), make(map[string]*solis.Value))
-	// Note: This requires proper types from solis package
-	// For now, just ensure the function exists
-	_ = p.decodeRange
+func TestPoll_NonOverlappingSchedule(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.start()
+	e.waitPolls(1) // immediately
+	require.True(t, e.clk.BlockUntil(1))
+	e.clk.Advance(pollEvery - time.Second)
+	assert.Never(t, func() bool { return e.polls.Load() > 1 }, 30*time.Millisecond,
+		time.Millisecond)
+	e.clk.Advance(time.Second)
+	e.waitPolls(2)
 }
 
-func TestPoller_filterComputedRegisters(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+func TestPoll_DisconnectedIsRecovering(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.connected.Store(false)
+	e.start()
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
+	assert.Zero(t, e.dev.reads.Load())
+	assert.False(t, e.p.LastBeat().IsZero())
 
-	p := New(cfg, nil)
-
-	// Test with nil input - returns empty map, not nil
-	result := p.filterComputedRegisters(nil)
-	if result == nil {
-		t.Error("filterComputedRegisters(nil) should return empty map, not nil")
-	}
-	if len(result) != 0 {
-		t.Errorf("filterComputedRegisters(nil) should return empty map, got %d items", len(result))
-	}
-
-	// Test with empty map
-	empty := make(map[string]*solis.Value)
-	result = p.filterComputedRegisters(empty)
-	if len(result) != 0 {
-		t.Errorf("filterComputedRegisters(empty) should return empty map, got %d items", len(result))
-	}
+	e.dev.connected.Store(true)
+	e.next()
+	assert.Equal(t, health.Healthy, e.p.State())
 }
 
-func TestPoller_Start_AlreadyRunning(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// Start the poller
-	if err := p.Start(); err != nil {
-		t.Fatalf("Failed to start poller: %v", err)
-	}
-	defer p.Stop()
-
-	// Try to start again - should return error
-	if err := p.Start(); err == nil {
-		t.Error("Start() should return error when poller is already running")
-	}
+func TestPoll_BlockRetryThenSuccess(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.set(33035, 10)
+	e.dev.failNext.Store(1)
+	e.start()
+	require.True(t, e.clk.BlockUntil(1)) // retry delay timer
+	e.clk.Advance(time.Second)
+	e.waitPolls(1)
+	assert.InDelta(t, 1.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
 }
 
-func TestPoller_Stop_NotRunning(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// Try to stop when not running - should return nil (idempotent)
-	if err := p.Stop(); err != nil {
-		t.Errorf("Stop() should return nil when poller is not running (idempotent), got: %v", err)
-	}
+func TestPoll_ReadFailureDiscardsPartialPoll(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.failNext.Store(2) // both attempts of block 1 fail
+	e.start()
+	require.True(t, e.clk.BlockUntil(1))
+	e.clk.Advance(time.Second)
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
+	assert.Zero(t, e.polls.Load())
 }
 
-func TestPoller_PollNow_NilModbus(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
+func TestPoll_MidnightRolloverEmitsPeriodClosed(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 23, 58, 0, 0, time.Local))
+	e.dev.set(33035, 300) // pv 30.0
+	e.dev.set(33175, 50)  // grid_export 5.0
+	e.start()
+	e.waitPolls(1)
 
-	p := New(cfg, nil)
+	e.clk.Set(time.Date(2026, 8, 6, 0, 5, 0, 0, time.Local))
+	e.dev.set(33035, 1) // pv reset -> 0.1
+	e.next()
+	assert.InDelta(t, 30.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
+	assert.InDelta(t, 0.1, e.daily("pv_energy_daily", "2026-08-06"), 1e-9)
+	assert.InDelta(t, 5.0, e.daily("grid_export_daily", "2026-08-05"), 1e-9)
 
-	// PollNow with nil modbus should fail
-	_, err := p.PollNow()
-	if err == nil {
-		t.Error("PollNow() should fail with nil modbus")
-	}
+	var closed eventbus.Event
+	require.Eventually(t, func() bool {
+		select {
+		case ev := <-e.events:
+			if ev.Kind == eventbus.PeriodClosed {
+				closed = ev
+				return true
+			}
+		default:
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	assert.Equal(t, "2026-08-05", closed.Day)
+
+	// A late write for the closed day is rejected by storage (not by the poller).
+	err := e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 99}}})
+	assert.ErrorIs(t, err, storage.ErrPeriodClosed)
+
+	// At window end the remaining keys are force-closed.
+	e.clk.Set(time.Date(2026, 8, 6, 0, 59, 0, 0, time.Local))
+	e.next()
+	stt, err := e.st.CloseState(bg)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08-05", stt.ClosedThrough)
 }
 
-func TestPoller_pollOnce_NilClientError(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	startTime := time.Now()
-	_, _, err := p.pollOnce(context.Background(), startTime)
-
-	if err == nil {
-		t.Error("pollOnce() should fail with nil modbus")
-	}
-	if err != nil && err.Error() != "modbus client is nil" {
-		t.Errorf("Expected error 'modbus client is nil', got: %v", err)
-	}
+func TestPoll_ColdStartSeedsFromStorage(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 6, 0, 10, 0, 0, time.Local))
+	require.NoError(t, e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300}}}))
+	e.dev.set(33035, 2) // 0.2 after the inverter reset
+	e.start()
+	e.waitPolls(1)
+	assert.InDelta(t, 30.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
+	assert.InDelta(t, 0.2, e.daily("pv_energy_daily", "2026-08-06"), 1e-9)
 }
 
-func TestPoller_WithOptions(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	// Test that options are applied correctly
-	p := New(cfg, nil, WithStorage(nil), WithCache(nil))
-	if p == nil {
-		t.Fatal("New() with options returned nil")
-	}
-	// We can't easily verify storage/cache are set without mocking,
-	// but at least verify it doesn't panic
+func TestPoll_MidDayDipKeepsCachedMax(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.set(33035, 100)
+	e.start()
+	e.waitPolls(1)
+	e.dev.set(33035, 3) // reboot
+	e.next()
+	assert.InDelta(t, 10.0, e.cache.Get("pv_energy_daily").DecodedValue, 1e-9)
+	assert.InDelta(t, 10.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
 }
 
-func TestPoller_Config(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// The config field is private, so we can't directly check it
-	// But we can verify the poller was created successfully
-	if p == nil {
-		t.Fatal("New() returned nil")
-	}
+func TestPoll_SeedFailureIsRecovering(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	require.NoError(t, e.st.Close())
+	e.start()
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
 }
 
-func TestPoller_readRangeWithRetry_MaxAttempts(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   0, // No retries
-		BlockRetryDelay: 100 * time.Millisecond,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	ctx := context.Background()
-	_, err := p.readRangeWithRetry(ctx, 0, 10)
-
-	// Should fail since modbus is nil
-	if err == nil {
-		t.Error("readRangeWithRetry() should fail with nil modbus")
-	}
+func TestNewAndStop(t *testing.T) {
+	_, err := New(Deps{})
+	assert.ErrorIs(t, err, ErrMissingDependency)
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	require.NoError(t, e.p.Stop()) // never started
+	require.NoError(t, e.p.Stop())
 }
 
-func TestPoller_pollOnce_ModbusNotConnected(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 100 * time.Millisecond,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	// Create a mock modbus client that is not connected
-	mockClient := &modbus.Client{}
-	// We can't easily set the state to disconnected without accessing private fields,
-	// but we can at least test the error path
-
-	p := New(cfg, mockClient)
-
-	startTime := time.Now()
-	_, _, err := p.pollOnce(context.Background(), startTime)
-
-	// This should handle the case where modbus is not connected gracefully
-	if err == nil {
-		t.Log("pollOnce() with disconnected modbus completed (may be expected)")
-	} else {
-		t.Logf("pollOnce() returned error: %v", err)
-	}
-}
-
-func TestPoller_handlePollError_NilError(t *testing.T) {
-	cfg := &config.PollerSettings{
-		Interval:        5 * time.Second,
-		BlockAttempts:   2,
-		BlockRetryDelay: 1 * time.Second,
-		BlockInterval:   0,
-		PollTimeout:     5 * time.Second,
-	}
-
-	p := New(cfg, nil)
-
-	// Handle nil error - should not panic
-	p.handlePollError(nil, 100*time.Millisecond)
-
-	// Last error should still be nil
-	if p.GetLastPollError() != nil {
-		t.Errorf("handlePollError(nil) should not set lastPollErr, got: %v", p.GetLastPollError())
-	}
+func TestMaxDay(t *testing.T) {
+	assert.Equal(t, "2026-08-05", maxDay("", "2026-08-05"))
+	assert.Equal(t, "2026-08-06", maxDay("2026-08-06", "2026-08-05"))
 }

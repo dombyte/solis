@@ -23,7 +23,7 @@ all: build
 
 .PHONY: run
 run: build
-	./$(BINARY_NAME) serve -c configs/config.yaml
+	./$(BINARY_NAME)
 
 .PHONY: check
 check:

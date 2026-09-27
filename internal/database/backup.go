@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,12 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dombyte/solis/internal/logging"
+	"github.com/rs/zerolog"
 	sqlite "modernc.org/sqlite"
 )
-
-// backupLogger is the package-level logger for backup operations.
-var backupLogger = logging.NewComponentLogger("database.backup")
 
 // BackupConfig contains configuration for backup operations.
 type BackupConfig struct {
@@ -89,7 +87,7 @@ type backuper interface {
 
 // calculateSHA256 calculates the SHA256 checksum of a file.
 func calculateSHA256(filePath string) (string, error) {
-	// filePath is generated from GenerateBackupFilename, which uses controlled inputs
+	// #nosec G304 -- filePath comes from GenerateBackupFilename/CreateBackup, not user input
 	file, err := os.Open(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open file for checksum: %w", err)
@@ -111,40 +109,31 @@ func calculateSHA256(filePath string) (string, error) {
 // createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API.
 // This provides better consistency and reliability compared to simple file copying.
 // It also verifies the backup integrity using SHA256 checksums.
-func createSQLiteBackup(sourcePath, destPath string) error {
+func createSQLiteBackup(sourcePath, destPath string, log zerolog.Logger) (err error) {
 	srcDB, err := openSourceDatabase(sourcePath)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := srcDB.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close source database: %w", closeErr)
-		}
-	}()
-
+	defer closeInto(&err, srcDB, "source database")
 	if err := ensureDestinationDirectory(destPath); err != nil {
 		return err
 	}
-
 	conn, err := getDatabaseConnection(srcDB)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := conn.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close connection: %w", closeErr)
-		}
-	}()
-
+	defer closeInto(&err, conn, "connection")
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
 	}
+	return verifyBackupFile(destPath, log)
+}
 
-	if err := verifyBackupFile(destPath); err != nil {
-		return err
+// closeInto closes c and records its error in *err unless an earlier error is set.
+func closeInto(err *error, c io.Closer, what string) {
+	if closeErr := c.Close(); closeErr != nil && *err == nil {
+		*err = fmt.Errorf("failed to close %s: %w", what, closeErr)
 	}
-
-	return nil
 }
 
 // openSourceDatabase opens the source database for backup
@@ -183,51 +172,45 @@ func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
 
 // performBackupCopy performs the actual backup copy using SQLite backup API
 func performBackupCopy(conn *sql.Conn, destPath string) error {
-	var backupErr error
-
-	if err := conn.Raw(func(driverConn any) error {
-		bkp, err := driverConn.(backuper).NewBackup(destPath)
-		if err != nil {
-			backupErr = fmt.Errorf("failed to create backup object: %w", err)
-			return backupErr
-		}
-
-		for more := true; more; {
-			more, err = bkp.Step(-1)
-			if err != nil {
-				backupErr = fmt.Errorf("failed during backup step: %w", err)
-				return backupErr
-			}
-		}
-
-		if err := bkp.Finish(); err != nil {
-			backupErr = fmt.Errorf("failed to finish backup: %w", err)
-			return backupErr
-		}
-
-		return nil
-	}); err != nil && backupErr == nil {
-		backupErr = fmt.Errorf("SQLite backup connection error: %w", err)
+	err := conn.Raw(func(driverConn any) error { return runBackup(driverConn, destPath) })
+	if err != nil {
+		return fmt.Errorf("SQLite backup failed: %w", err)
 	}
+	return nil
+}
 
-	if backupErr != nil {
-		return fmt.Errorf("SQLite backup failed: %w", backupErr)
+// runBackup copies the whole database behind driverConn to destPath.
+func runBackup(driverConn any, destPath string) error {
+	b, ok := driverConn.(backuper)
+	if !ok {
+		return errors.New("driver connection does not support backups")
 	}
-
+	bkp, err := b.NewBackup(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create backup object: %w", err)
+	}
+	for more := true; more; {
+		if more, err = bkp.Step(-1); err != nil {
+			return fmt.Errorf("failed during backup step: %w", err)
+		}
+	}
+	if err := bkp.Finish(); err != nil {
+		return fmt.Errorf("failed to finish backup: %w", err)
+	}
 	return nil
 }
 
 // verifyBackupFile verifies the backup file exists, has content, and has a valid checksum
-func verifyBackupFile(destPath string) error {
+func verifyBackupFile(destPath string, log zerolog.Logger) error {
 	backupChecksum, err := calculateSHA256(destPath)
 	if err != nil {
 		if removeErr := os.Remove(destPath); removeErr != nil {
-			backupLogger.Warn().Msgf("Failed to remove incomplete backup file: %v", removeErr)
+			log.Warn().Msgf("Failed to remove incomplete backup file: %v", removeErr)
 		}
 		return fmt.Errorf("failed to verify backup file: %w", err)
 	}
 
-	backupLogger.Debug().Msgf("Backup created with checksum: %s", backupChecksum)
+	log.Debug().Msgf("Backup created with checksum: %s", backupChecksum)
 
 	backupInfo, err := os.Stat(destPath)
 	if err != nil {
@@ -236,18 +219,18 @@ func verifyBackupFile(destPath string) error {
 
 	if backupInfo.Size() == 0 {
 		if removeErr := os.Remove(destPath); removeErr != nil {
-			backupLogger.Warn().Msgf("Failed to remove empty backup file: %v", removeErr)
+			log.Warn().Msgf("Failed to remove empty backup file: %v", removeErr)
 		}
-		return fmt.Errorf("backup file is empty")
+		return errors.New("backup file is empty")
 	}
 
 	return nil
 }
 
 // CreateBackup creates a backup copy of the database file.
-func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
+func CreateBackup(dbPath string, config *BackupConfig, log zerolog.Logger) (string, error) {
 	if !config.Enabled {
-		backupLogger.Info().Msg("Backup disabled, skipping backup creation")
+		log.Info().Msg("Backup disabled, skipping backup creation")
 		return "", nil
 	}
 
@@ -271,10 +254,10 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 	// Generate backup filename
 	backupPath := GenerateBackupFilename(dbPath)
 
-	backupLogger.Info().Msgf("Creating backup (source: %s, destination: %s)", dbPath, backupPath)
+	log.Info().Msgf("Creating backup (source: %s, destination: %s)", dbPath, backupPath)
 
 	// Create the backup using SQLite native backup API
-	if err := createSQLiteBackup(dbPath, backupPath); err != nil {
+	if err := createSQLiteBackup(dbPath, backupPath, log); err != nil {
 		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
 
@@ -284,7 +267,7 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	backupLogger.Info().Msgf("Backup created successfully (file: %s, size: %d)", backupPath, backupInfo.Size())
+	log.Info().Msgf("Backup created successfully (file: %s, size: %d)", backupPath, backupInfo.Size())
 
 	return backupPath, nil
 }
@@ -309,30 +292,9 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 
 	backups := make([]BackupInfo, 0)
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+		if info, ok := backupEntry(backupsDir, entry); ok {
+			backups = append(backups, *info)
 		}
-
-		filename := entry.Name()
-		if !strings.HasSuffix(filename, ".backup") {
-			continue
-		}
-
-		fullPath := filepath.Join(backupsDir, filename)
-		info, err := ExtractBackupInfo(fullPath)
-		if err != nil {
-			// Skip files that don't match our naming pattern
-			continue
-		}
-
-		// Get file size
-		fileInfo, err := os.Stat(fullPath)
-		if err != nil {
-			continue
-		}
-		info.Size = fileInfo.Size()
-
-		backups = append(backups, *info)
 	}
 
 	// Sort by timestamp (newest first)
@@ -343,11 +305,30 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 	return backups, nil
 }
 
+// backupEntry returns the backup info for entry, or false when it is not a backup file
+// following our naming pattern.
+func backupEntry(backupsDir string, entry os.DirEntry) (*BackupInfo, bool) {
+	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".backup") {
+		return nil, false
+	}
+	fullPath := filepath.Join(backupsDir, entry.Name())
+	info, err := ExtractBackupInfo(fullPath)
+	if err != nil {
+		return nil, false
+	}
+	fileInfo, err := os.Stat(fullPath)
+	if err != nil {
+		return nil, false
+	}
+	info.Size = fileInfo.Size()
+	return info, true
+}
+
 // CleanupBackups removes old backup files, keeping only the most recent MaxBackups.
 // If maxBackups <= 0, keeps all backups.
-func CleanupBackups(dbPath string, maxBackups int) error {
+func CleanupBackups(dbPath string, maxBackups int, log zerolog.Logger) error {
 	if maxBackups <= 0 {
-		backupLogger.Debug().Msg("Backup cleanup skipped: maxBackups <= 0")
+		log.Debug().Msg("Backup cleanup skipped: maxBackups <= 0")
 		return nil
 	}
 
@@ -357,7 +338,8 @@ func CleanupBackups(dbPath string, maxBackups int) error {
 	}
 
 	if len(backups) <= maxBackups {
-		backupLogger.Debug().Msgf("No cleanup needed (backups_count: %d, max_backups: %d)", len(backups), maxBackups)
+		log.Debug().Int("backups_count", len(backups)).Int("max_backups", maxBackups).
+			Msg("no backup cleanup needed")
 		return nil
 	}
 
@@ -365,16 +347,16 @@ func CleanupBackups(dbPath string, maxBackups int) error {
 	toRemove := len(backups) - maxBackups
 	backupsToRemove := backups[maxBackups:]
 
-	backupLogger.Info().Msgf("Cleaning up old backups (to_remove: %d, keeping: %d)", toRemove, maxBackups)
+	log.Info().Msgf("Cleaning up old backups (to_remove: %d, keeping: %d)", toRemove, maxBackups)
 
 	// Remove the oldest backups
 	for _, backup := range backupsToRemove {
 		if err := os.Remove(backup.Filename); err != nil {
-			backupLogger.Error().Msgf("Failed to remove backup (file: %s, error: %v)", backup.Filename, err)
+			log.Error().Msgf("Failed to remove backup (file: %s, error: %v)", backup.Filename, err)
 			// Continue with cleanup even if one file fails
 			continue
 		}
-		backupLogger.Debug().Msgf("Removed old backup (file: %s)", backup.Filename)
+		log.Debug().Msgf("Removed old backup (file: %s)", backup.Filename)
 	}
 
 	return nil

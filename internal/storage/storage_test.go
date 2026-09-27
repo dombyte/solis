@@ -1,1070 +1,380 @@
 package storage
 
 import (
-	"os"
+	"context"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/dombyte/solis/internal/config"
+	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
+	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
-func TestNew(t *testing.T) {
-	// Create a temporary directory for the test database
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test.db")
+var ctx = context.Background()
 
-	cfg := &config.StorageSettings{
-		Path:        dbPath,
-		WalMode:     true,
-		Synchronous: "NORMAL",
-		TempStore:   "MEMORY",
+func testConfig(path string) *config.StorageSettings {
+	return &config.StorageSettings{
+		Path: path, DailyRetention: 365 * 24 * time.Hour, MonthlyRetention: 365 * 24 * time.Hour,
+		YearlyRetention: 365 * 24 * time.Hour, ErrorRetention: 30 * 24 * time.Hour,
+		WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY",
 	}
-
-	// Create storage
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	if st == nil {
-		t.Fatal("New() returned nil")
-	}
-
-	// Check configuration
-	if st.config != cfg {
-		t.Error("Storage.config is not set correctly")
-	}
-
-	if st.path != dbPath {
-		t.Errorf("Storage.path = %v, want %v", st.path, dbPath)
-	}
-
-	// Check database file was created
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Error("Database file was not created")
-	}
-
-	// Clean up
-	st.Close()
-
-	// Verify file still exists after close
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Error("Database file was deleted after Close()")
-	}
-
-	// Clean up the file
-	os.Remove(dbPath)
 }
 
-func TestNew_WithDefaultSettings(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_default.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-		// Use default values for other fields
-		WalMode:     false,
-		Synchronous: "",
-		TempStore:   "",
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() with defaults error = %v", err)
-	}
-
-	if st == nil {
-		t.Fatal("New() with defaults returned nil")
-	}
-
-	// Clean up
-	st.Close()
-	os.Remove(dbPath)
+func newStore(t *testing.T, now time.Time) (*Storage, *clocktest.Clock, string) {
+	t.Helper()
+	reg, err := solis.NewRegistry()
+	require.NoError(t, err)
+	clk := clocktest.New(now)
+	path := filepath.Join(t.TempDir(), "solis.db")
+	s, err := New(testConfig(path), reg, clk, zerolog.Nop())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	return s, clk, path
 }
 
-func TestStorage_Close(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_close.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	// Close the storage
-	err = st.Close()
-	if err != nil {
-		t.Errorf("Close() error = %v", err)
-	}
-
-	// Close again (should be safe)
-	err = st.Close()
-	if err != nil {
-		t.Logf("Close() second call error: %v", err)
-	}
-
-	// Clean up
-	os.Remove(dbPath)
+func day(d string) time.Time {
+	t, _ := time.ParseInLocation(period.DayLayout, d, time.Local)
+	return t.Add(12 * time.Hour)
 }
 
-func TestStorage_InitSchema(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_schema.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	// The schema should have been initialized
-	// We can verify by checking if the database file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		t.Error("Database file was not created during schema initialization")
-	}
-
-	// Clean up
-	st.Close()
-	os.Remove(dbPath)
+func dailyValue(t *testing.T, s *Storage, key, d string) float64 {
+	t.Helper()
+	pts, err := s.GetDailyHistory(ctx, key, day(d), day(d))
+	require.NoError(t, err)
+	require.Len(t, pts, 1)
+	return pts[0].Value
 }
 
-func TestStorage_MultipleInstances(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath1 := filepath.Join(tempDir, "test1.db")
-	dbPath2 := filepath.Join(tempDir, "test2.db")
+func TestWritePoll_MaxWriteAndStatus(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	now := day("2026-08-05")
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily:  []DailyRow{{Key: "pv_energy_daily", Day: "2026-08-05", Value: 10.5, Raw: 105}},
+		Status: []StatusRow{{Key: "solis_status", Raw: 3, At: now}},
+	}))
+	// Lower value never replaces the max of the open day.
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily: []DailyRow{{Key: "pv_energy_daily", Day: "2026-08-05", Value: 9, Raw: 90}},
+	}))
+	assert.InDelta(t, 10.5, dailyValue(t, s, "pv_energy_daily", "2026-08-05"), 1e-9)
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily: []DailyRow{{Key: "pv_energy_daily", Day: "2026-08-05", Value: 11, Raw: 110}},
+	}))
+	assert.InDelta(t, 11.0, dailyValue(t, s, "pv_energy_daily", "2026-08-05"), 1e-9)
 
-	cfg1 := &config.StorageSettings{
-		Path: dbPath1,
-	}
-
-	cfg2 := &config.StorageSettings{
-		Path: dbPath2,
-	}
-
-	st1, err := New(cfg1)
-	if err != nil {
-		t.Fatalf("New() first instance error = %v", err)
-	}
-
-	st2, err := New(cfg2)
-	if err != nil {
-		t.Fatalf("New() second instance error = %v", err)
-	}
-
-	// They should be different instances
-	if st1 == st2 {
-		t.Error("Two storage instances are the same")
-	}
-
-	// Clean up
-	st1.Close()
-	st2.Close()
-	os.Remove(dbPath1)
-	os.Remove(dbPath2)
+	hist, err := s.GetErrorHistory(ctx, "solis_status", now.Add(-time.Hour), now.Add(time.Hour))
+	require.NoError(t, err)
+	require.Len(t, hist, 1)
+	assert.InDelta(t, 3.0, hist[0].RawValue, 0)
 }
 
-func TestStorage_StoreAllRegisters(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_store.db")
+func TestWritePoll_ClosedDayRejected(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily: []DailyRow{{Key: "pv_energy_daily", Day: "2026-08-05", Value: 20, Raw: 200}},
+		Close: []DayClose{{Key: "pv_energy_daily", Day: "2026-08-05"}},
+	}))
 
-	cfg := &config.StorageSettings{
-		Path: dbPath,
+	err := s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 25, Raw: 250}, // late poll
+		{Key: "grid_export_daily", Day: "2026-08-05", Value: 1, Raw: 10}, // other key open
+		{Key: "pv_energy_daily", Day: "2026-08-06", Value: 0.1, Raw: 1},
+	}})
+	require.ErrorIs(t, err, ErrPeriodClosed)
+	var pce *PeriodClosedError
+	require.True(t, errors.As(err, &pce))
+	assert.Equal(t, "2026-08-05", pce.Period)
+	assert.Contains(t, pce.Error(), "closed")
+
+	assert.InDelta(t, 20.0, dailyValue(t, s, "pv_energy_daily", "2026-08-05"), 1e-9)
+	assert.InDelta(t, 1.0, dailyValue(t, s, "grid_export_daily", "2026-08-05"), 1e-9)
+	assert.InDelta(t, 0.1, dailyValue(t, s, "pv_energy_daily", "2026-08-06"), 1e-9)
+}
+
+func TestWritePoll_DomainGuards(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	err := s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "grid_energy_daily", Day: "2026-08-05", Value: 1}, // net: aggregator only
+		{Key: "pv_energy_monthly", Day: "2026-08-05", Value: 1}, // computed
+		{Key: "nope", Day: "2026-08-05", Value: 1},
+	}})
+	assert.ErrorIs(t, err, ErrWriteDomain)
+	assert.ErrorIs(t, err, ErrUnknownKey)
+	var wde *WriteDomainError
+	require.True(t, errors.As(err, &wde))
+	assert.Contains(t, wde.Error(), "poller")
+
+	assert.ErrorIs(t, s.WritePoll(ctx, PollWrite{Status: []StatusRow{{Key: "pv_energy_daily"}}}),
+		ErrWriteDomain)
+	assert.ErrorIs(t, s.WritePoll(ctx, PollWrite{Close: []DayClose{{Key: "zz"}}}), ErrUnknownKey)
+}
+
+func TestWriteComputed_DomainAndFreeze(t *testing.T) {
+	s, clk, _ := newStore(t, day("2026-08-05"))
+	at := clk.Now()
+	rows := []PeriodRow{
+		{Level: period.Monthly, Key: "pv_energy_monthly", Period: "2026-08", Value: 100.123},
+		{Level: period.Yearly, Key: "pv_energy_yearly", Period: "2026", Value: 900},
+		{Level: period.Total, Key: "pv_energy_total", Value: 5000},
+		{Level: period.Daily, Key: "grid_energy_daily", Period: "2026-08-05", Value: -2.5},
 	}
+	require.NoError(t, s.WriteComputed(ctx, ComputedWrite{Rows: rows, At: at}))
 
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+	// REPLACE semantics: a lower recomputation replaces the open period.
+	require.NoError(t, s.WriteComputed(ctx, ComputedWrite{Rows: []PeriodRow{
+		{Level: period.Monthly, Key: "pv_energy_monthly", Period: "2026-08", Value: 99},
+	}, Freezes: []Freeze{{Level: period.Monthly, Period: "2026-08"}}, At: at}))
+	m, err := s.GetMonthlyHistory(ctx, "pv_energy_monthly", day("2026-08-01"), day("2026-08-01"))
+	require.NoError(t, err)
+	assert.InDelta(t, 99.0, m[0].Value, 1e-9)
+
+	err = s.WriteComputed(ctx, ComputedWrite{Rows: []PeriodRow{
+		{Level: period.Monthly, Key: "pv_energy_monthly", Period: "2026-08", Value: 1},
+		{Level: period.Monthly, Key: "pv_energy_daily", Period: "2026-08", Value: 1},
+		{Level: period.Daily, Key: "pv_energy_daily", Period: "2026-08-05", Value: 1},
+	}, At: at})
+	assert.ErrorIs(t, err, ErrPeriodClosed)
+	assert.ErrorIs(t, err, ErrWriteDomain)
+
+	total, err := s.GetTotalHistory(ctx, "pv_energy_total")
+	require.NoError(t, err)
+	assert.InDelta(t, 5000.0, total.Value, 1e-9)
+	assert.Equal(t, at.Format(time.RFC3339), total.Timestamp)
+	assert.InDelta(t, -2.5, dailyValue(t, s, "grid_energy_daily", "2026-08-05"), 1e-9)
+
+	missing, err := s.GetTotalHistory(ctx, "grid_energy_total")
+	require.NoError(t, err)
+	assert.Nil(t, missing)
+
+	assert.Error(t, s.WriteComputed(ctx, ComputedWrite{Freezes: []Freeze{{Level: period.Total}}}))
+}
+
+func TestEnsureCutover_FreezesPreCutoverHistory(t *testing.T) {
+	s, _, path := newStore(t, day("2026-09-27"))
+	p := period.Of(day("2026-09-27"))
+	cut, created, err := s.EnsureCutover(ctx, p)
+	require.NoError(t, err)
+	assert.True(t, created)
+	assert.Equal(t, "2026-09-27", cut)
+
+	st, err := s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08", st.FrozenMonth)
+	assert.Equal(t, "2025", st.FrozenYear)
+	assert.Equal(t, "2025", st.BaselineYear)
+	assert.Equal(t, "2026-09-25", st.FrozenNetDay)
+	assert.Equal(t, "2026-09-25", st.ClosedThrough)
+
+	// Pre-cutover rows are immutable for the aggregator.
+	err = s.WriteComputed(ctx, ComputedWrite{Rows: []PeriodRow{
+		{Level: period.Monthly, Key: "pv_energy_monthly", Period: "2026-08", Value: 1},
+		{Level: period.Yearly, Key: "pv_energy_yearly", Period: "2025", Value: 1},
+	}})
+	assert.ErrorIs(t, err, ErrPeriodClosed)
+
+	// Second call is a no-op; state survives reopening.
+	_, created, err = s.EnsureCutover(ctx, period.Of(day("2026-10-01")))
+	require.NoError(t, err)
+	assert.False(t, created)
+	require.NoError(t, s.Close())
+
+	reg, _ := solis.NewRegistry()
+	s2, err := New(testConfig(path), reg, clocktest.New(day("2026-10-01")), zerolog.Nop())
+	require.NoError(t, err)
+	defer func() { _ = s2.Close() }()
+	st2, err := s2.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, st, st2)
+}
+
+func TestSumDaily_ExplicitBounds(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	var rows []DailyRow
+	for _, d := range []string{"2026-07-31", "2026-08-01", "2026-08-04", "2026-08-05", "2026-08-09"} {
+		rows = append(rows, DailyRow{Key: "pv_energy_daily", Day: d, Value: 10, Raw: 100})
 	}
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: rows}))
 
-	// Create test data
-	timestamp := time.Now()
-	values := map[string]*solis.Value{
-		"test_register_1": {
-			Key:          "test_register_1",
-			Name:         "Test Register 1",
-			RawValue:     100,
-			DecodedValue: 10.0,
-			Unit:         "V",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
+	sum, err := s.SumDaily(ctx, "pv_energy_daily", "2026-08-01", "2026-08-05")
+	require.NoError(t, err)
+	assert.InDelta(t, 30.0, sum, 1e-9, "future-dated 2026-08-09 excluded by the bound")
+
+	all, err := s.SumDaily(ctx, "pv_energy_daily", "", "2026-12-31")
+	require.NoError(t, err)
+	assert.InDelta(t, 50.0, all, 1e-9)
+
+	none, err := s.SumDaily(ctx, "grid_import_daily", "2026-08-01", "2026-08-31")
+	require.NoError(t, err)
+	assert.Zero(t, none)
+
+	has, err := s.HasDailyData(ctx)
+	require.NoError(t, err)
+	assert.True(t, has)
+}
+
+func TestBaselineFold_Idempotent(t *testing.T) {
+	s, _, _ := newStore(t, day("2027-01-01"))
+	fold := BaselineFold{Year: "2026", Add: map[string]float64{"pv_energy_total": 4000}}
+	w := ComputedWrite{Freezes: []Freeze{{Level: period.Yearly, Period: "2026"}},
+		Folds: []BaselineFold{fold}}
+	require.NoError(t, s.WriteComputed(ctx, w))
+	require.NoError(t, s.WriteComputed(ctx, w)) // duplicate close event
+
+	st, err := s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026", st.BaselineYear)
+	assert.Equal(t, "2026", st.FrozenYear)
+	assert.InDelta(t, 4000.0, st.Baseline["pv_energy_total"], 1e-9)
+}
+
+func TestSeed(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	now := day("2026-08-05")
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily: []DailyRow{
+			{Key: "pv_energy_daily", Day: "2026-08-04", Value: 30, Raw: 300},
+			{Key: "pv_energy_daily", Day: "2026-08-05", Value: 2, Raw: 20},
+			{Key: "grid_export_daily", Day: "2026-08-01", Value: 9, Raw: 90},
 		},
-		"test_register_2": {
-			Key:          "test_register_2",
-			Name:         "Test Register 2",
-			RawValue:     200,
-			DecodedValue: 20.0,
-			Unit:         "A",
-			Timestamp:    timestamp,
-			DataType:     solis.Int16,
-			Stability:    solis.Dynamic,
+		Status: []StatusRow{
+			{Key: "solis_status", Raw: 3, At: now},
+			{Key: "grid_fault_1", Raw: 1, At: now},
 		},
-	}
+		Close: []DayClose{{Key: "pv_energy_daily", Day: "2026-08-04"}},
+	}))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Status: []StatusRow{{Key: "solis_status", Raw: 15, At: now.Add(time.Second)}},
+	}))
 
-	// Store the data
-	err = st.StoreAllRegisters(values, timestamp)
-	if err != nil {
-		t.Errorf("StoreAllRegisters() error = %v", err)
-	}
+	seed, err := s.Seed(ctx, []string{"2026-08-04", "2026-08-05"})
+	require.NoError(t, err)
+	assert.InDelta(t, 30.0, seed.Daily["2026-08-04"]["pv_energy_daily"], 0)
+	assert.InDelta(t, 2.0, seed.Daily["2026-08-05"]["pv_energy_daily"], 0)
+	assert.NotContains(t, seed.Daily["2026-08-05"], "grid_export_daily")
+	assert.InDelta(t, 15.0, seed.Status["solis_status"], 0)
+	assert.InDelta(t, 1.0, seed.Status["grid_fault_1"], 0)
+	assert.Equal(t, "2026-08-04", seed.Closed["pv_energy_daily"])
 
-	// Clean up
-	st.Close()
-	os.Remove(dbPath)
+	empty, err := s.Seed(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty.Daily)
 }
 
-func TestStorage_StoreAllRegisters_Empty(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_empty.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
+func TestClosedThroughNeedsEveryKey(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	reg, _ := solis.NewRegistry()
+	var closes []DayClose
+	for _, k := range reg.DailyKeys() {
+		closes = append(closes, DayClose{Key: k, Day: "2026-08-05"})
 	}
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Close: closes[1:]}))
+	st, _ := s.CloseState(ctx)
+	assert.Empty(t, st.ClosedThrough)
 
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	// Store empty data (should not error)
-	err = st.StoreAllRegisters(map[string]*solis.Value{}, time.Now())
-	if err != nil {
-		t.Errorf("StoreAllRegisters() with empty map error = %v", err)
-	}
-
-	// Clean up
-	st.Close()
-	os.Remove(dbPath)
+	closes[0].Day = "2026-08-04"
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Close: closes[:1]}))
+	st, _ = s.CloseState(ctx)
+	assert.Equal(t, "2026-08-04", st.ClosedThrough)
 }
 
-func TestStorage_StoreAllRegisters_StableAndDynamic(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_all.db")
+func TestBackfill(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-09-27"))
+	_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-09-27")))
+	require.NoError(t, err)
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-09-26", Value: 5, Raw: 50},
+	}}))
 
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
+	err = s.Backfill(ctx, func(tx BackfillTx) error {
+		sum, err := tx.SumDaily("pv_energy_daily", "2026-09-01", "2026-09-30")
+		require.NoError(t, err)
+		assert.InDelta(t, 5.0, sum, 0)
+		_, ok, err := tx.PeriodValue(period.Monthly, "pv_energy_monthly", "2026-08")
+		require.NoError(t, err)
+		assert.False(t, ok)
+		// Frozen month is writable inside the backfill transaction.
+		require.NoError(t, tx.PutPeriod(period.Monthly, "pv_energy_monthly", "2026-08", 42))
+		v, ok, err := tx.PeriodValue(period.Monthly, "pv_energy_monthly", "2026-08")
+		require.NoError(t, err)
+		assert.True(t, ok)
+		assert.InDelta(t, 42.0, v, 0)
+		year, base := tx.Baseline()
+		assert.Equal(t, "2025", year)
+		assert.Empty(t, base)
+		require.NoError(t, tx.PutBaseline(map[string]float64{"pv_energy_total": 7}))
+		assert.Error(t, tx.PutPeriod(period.Total, "pv_energy_total", "", 1))
+		assert.ErrorIs(t, tx.PutPeriod(period.Monthly, "pv_energy_daily", "2026-08", 1),
+			ErrWriteDomain)
+		_, _, err = tx.PeriodValue(period.Total, "x", "")
+		assert.Error(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+	st, _ := s.CloseState(ctx)
+	assert.InDelta(t, 7.0, st.Baseline["pv_energy_total"], 0)
 
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	// Create test data with both stable and dynamic registers
-	timestamp := time.Now()
-	values := map[string]*solis.Value{
-		"stable_register": {
-			Key:          "stable_register",
-			Name:         "Stable Register",
-			RawValue:     100,
-			DecodedValue: 100,
-			Unit:         "",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Stable,
-		},
-		"dynamic_register": {
-			Key:          "dynamic_register",
-			Name:         "Dynamic Register",
-			RawValue:     200,
-			DecodedValue: 20.0,
-			Unit:         "V",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	// Store all registers
-	err = st.StoreAllRegisters(values, timestamp)
-	if err != nil {
-		t.Errorf("StoreAllRegisters() error = %v", err)
-	}
-
-	// Clean up
-	st.Close()
-	os.Remove(dbPath)
+	// A failing job rolls everything back.
+	boom := errors.New("boom")
+	err = s.Backfill(ctx, func(tx BackfillTx) error {
+		require.NoError(t, tx.PutPeriod(period.Monthly, "pv_energy_monthly", "2026-08", 1))
+		return boom
+	})
+	assert.ErrorIs(t, err, boom)
+	m, _ := s.GetMonthlyHistory(ctx, "pv_energy_monthly", day("2026-08-01"), day("2026-08-01"))
+	assert.InDelta(t, 42.0, m[0].Value, 0)
 }
 
-func TestStorage_IntervalTypes(t *testing.T) {
-	// Only IntervalRaw is supported now (aggregated intervals removed)
-	if string(IntervalRaw) != "raw" {
-		t.Errorf("IntervalRaw = %v, want 'raw'", string(IntervalRaw))
-	}
+func TestHistoryAndJSONRounding(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	require.NoError(t, s.WriteComputed(ctx, ComputedWrite{Rows: []PeriodRow{
+		{Level: period.Yearly, Key: "pv_energy_yearly", Period: "2026", Value: 1.23456},
+	}}))
+	y, err := s.GetYearlyHistory(ctx, "pv_energy_yearly", day("2025-01-01"), day("2026-01-01"))
+	require.NoError(t, err)
+	require.Len(t, y, 1)
+	assert.InDelta(t, 1.23456, y[0].Value, 1e-12, "stored at full precision")
+
+	b, err := json.Marshal(y[0])
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"year":"2026","value":1.23,"raw_value":1.23}`, string(b))
+
+	b, _ = json.Marshal(DailyDataPoint{Date: "2026-08-05", Value: 1.005, RawValue: 10})
+	assert.JSONEq(t, `{"date":"2026-08-05","value":1.0,"raw_value":10}`, string(b))
+	b, _ = json.Marshal(MonthlyDataPoint{Month: "2026-08", Value: 2.499})
+	assert.JSONEq(t, `{"month":"2026-08","value":2.5,"raw_value":0}`, string(b))
+	b, _ = json.Marshal(TotalDataPoint{Value: 3.333, Timestamp: "t"})
+	assert.JSONEq(t, `{"value":3.33,"raw_value":0,"timestamp":"t"}`, string(b))
+	b, _ = json.Marshal(ErrorDataPoint{Timestamp: "t", RawValue: 4})
+	assert.JSONEq(t, `{"timestamp":"t","raw_value":4}`, string(b))
 }
 
-func TestStorage_RegisterValue(t *testing.T) {
-	// Test RegisterValue struct
-	value := RegisterValue{
-		Key:         "test_key",
-		RawValue:    100,
-		StringValue: "",
-		Timestamp:   time.Now(),
-	}
-
-	if value.Key != "test_key" {
-		t.Errorf("RegisterValue.Key = %v, want test_key", value.Key)
-	}
-
-	if value.RawValue != 100 {
-		t.Errorf("RegisterValue.RawValue = %v, want 100", value.RawValue)
-	}
-}
-
-func TestStorage_HistoryResult(t *testing.T) {
-	// Test HistoryResult struct
-	result := &HistoryResult{
-		Key:      "test_key",
-		Unit:     "V",
-		Interval: IntervalRaw,
-		Data:     []HistoryDataPoint{},
-	}
-
-	if result.Key != "test_key" {
-		t.Errorf("HistoryResult.Key = %v, want test_key", result.Key)
-	}
-
-	if result.Unit != "V" {
-		t.Errorf("HistoryResult.Unit = %v, want V", result.Unit)
-	}
-
-	if result.Interval != IntervalRaw {
-		t.Errorf("HistoryResult.Interval = %v, want %v", result.Interval, IntervalRaw)
-	}
-
-	if result.Data == nil {
-		t.Error("HistoryResult.Data is nil")
-	}
-}
-
-func TestStorage_HistoryDataPoint(t *testing.T) {
-	// Test HistoryDataPoint struct
-	point := HistoryDataPoint{
-		Timestamp: "2024-01-01T00:00:00Z",
-		Value:     10.5,
-	}
-
-	if point.Timestamp != "2024-01-01T00:00:00Z" {
-		t.Errorf("HistoryDataPoint.Timestamp = %v, want 2024-01-01T00:00:00Z", point.Timestamp)
-	}
-
-	if point.Value != 10.5 {
-		t.Errorf("HistoryDataPoint.Value = %v, want 10.5", point.Value)
-	}
-}
-
-// TestStorage_GetMonthlySum tests the GetMonthlySum method
-func TestStorage_GetMonthlySum(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_monthly_sum.db")
-
-	cfg := &config.StorageSettings{
-		Path:           dbPath,
-		DailyRetention: 365 * 24 * time.Hour,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Insert some test daily data
-	timestamp := time.Now()
-	dailyValues := map[string]*solis.Value{
-		"energy_consumption_daily": {
-			Key:          "energy_consumption_daily",
-			Name:         "Today Energy Consumption",
-			RawValue:     100,
-			DecodedValue: 10.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	// Store the data
-	err = st.StoreAllRegisters(dailyValues, timestamp)
-	if err != nil {
-		t.Fatalf("StoreAllRegisters() error = %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(10 * time.Millisecond)
-
-	// Get monthly sum for current month
-	currentMonth := timestamp.Format("2006-01")
-	sumValue, sumRawValue, err := st.GetMonthlySum("energy_consumption_daily", currentMonth)
-	if err != nil {
-		t.Fatalf("GetMonthlySum() error = %v", err)
-	}
-
-	// Since we just inserted one value, the sum should be that value
-	// Note: the value stored in daily_values is scaled, so sumValue should be 10.0 (not 100)
-	// But GetMonthlySum returns the sum of the 'value' column which is decodedValue * scale
-	// In our test, scale is 0.1 for energy_consumption_daily, so decodedValue = 100 * 0.1 = 10.0
-	if sumValue < 0 {
-		t.Errorf("GetMonthlySum() sumValue = %v, want >= 0", sumValue)
-	}
-
-	t.Logf("GetMonthlySum for %s: value=%.2f, raw=%.2f", currentMonth, sumValue, sumRawValue)
-}
-
-// TestStorage_GetMonthlySum_NoData tests GetMonthlySum with no data
-func TestStorage_GetMonthlySum_NoData(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_monthly_sum_nodata.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Get monthly sum for a register with no data
-	sumValue, sumRawValue, err := st.GetMonthlySum("energy_consumption_daily", "2024-01")
-	if err != nil {
-		t.Fatalf("GetMonthlySum() with no data error = %v", err)
-	}
-
-	// Should return 0 for no data
-	if sumValue != 0 {
-		t.Errorf("GetMonthlySum() with no data sumValue = %v, want 0", sumValue)
-	}
-	if sumRawValue != 0 {
-		t.Errorf("GetMonthlySum() with no data sumRawValue = %v, want 0", sumRawValue)
-	}
-}
-
-// TestStorage_GetYearlySum tests the GetYearlySum method
-func TestStorage_GetYearlySum(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_yearly_sum.db")
-
-	cfg := &config.StorageSettings{
-		Path:           dbPath,
-		DailyRetention: 365 * 24 * time.Hour,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Insert some test daily data
-	timestamp := time.Now()
-	dailyValues := map[string]*solis.Value{
-		"energy_consumption_daily": {
-			Key:          "energy_consumption_daily",
-			Name:         "Today Energy Consumption",
-			RawValue:     150,
-			DecodedValue: 15.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	// Store the data
-	err = st.StoreAllRegisters(dailyValues, timestamp)
-	if err != nil {
-		t.Fatalf("StoreAllRegisters() error = %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(10 * time.Millisecond)
-
-	// Get yearly sum for current year
-	currentYear := timestamp.Format("2006")
-	sumValue, sumRawValue, err := st.GetYearlySum("energy_consumption_daily", currentYear)
-	if err != nil {
-		t.Fatalf("GetYearlySum() error = %v", err)
-	}
-
-	// Should return a positive value
-	if sumValue < 0 {
-		t.Errorf("GetYearlySum() sumValue = %v, want >= 0", sumValue)
-	}
-
-	t.Logf("GetYearlySum for %s: value=%.2f, raw=%.2f", currentYear, sumValue, sumRawValue)
-}
-
-// TestStorage_GetYearlySum_NoData tests GetYearlySum with no data
-func TestStorage_GetYearlySum_NoData(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_yearly_sum_nodata.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Get yearly sum for a register with no data
-	sumValue, sumRawValue, err := st.GetYearlySum("energy_consumption_daily", "2024")
-	if err != nil {
-		t.Fatalf("GetYearlySum() with no data error = %v", err)
-	}
-
-	// Should return 0 for no data
-	if sumValue != 0 {
-		t.Errorf("GetYearlySum() with no data sumValue = %v, want 0", sumValue)
-	}
-	if sumRawValue != 0 {
-		t.Errorf("GetYearlySum() with no data sumRawValue = %v, want 0", sumRawValue)
-	}
-}
-
-// TestStorage_StoreMonthlyDataPoint tests the StoreMonthlyDataPoint method
-func TestStorage_StoreMonthlyDataPoint(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_store_monthly.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Create a test monthly data point
-	// For computed monthly registers with scale=1, both Value and RawValue should be the same
-	dp := &MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    1005.0,  // This is the decoded monthly value
-		RawValue: 10050.0, // This is the sum of daily raw values (used for auditing, but stored as value/scale)
-	}
-
-	// Store it for a valid register key (energy_consumption_monthly has scale=1)
-	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", dp)
-	if err != nil {
-		t.Fatalf("StoreMonthlyDataPoint() error = %v", err)
-	}
-
-	// Verify it was stored by retrieving it
-	retrieved, err := st.GetMonthlyHistory("energy_consumption_monthly",
-		time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC),
-		time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory() after store error = %v", err)
-	}
-
-	if len(retrieved) == 0 {
-		t.Error("StoreMonthlyDataPoint() did not store the data")
-	} else {
-		// Check that the stored value is correct
-		// For registers with scale=1, raw_value should equal value
-		found := false
-		for _, storedDp := range retrieved {
-			if storedDp.Month == "2024-06" {
-				// The stored value should be dp.Value (already decoded)
-				if storedDp.Value != 1005.0 {
-					t.Errorf("Stored value = %v, want %v", storedDp.Value, 1005.0)
-				}
-				// For scale=1 registers, raw_value should equal value
-				if storedDp.RawValue != 1005.0 {
-					t.Errorf("Stored raw_value = %v, want %v (same as value for scale=1)", storedDp.RawValue, 1005.0)
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("Stored monthly data point not found in history")
-		}
-	}
-}
-
-// TestStorage_StoreMonthlyDataPoint_InvalidRegister tests StoreMonthlyDataPoint with invalid register
-func TestStorage_StoreMonthlyDataPoint_InvalidRegister(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_store_monthly_invalid.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Create a test monthly data point
-	dp := &MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    100.5,
-		RawValue: 1005,
-	}
-
-	// Try to store with invalid register key
-	err = st.StoreMonthlyDataPoint("invalid_register_key", dp)
-	if err == nil {
-		t.Error("StoreMonthlyDataPoint() with invalid register expected error, got nil")
-	}
-}
-
-// TestStorage_StoreYearlyDataPoint tests the StoreYearlyDataPoint method
-func TestStorage_StoreYearlyDataPoint(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_store_yearly.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Create a test yearly data point
-	// For computed yearly registers, Value should be the decoded/summed value
-	// and RawValue should be the sum of daily raw values
-	dp := &YearlyDataPoint{
-		Year:     "2024",
-		Value:    10005.0,  // This is the decoded yearly value (what we want stored)
-		RawValue: 100050.0, // This is the sum of daily raw values (for auditing)
-	}
-
-	// Store it for a valid register key
-	err = st.StoreYearlyDataPoint("energy_consumption_yearly", dp)
-	if err != nil {
-		t.Fatalf("StoreYearlyDataPoint() error = %v", err)
-	}
-
-	// Verify it was stored by retrieving it
-	retrieved, err := st.GetYearlyHistory("energy_consumption_yearly",
-		time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
-		time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("GetYearlyHistory() after store error = %v", err)
-	}
-
-	if len(retrieved) == 0 {
-		t.Error("StoreYearlyDataPoint() did not store the data")
-	} else {
-		found := false
-		for _, storedDp := range retrieved {
-			if storedDp.Year == "2024" {
-				// The stored value should be dp.Value (already decoded), not dp.RawValue * scale
-				if storedDp.Value != 10005.0 {
-					t.Errorf("Stored value = %v, want %v", storedDp.Value, 10005.0)
-				}
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("Stored yearly data point not found in history")
-		}
-	}
-}
-
-// TestStorage_StoreYearlyDataPoint_InvalidRegister tests StoreYearlyDataPoint with invalid register
-func TestStorage_StoreYearlyDataPoint_InvalidRegister(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_store_yearly_invalid.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Create a test yearly data point
-	dp := &YearlyDataPoint{
-		Year:     "2024",
-		Value:    1000.5,
-		RawValue: 10005,
-	}
-
-	// Try to store with invalid register key
-	err = st.StoreYearlyDataPoint("invalid_register_key", dp)
-	if err == nil {
-		t.Error("StoreYearlyDataPoint() with invalid register expected error, got nil")
-	}
-}
-
-// TestStorage_GetTotalHistory tests the GetTotalHistory method
-func TestStorage_GetTotalHistory(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_total_history.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Insert some test total data by storing a total register value
-	timestamp := time.Now()
-	totalValues := map[string]*solis.Value{
-		"grid_export_total": {
-			Key:          "grid_export_total",
-			Name:         "Total Energy Fed Into Grid",
-			RawValue:     5000,
-			DecodedValue: 500.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint32,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(totalValues, timestamp)
-	if err != nil {
-		t.Fatalf("StoreAllRegisters() error = %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(10 * time.Millisecond)
-
-	// Get total history
-	dp, err := st.GetTotalHistory("grid_export_total")
-	if err != nil {
-		t.Fatalf("GetTotalHistory() error = %v", err)
-	}
-
-	if dp == nil {
-		t.Fatal("GetTotalHistory() returned nil")
-	}
-
-	// Check that we got the stored value
-	// Note: the value is scaled by the register's scale
-	if dp.Value <= 0 {
-		t.Errorf("GetTotalHistory() dp.Value = %v, want > 0", dp.Value)
-	}
-
-	t.Logf("GetTotalHistory: value=%.2f, raw=%.2f, timestamp=%s", dp.Value, dp.RawValue, dp.Timestamp)
-}
-
-// TestStorage_GetTotalHistory_NoData tests GetTotalHistory with no data
-func TestStorage_GetTotalHistory_NoData(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_total_history_nodata.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Get total history for a register with no data
-	dp, err := st.GetTotalHistory("grid_export_total")
-	if err != nil {
-		t.Fatalf("GetTotalHistory() with no data error = %v", err)
-	}
-
-	// Should return nil for no data
-	if dp != nil {
-		t.Errorf("GetTotalHistory() with no data returned %v, want nil", dp)
-	}
-}
-
-// TestStorage_GetTotalHistory_InvalidKey tests GetTotalHistory with invalid key
-func TestStorage_GetTotalHistory_InvalidKey(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_total_history_invalid.db")
-
-	cfg := &config.StorageSettings{
-		Path: dbPath,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Get total history for an invalid register key
-	// This should not error, but return nil
-	dp, err := st.GetTotalHistory("invalid_register_key")
-	if err != nil {
-		t.Logf("GetTotalHistory() with invalid key error: %v", err)
-		return
-	}
-
-	// Should return nil for invalid key
-	if dp != nil {
-		t.Errorf("GetTotalHistory() with invalid key returned %v, want nil", dp)
-	}
-}
-
-// TestStorage_MonthlyDataPoint tests the MonthlyDataPoint struct
-func TestStorage_MonthlyDataPoint(t *testing.T) {
-	dp := &MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    150.5,
-		RawValue: 1505,
-	}
-
-	if dp.Month != "2024-06" {
-		t.Errorf("MonthlyDataPoint.Month = %v, want 2024-06", dp.Month)
-	}
-
-	if dp.Value != 150.5 {
-		t.Errorf("MonthlyDataPoint.Value = %v, want 150.5", dp.Value)
-	}
-
-	if dp.RawValue != 1505 {
-		t.Errorf("MonthlyDataPoint.RawValue = %v, want 1505", dp.RawValue)
-	}
-}
-
-// TestStorage_YearlyDataPoint tests the YearlyDataPoint struct
-func TestStorage_YearlyDataPoint(t *testing.T) {
-	dp := &YearlyDataPoint{
-		Year:     "2024",
-		Value:    1500.5,
-		RawValue: 15005,
-	}
-
-	if dp.Year != "2024" {
-		t.Errorf("YearlyDataPoint.Year = %v, want 2024", dp.Year)
-	}
-
-	if dp.Value != 1500.5 {
-		t.Errorf("YearlyDataPoint.Value = %v, want 1500.5", dp.Value)
-	}
-
-	if dp.RawValue != 15005 {
-		t.Errorf("YearlyDataPoint.RawValue = %v, want 15005", dp.RawValue)
-	}
-}
-
-// TestStorage_TotalDataPoint tests the TotalDataPoint struct
-func TestStorage_TotalDataPoint(t *testing.T) {
-	dp := &TotalDataPoint{
-		Value:     5000.5,
-		RawValue:  50005,
-		Timestamp: "2024-06-26T00:00:00Z",
-	}
-
-	if dp.Value != 5000.5 {
-		t.Errorf("TotalDataPoint.Value = %v, want 5000.5", dp.Value)
-	}
-
-	if dp.RawValue != 50005 {
-		t.Errorf("TotalDataPoint.RawValue = %v, want 50005", dp.RawValue)
-	}
-
-	if dp.Timestamp != "2024-06-26T00:00:00Z" {
-		t.Errorf("TotalDataPoint.Timestamp = %v, want 2024-06-26T00:00:00Z", dp.Timestamp)
-	}
-}
-
-// TestCleanupAll tests the unified cleanup function
 func TestCleanupAll(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_cleanup_all.db")
-
-	// Use very short retention periods for testing
-	cfg := &config.StorageSettings{
-		Path:             dbPath,
-		DailyRetention:   time.Hour, // 1 hour
-		MonthlyRetention: time.Hour, // 1 hour
-		YearlyRetention:  time.Hour, // 1 hour
-		ErrorRetention:   time.Hour, // 1 hour
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Insert old data that should be cleaned up
-	// Use dates far enough in the past to ensure they're cleaned up
-	oldDailyDate := time.Now().Add(-2 * 24 * time.Hour).Format("2006-01-02")
-	oldMonthlyDate := time.Now().Add(-2 * 30 * 24 * time.Hour).Format("2006-01")
-	oldYearlyDate := "2020" // Far in the past
-	oldErrorTime := time.Now().Add(-2 * time.Hour)
-
-	// Insert old daily data
-	_, err = st.db.Exec("INSERT INTO daily_values (register_key, date, value, raw_value) VALUES (?, ?, ?, ?)",
-		"test_daily", oldDailyDate, 100.0, 1000)
-	if err != nil {
-		t.Fatalf("Failed to insert test daily data: %v", err)
-	}
-
-	// Insert old monthly data
-	_, err = st.db.Exec("INSERT INTO monthly_values (register_key, month, value, raw_value) VALUES (?, ?, ?, ?)",
-		"test_monthly", oldMonthlyDate, 200.0, 2000)
-	if err != nil {
-		t.Fatalf("Failed to insert test monthly data: %v", err)
-	}
-
-	// Insert old yearly data
-	_, err = st.db.Exec("INSERT INTO yearly_values (register_key, year, value, raw_value) VALUES (?, ?, ?, ?)",
-		"test_yearly", oldYearlyDate, 300.0, 3000)
-	if err != nil {
-		t.Fatalf("Failed to insert test yearly data: %v", err)
-	}
-
-	// Insert old error data
-	_, err = st.db.Exec("INSERT INTO error_data (register_key, timestamp, raw_value, string_value) VALUES (?, ?, ?, ?)",
-		"test_error", oldErrorTime, 400.0, "test error")
-	if err != nil {
-		t.Fatalf("Failed to insert test error data: %v", err)
-	}
-
-	// Verify data was inserted
-	var count int
-	err = st.db.QueryRow("SELECT COUNT(*) FROM daily_values").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count daily data: %v", err)
-	}
-	if count != 1 {
-		t.Errorf("Expected 1 daily data row, got %d", count)
-	}
-
-	// Run cleanup - should remove all old data
-	err = st.CleanupAll()
-	if err != nil {
-		t.Fatalf("CleanupAll() error = %v", err)
-	}
-
-	// Verify data was cleaned up
-	err = st.db.QueryRow("SELECT COUNT(*) FROM daily_values").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count daily data after cleanup: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 daily data rows after cleanup, got %d", count)
-	}
-
-	err = st.db.QueryRow("SELECT COUNT(*) FROM monthly_values").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count monthly data after cleanup: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 monthly data rows after cleanup, got %d", count)
-	}
-
-	err = st.db.QueryRow("SELECT COUNT(*) FROM yearly_values").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count yearly data after cleanup: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 yearly data rows after cleanup, got %d", count)
-	}
-
-	err = st.db.QueryRow("SELECT COUNT(*) FROM error_data").Scan(&count)
-	if err != nil {
-		t.Fatalf("Failed to count error data after cleanup: %v", err)
-	}
-	if count != 0 {
-		t.Errorf("Expected 0 error data rows after cleanup, got %d", count)
-	}
-
-	// Verify last cleanup time was set
-	if st.GetLastCleanupTime().IsZero() {
-		t.Error("Expected last cleanup time to be set after CleanupAll()")
-	}
+	s, clk, _ := newStore(t, day("2026-08-05"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2024-01-01", Value: 1},
+		{Key: "pv_energy_daily", Day: "2026-08-01", Value: 1},
+	}, Status: []StatusRow{{Key: "solis_status", Raw: 1, At: clk.Now().AddDate(0, -3, 0)}}}))
+	require.NoError(t, s.CleanupAll(ctx))
+	sum, err := s.SumDaily(ctx, "pv_energy_daily", "", "2030-01-01")
+	require.NoError(t, err)
+	assert.InDelta(t, 1.0, sum, 0)
+	hist, err := s.GetErrorHistory(ctx, "solis_status", time.Time{}, clk.Now())
+	require.NoError(t, err)
+	assert.Empty(t, hist)
+	require.NoError(t, s.CleanupAll(ctx)) // nothing deleted, no vacuum
+	require.NoError(t, s.Ping(ctx))
 }
 
-// TestCleanupAll_NoData tests CleanupAll when there's no data to clean
-func TestCleanupAll_NoData(t *testing.T) {
-	tempDir := t.TempDir()
-	dbPath := filepath.Join(tempDir, "test_cleanup_all_nodata.db")
-
-	cfg := &config.StorageSettings{
-		Path:             dbPath,
-		DailyRetention:   24 * time.Hour,
-		MonthlyRetention: 24 * time.Hour,
-		YearlyRetention:  24 * time.Hour,
-		ErrorRetention:   24 * time.Hour,
-	}
-
-	st, err := New(cfg)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.Remove(dbPath)
-	}()
-
-	// Run cleanup on empty database - should not error
-	err = st.CleanupAll()
-	if err != nil {
-		t.Fatalf("CleanupAll() on empty database error = %v", err)
-	}
-
-	// Verify last cleanup time was set
-	if st.GetLastCleanupTime().IsZero() {
-		t.Error("Expected last cleanup time to be set even with no data")
-	}
+func TestNew_Errors(t *testing.T) {
+	reg, _ := solis.NewRegistry()
+	_, err := New(testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
+	assert.Error(t, err, "a directory is not a database")
 }

@@ -1,174 +1,137 @@
-// Package websocket provides WebSocket communication for real-time updates.
 package websocket
 
 import (
 	"encoding/json"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog"
+
+	"github.com/dombyte/solis/internal/utils"
 )
 
 const (
-	// Time allowed to write a message to the peer.
+	// writeWait is the time allowed to write a frame.
 	writeWait = 10 * time.Second
-
-	// Time allowed to read the next pong message from the peer.
+	// pongWait is the time allowed to read the next pong.
 	pongWait = 60 * time.Second
-
-	// Send pings to peer with this period. Must be less than pongWait.
+	// pingPeriod must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
-
-	// Maximum message size allowed from peer.
-	maxMessageSize = 512 * 1024 // 512KB
-
-	// Time to wait before closing connection after write error.
-	// Must be shorter than HTTP server shutdown timeout (5s).
-	closeGracePeriod = 1 * time.Second
+	// maxMessageSize bounds client frames (subscriptions are small).
+	maxMessageSize = 64 * 1024
+	// sendBuffer is the per-client outgoing queue; a full queue disconnects the client.
+	sendBuffer = 256
 )
 
-// Client is a middleman between the WebSocket connection and the hub.
+// Client is one WebSocket connection.
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
-	// closeOnce ensures the send channel is only closed once
-	closeOnce sync.Once
-	// sendOpen is 1 when the send channel is open, 0 when closed (used with atomic)
-	sendOpen int32
+	hub    *Hub
+	conn   *websocket.Conn
+	send   chan []byte
+	clock  utils.Clock
+	log    zerolog.Logger
+	once   sync.Once
+	closed chan struct{}
+	active atomic.Int64
 }
 
-// Send sends a message to this client.
-// Returns false if the send buffer is full or the channel is closed.
-func (c *Client) Send(message []byte) bool {
-	// Check if channel is closed before attempting to send
-	// This prevents panic from sending on a closed channel
-	if atomic.LoadInt32(&c.sendOpen) == 0 {
+func newClient(h *Hub, conn *websocket.Conn) *Client {
+	c := &Client{hub: h, conn: conn, send: make(chan []byte, sendBuffer), clock: h.d.Clock,
+		log: h.d.Log, closed: make(chan struct{})}
+	c.touch()
+	return c
+}
+
+func (c *Client) touch() { c.active.Store(c.clock.Now().UnixNano()) }
+
+func (c *Client) lastActivity() time.Time { return time.Unix(0, c.active.Load()) }
+
+// enqueue queues a frame without blocking; false when the buffer is full or closed.
+func (c *Client) enqueue(b []byte) bool {
+	select {
+	case <-c.closed:
 		return false
+	default:
 	}
 	select {
-	case c.send <- message:
+	case c.send <- b:
 		return true
 	default:
 		return false
 	}
 }
 
-// Close closes the client's send channel exactly once.
-// This should be called when the client disconnects or needs to be removed.
-func (c *Client) Close() {
-	c.closeOnce.Do(func() {
-		close(c.send)
-		atomic.StoreInt32(&c.sendOpen, 0)
-	})
+// close stops the write pump (which closes the connection) exactly once.
+func (c *Client) close() {
+	c.once.Do(func() { close(c.closed) })
 }
 
-// readPump pumps messages from the WebSocket connection to the hub.
-// It also handles ping/pong messages and client requests.
+// readPump forwards client frames to the hub until the connection fails.
 func (c *Client) readPump() {
 	defer func() {
-		c.hub.unregister <- c
-		_ = c.conn.Close() // #nosec G104
+		c.hub.unregisterClient(c)
+		_ = c.conn.Close()
 	}()
-
 	c.conn.SetReadLimit(maxMessageSize)
-	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait)) // #nosec G104
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck // best effort
 	c.conn.SetPongHandler(func(string) error {
-		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait)) // #nosec G104
-		return nil
+		c.touch()
+		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	})
-
 	for {
-		messageType, message, err := c.conn.ReadMessage()
+		_, data, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err) {
-				logger.Warn().Msgf("WebSocket error: %v", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway,
+				websocket.CloseNormalClosure) {
+				c.log.Debug().Err(err).Msg("websocket read")
 			}
-			break
+			return
 		}
-
-		// Update last activity time for this client
-		c.hub.UpdateLastActivity(c)
-
-		if messageType == websocket.TextMessage {
-			var msg ClientMessage
-			if err := json.Unmarshal(message, &msg); err == nil {
-				switch msg.Type {
-				case MessageTypeRequestInitial:
-					// Client requests initial data
-					if c.hub.onInitialDataRequest != nil {
-						c.hub.onInitialDataRequest(c)
-					}
-				default:
-					logger.Debug().Msgf("Received unknown message type: %s", msg.Type)
-				}
-			} else {
-				logger.Debug().Msgf("Failed to parse client message: %v", err)
-			}
+		c.touch()
+		var msg ClientMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			msg = ClientMessage{Type: "invalid json"}
 		}
+		c.hub.command(c, msg)
 	}
 }
 
-// writePump pumps messages from the hub to the WebSocket connection.
+// writePump writes queued frames and pings until the client is closed.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		// Graceful close: wait for write to complete or timeout
-		time.Sleep(closeGracePeriod)
-		_ = c.conn.Close() // #nosec G104
+		_ = c.conn.Close()
 	}()
-
 	for {
 		select {
-		case message := <-c.send:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				logger.Error().Msgf("Failed to get writer: %v", err)
+		case <-c.closed:
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck // best effort
+			_ = c.conn.WriteMessage(websocket.CloseMessage,        //nolint:errcheck // best effort
+				websocket.FormatCloseMessage(websocket.CloseGoingAway, "server closing"))
+			return
+		case b := <-c.send:
+			if err := c.write(websocket.TextMessage, b); err != nil {
 				return
 			}
-			if _, err := w.Write(message); err != nil {
-				logger.Error().Msgf("Failed to write message: %v", err)
-				return
-			}
-			if err := w.Close(); err != nil {
-				logger.Error().Msgf("Failed to close writer: %v", err)
-				return
-			}
-			// Update last activity time for this client
-			c.hub.UpdateLastActivity(c)
-
 		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				logger.Debug().Msgf("Failed to write ping: %v", err)
+			if err := c.write(websocket.PingMessage, nil); err != nil {
 				return
 			}
 		}
 	}
 }
 
-// ServeWebSocket handles WebSocket requests from the peer.
-func ServeWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) *Client {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		logger.Error().Msgf("WebSocket upgrade failed: %v", err)
-		return nil
+func (c *Client) write(kind int, b []byte) error {
+	if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+		return err
 	}
-
-	client := &Client{
-		hub:      hub,
-		conn:     conn,
-		send:     make(chan []byte, 256),
-		sendOpen: 1, // Channel starts open
+	if err := c.conn.WriteMessage(kind, b); err != nil {
+		c.log.Debug().Err(err).Msg("websocket write")
+		return err
 	}
-
-	hub.register <- client
-	go client.writePump()
-	go client.readPump()
-
-	return client
+	c.touch()
+	return nil
 }

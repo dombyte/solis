@@ -3,7 +3,7 @@ package migrations
 
 import (
 	"database/sql"
-	"fmt"
+	"errors"
 )
 
 // Migration represents a database schema migration that can be applied or reverted.
@@ -24,7 +24,7 @@ type Migration interface {
 }
 
 // ErrNotImplemented is returned when a down migration is not implemented.
-var ErrNotImplemented = fmt.Errorf("down migration not implemented")
+var ErrNotImplemented = errors.New("down migration not implemented")
 
 // MigrationFunc is a function type that implements the Up method of Migration.
 type MigrationFunc func(tx *sql.Tx) error

@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 go build \
     -ldflags="-w -s" \
     -a \
     -installsuffix cgo \
-    -o solis ./cmd/main.go
+    -o solis ./cmd
 
 
 FROM scratch

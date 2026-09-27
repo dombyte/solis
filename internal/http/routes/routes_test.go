@@ -3,187 +3,90 @@ package routes
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/dombyte/solis/internal/service"
-	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/http/handlers"
+	"github.com/dombyte/solis/internal/http/handlers/mocks"
+	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
-func TestNewRouter(t *testing.T) {
-	// Create a mock service (nil is okay for basic routing tests)
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	if router == nil {
-		t.Fatal("NewRouter() returned nil")
-	}
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
 
-func TestNewRouter_Routes(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	// Test that the router has routes registered
-	// We can't easily test all routes without making actual HTTP requests,
-	// but we can test that the router is properly configured
-
-	// Test health endpoint exists
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// This will fail because Service is nil, but it proves the route exists
-	// We expect a panic or error, which is fine for this test
-	// The important thing is that the route is registered
-	_ = w // We don't check the response because we expect it to fail with nil service
+func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
+	t.Helper()
+	fe, docs := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(fe, "index.html"), "INDEX")
+	writeFile(t, filepath.Join(fe, "assets", "app.js"), "JS")
+	writeFile(t, filepath.Join(fe, "robots.txt"), "ROBOTS")
+	writeFile(t, filepath.Join(fe, "favicon.svg"), "<svg/>")
+	writeFile(t, filepath.Join(docs, "index.html"), "DOCS")
+	svc := mocks.NewMockReadService(t)
+	ws := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	})
+	return svc, SetupRoutes(Deps{
+		Handlers: handlers.HandlerDeps{Service: svc,
+			Errors: handlers.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now())},
+		WebSocket: ws, FrontendDir: fe, DocsDir: docs, Log: zerolog.Nop(),
+	})
 }
 
-func TestNewRouter_Middleware(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	// The router should have middleware configured
-	// For now, just test that the router can be created
-	if router == nil {
-		t.Fatal("Router is nil")
-	}
+func get(h http.Handler, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec
 }
 
-func TestSetupRoutes(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
+func TestRoutes(t *testing.T) {
+	svc, r := router(t)
+	svc.EXPECT().Health().Return(health.Snapshot{Status: health.StatusOK}).Once()
+	assert.Equal(t, http.StatusOK, get(r, "/health").Code)
+	assert.Equal(t, http.StatusTeapot, get(r, "/ws").Code)
 
-	router := SetupRoutes(deps)
+	rec := get(r, "/")
+	assert.Equal(t, "INDEX", rec.Body.String())
+	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
 
-	if router == nil {
-		t.Fatal("SetupRoutes() returned nil")
-	}
+	rec = get(r, "/assets/app.js")
+	assert.Equal(t, "JS", rec.Body.String())
+	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
 
-	// SetupRoutes should return the same as NewRouter
-	// We can verify they're the same type
-	if _, ok := any(router).(*chi.Mux); !ok {
-		t.Errorf("SetupRoutes() did not return a *chi.Mux")
-	}
+	assert.Equal(t, "ROBOTS", get(r, "/robots.txt").Body.String())
+	assert.Equal(t, "image/svg+xml", get(r, "/favicon.svg").Header().Get("Content-Type"))
+	assert.Equal(t, "INDEX", get(r, "/history").Body.String(), "SPA route")
+	trav := get(r, "/../../etc/passwd")
+	assert.Equal(t, http.StatusBadRequest, trav.Code, "traversal rejected")
+	assert.NotContains(t, trav.Body.String(), "root:")
+	assert.Equal(t, http.StatusNotFound, get(r, "/api/unknown").Code)
+	assert.Equal(t, http.StatusMovedPermanently, get(r, "/docs").Code)
+	assert.Equal(t, "DOCS", get(r, "/docs/").Body.String())
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/api/keys", nil))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/nowhere", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
-func TestHandlerDeps_Structure(t *testing.T) {
-	// Test that HandlerDeps can be created with a real service
-	// We use a nil service pointer which is allowed
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	if deps.Service != nil {
-		t.Error("HandlerDeps.Service should be nil")
-	}
-
-	// Test with a mock service (we can't create a real one easily)
-	// For now, just verify the struct can be created
-}
-
-func TestRouter_HealthEndpoint(t *testing.T) {
-	// This test verifies that the health endpoint route is properly configured
-	// We use a nil service which will cause a panic, but that's expected
-	// In a real scenario, you'd use a mock service
-
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	// Verify the router is not nil
-	if router == nil {
-		t.Fatal("Router is nil")
-	}
-
-	// We can't test the actual handler without a valid service,
-	// but we can verify the route exists by checking for 404 on non-existent routes
-
-	// Test a non-existent route
-	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// Should get 404 for non-existent route
-	if w.Code != http.StatusNotFound {
-		// Note: Chi might return 404 or might not handle it at all
-		// This is just to verify the router is working
-		t.Logf("Non-existent route returned status: %d", w.Code)
-	}
-}
-
-func TestRouter_APIEndpoints(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	if router == nil {
-		t.Fatal("Router is nil")
-	}
-	// Router created with API endpoints registered
-}
-
-func TestRouter_CORSMiddleware(t *testing.T) {
-	deps := HandlerDeps{
-		Service: nil,
-	}
-
-	router := NewRouter(deps)
-
-	if router == nil {
-		t.Fatal("Router is nil")
-	}
-
-	// Test OPTIONS request (should be handled by CORS middleware)
-	req := httptest.NewRequest(http.MethodOptions, "/api/v1/keys", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	// CORS middleware should return 200 for OPTIONS
-	if w.Code != http.StatusOK {
-		t.Logf("OPTIONS request returned status: %d", w.Code)
-	}
-
-	// Check CORS headers
-	corsHeaders := []string{
-		"Access-Control-Allow-Origin",
-		"Access-Control-Allow-Methods",
-		"Access-Control-Allow-Headers",
-	}
-
-	for _, header := range corsHeaders {
-		if w.Header().Get(header) == "" {
-			t.Logf("Missing CORS header: %s", header)
-		}
-	}
-}
-
-// Test with a mock service that implements the interface
-func TestNewRouter_WithMockService(t *testing.T) {
-	// Create a minimal mock service
-	mockService := &service.ReadService{}
-
-	deps := HandlerDeps{
-		Service: mockService,
-	}
-
-	router := NewRouter(deps)
-
-	if router == nil {
-		t.Fatal("NewRouter() with mock service returned nil")
-	}
-	// Router created successfully
+func TestRoutes_WithoutDistFolders(t *testing.T) {
+	svc := mocks.NewMockReadService(t)
+	r := SetupRoutes(Deps{Handlers: handlers.HandlerDeps{Service: svc},
+		FrontendDir: filepath.Join(t.TempDir(), "absent"), DocsDir: "/nonexistent",
+		Log: zerolog.Nop()})
+	assert.Equal(t, http.StatusNotFound, get(r, "/").Code)
+	assert.Equal(t, http.StatusNotFound, get(r, "/ws").Code)
 }

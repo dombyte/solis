@@ -3,12 +3,27 @@
 
 ## Project Overview
 
+Solis Monitor polls a Solis hybrid inverter over Modbus TCP, stores daily energy counters and
+status/fault changes in SQLite, computes monthly/yearly/total values itself, and serves a React
+dashboard (REST + WebSocket) from the same Go binary.
+
+- **v3 is in progress.** The authoritative design is `ref/solis-monitor-v3-refactor-specification(3).md`;
+  the implementation plan, spec decisions (D1–D15) and phase order are in `Plan.md`.
+- The dashboard power-flow reference is `ref/solis-v3-dashboard-power-flow-diagram-prototype.tsx`
+  (layout/geometry/colors/animation; emoji icons are placeholders for lucide-react).
+- Where this file and the spec disagree, the spec + `Plan.md` decisions win; update this file.
+- Cross-project Go standard: `ref/Arch_Plan.md` (DI, factories, zero global state, error
+  handling, testing, tooling). All new/changed Go code must comply; `Plan.md` §7 maps each rule
+  to the v3 design and lists the open confirmations (A1–A7).
 
 ## Tools
 go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -ignore "(?:.*_test\.go|.*test.*\.go|frontend)" .
 go run github.com/securego/gosec/v2/cmd/gosec@v2.23.0 ./...
 go run github.com/gordonklaus/ineffassign@latest ./...
 go run golang.org/x/tools/cmd/deadcode@latest ./...
+go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+golangci-lint run --config .golangci.yml
+go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.yaml
 go run github.com/client9/misspell/cmd/misspell@latest -w . -j 200
 go fmt ./...
 go vet ./...
@@ -21,13 +36,40 @@ go vet ./...
 - For new features, fixes, or changes, create a new branch following the schema:
   - `{feat,fix,doc,refactor,chore}/{name}`
   - Example: `feat/add-dark-mode`, `fix/cache-leak`, `doc/update-readme`, `feat/all-registers`
-- Current working branch: `fix/performance`
+- Current working branch: `refactor/v3` (per-phase sub-branches like `refactor/v3-event-bus` are fine)
 
 ---
 
 ## Project Structure
 
+v3 target layout (packages marked *new* are created during the v3 phases, see `Plan.md`):
 
+```
+cmd/                     main.go (subcommand dispatch + restart loop), serve.go, backfill.go
+internal/
+  app/           *new*   composition root: Create* factories, health adapters, logger wiring
+  config/                YAML/env config, Validate() methods (incl. strict rollover.time HH:MM)
+  period/        *new*   Period (day/month/year keys from one captured instant), rollover window
+  eventbus/      *new*   event bus (ValuesUpdated, PeriodClosed), non-blocking, per-subscriber policy
+  health/        *new*   supervisor, component contract, restart budget, ErrHealthFatal, snapshot
+  solis/                 register table (Store enum), computed defs, block planning, decode, derive
+  modbus/                Modbus TCP client, reconnect loop, Source slot for the poller
+  poller/                poll loop, DayAttributor (day attribution + rollover), cold-start seeding
+  aggregation/   *new*   PURE period math (monthly/yearly/total/net) shared by aggregator + CLI
+  aggregator/            event-driven runner (debounce/heartbeat/catch-up) using aggregation
+  cache/                 latest values; publishes change events; ReplaceDomain/Merge
+  storage/               sole SQLite owner; PollerStore/AggregatorStore/ReadStore; closed periods
+  database/              manager: migrations (incl. V3 meta table), backups, retention cleanup
+  websocket/             subscription protocol, per-client diff, same-origin upgrader
+  service/               ReadService for HTTP (cache + ReadStore + health snapshot)
+  http/{handlers,routes,server}/
+  maintenance/   *new*   CLI jobs (backfill): flock, backup, recompute, report
+  logging/, utils/       zerolog constructor (no global logger); math, Clock, Slot[T]
+  <pkg>/mocks/           mockery-generated mocks (never hand-edit)
+frontend/                React 19 + Vite + Tailwind 4 + zustand SPA
+docs/                    Swagger UI + openapi.yaml
+ref/                     v3 spec + dashboard prototype (reference only, not built)
+```
 
 ---
 
@@ -60,29 +102,79 @@ go vet ./...
 - Configure middleware chain
 
 ### Modbus Package (`internal/modbus/`)
-- Modbus client implementation
-- Connection pooling and management
-- Raw Modbus read operations
-- Error handling for Modbus protocol errors
+- Modbus client implementation (single TCP connection, used **only by the poller**)
+- Reconnection loop with exponential backoff; beats while waiting so it never looks stale
+- Raw Modbus read operations and error classification
+- Construction never fails on an unreachable device — it starts `recovering` and reconnects
+- Publishes the current client through a `Source` slot so a restart swaps it without touching the poller
 
 ### Service Package (`internal/service/`)
-- Business logic orchestration
-- Coordinate between Modbus client and other services
-- Data transformation and aggregation
+- Read-side business logic for HTTP: cache for current values, `ReadStore` for history
+- Health snapshot passthrough for `/health`
 - **Do NOT** directly handle HTTP requests
+- **Do NOT** touch Modbus, the poller or the aggregator (no direct reads, no `PollNow`)
 
 ### Solis Package (`internal/solis/`)
-- Solis inverter-specific register definitions
-- Register reading and decoding logic
-- Register map management and lookup
-- Solis-specific decoding patterns
+- Solis inverter-specific register definitions (single table, `Store` enum, `Net` flag)
+- Computed register definitions (daily→monthly/yearly/total maps, net export/import pairs)
+- Read-block planning from addressed registers (`PlanBlocks`)
+- Decoding (`DecodeRegister`, status/fault maps) and derived values (`DeriveValues`, e.g. `battery_power_signed`)
 - everything not Solis specific which is more generic should be in utils
 - **Do NOT** contain Modbus client logic (belongs in modbus package)
+
+### Poller Package (`internal/poller/`)
+- Non-overlapping poll loop (next poll = interval after previous start)
+- Sole writer of daily rows and error/status rows (`PollerStore`)
+- Owns day attribution and rollover detection (`DayAttributor`) and emits `PeriodClosed`
+- Replaces its own key domain in the cache after each successful poll
+
+### Aggregation Package (`internal/aggregation/`)
+- Pure functions only: sums + baseline in → monthly/yearly/total/net values out
+- No I/O, no clock, no logging — called identically by the live aggregator and the CLI backfill
+
+### Aggregator Package (`internal/aggregator/`)
+- Event-driven: debounce 4× poll interval, heartbeat 5× poll interval, no config section
+- Sole writer of computed values (`AggregatorStore`); merges computed keys into the cache
+- Idempotent catch-up of missed period closes on every run
+
+### Cache Package (`internal/cache/`)
+- Latest values, `lastPollTime`; never recreated at runtime
+- Publishes change events on the injected bus on every write
+- **Do NOT** import websocket or any consumer — consumers subscribe to the bus
+
+### App Package (`internal/app/`)
+- Composition root: the only package that names concrete types and wires them together
+- `Create*` factory functions, `health.Component` adapters (e.g. around the Modbus client)
+- Builds the root logger and hands each component a logger scoped with `component`
+
+### Eventbus Package (`internal/eventbus/`)
+- Created in `internal/app`, injected as `Publisher`/`Subscriber` interfaces; never recreated
+- `Publish` never blocks; each subscriber has a buffered channel with an overflow policy
+
+### Health Package (`internal/health/`)
+- Supervisor: calls factories, registers, starts, watches and restarts restartable components
+- Owns the root context (`context.WithCancelCause`); fatal escalation cancels it with `ErrHealthFatal`
+- Publishes the snapshot served by `/health` (503 fail-closed)
+
+### Storage Package (`internal/storage/`)
+- The only package that touches SQLite (single connection, WAL)
+- Narrow interfaces per consumer: `PollerStore`, `AggregatorStore`, `ReadStore`
+- Enforces immutability of closed periods (`ErrPeriodClosed`) and the net-key write guard
+- Period sums run as SQL with an explicit bound, never by fetching rows into Go
+
+### WebSocket Package (`internal/websocket/`)
+- Subscription protocol (subscribe/unsubscribe → snapshot/update/error), per-client diff
+- Same-origin upgrader; ping/pong, stale-client cleanup, full-buffer disconnect
+
+### Maintenance Package (`internal/maintenance/`)
+- Out-of-band CLI jobs (`solis backfill --years N`); never starts server, poller or hub
+- Exclusive flock next to the DB, verified backup before any write, per-period report
 
 ### Utils Package (`internal/utils/`)
 - Common utility functions (e.g., error handling, logging helpers)
 - Data transformation utilities
 - Data type handling (Uint16, Int16, Uint32, Int32, Float32, String, Bool)
+- `Clock` interface (inject everywhere a loop waits — tests use a fake clock) and `Slot[T]`
 ---
 
 ## Structure Best Practices
@@ -97,6 +189,23 @@ routes → handlers → services → models
 ```
 HTTP layer depends on service layer, not vice versa.
 
+Background components never reference each other; they interact only through the cache,
+the event bus and the health supervisor:
+```
+poller     → solis, period, eventbus, health(Reporter) + own interfaces (Store, Cache, Reader)
+aggregator → aggregation, solis, period, eventbus, health(Reporter) + own Store, Cache
+websocket  → eventbus, solis, health(Reporter) + own Snapshotter
+cache      → eventbus, solis
+storage    → solis, period
+modbus     → stdlib + simonvetter only (external layer: no config/health/logging-global imports)
+service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
+app        → everything (composition root)
+```
+Forbidden: poller ↔ aggregator, cache → websocket, handlers → storage/modbus, anything → cmd/app.
+
+Interfaces are declared by the consumer (except the storage interfaces in
+`storage/interfaces.go`, as the spec asks) and every interface has a mockery mock.
+
 ### 3. No Circular Dependencies
 Avoid circular imports between packages. Use interfaces for decoupling.
 
@@ -104,10 +213,16 @@ Avoid circular imports between packages. Use interfaces for decoupling.
 Each package exposes a clean, minimal public API. Internal details stay unexported.
 
 ### 5. Avoid Global State
-Use dependency injection instead of global variables.
+Use dependency injection instead of global variables. Zero tolerance (Arch_Plan): no
+package-level loggers, caches, upgraders or lookup maps in new/changed code — build them in a
+constructor (e.g. `solis.NewRegistry()`, `solis.NewDecoder()`) and inject them.
 
 ### 6. Testable Components
 Design packages to be easily testable in isolation. Use interfaces for external dependencies.
+
+### 7. Logging
+Loggers are injected (`zerolog.Logger`) and scoped with `Str("component", …)` by `internal/app`.
+Log errors with component context and the wrapped error; never log secrets.
 
 ---
 
@@ -117,18 +232,58 @@ Design packages to be easily testable in isolation. Use interfaces for external 
 - ❌ **Don't put business logic** in handler packages (belongs in service layer)
 - ❌ **Don't create utility functions** in domain packages (belongs in utils)
 - ❌ **Don't duplicate data structures** across packages
-- ❌ **Don't use global variables** for configuration or dependencies
+- ❌ **Don't use global variables** for configuration, dependencies, loggers or lookup tables
 - ❌ **Don't panic** - return errors explicitly
 - ❌ **Don't ignore errors** - always handle or return them
+- ❌ **Don't read Modbus from the HTTP path** - no `?direct=true`, no `PollNow`; only the poller talks to the inverter
+- ❌ **Don't let a component restart another component** - only the health supervisor restarts things
+- ❌ **Don't call `time.Now()` mid-run** in poller/aggregator logic - capture once, derive a `period.Period`, inject `utils.Clock`
+- ❌ **Don't write outside your write domain** (see below)
+- ❌ **Don't add config knobs for health/aggregation constants** (restart budget 3, debounce 4×, heartbeat 5×, reset threshold 10 %) - they are constants until real outage data says otherwise
+
+---
+
+## Component Supervision Contract (v3)
+
+Every restartable component (modbus, poller, aggregator, WebSocket hub) implements:
+
+```go
+Start(ctx context.Context) error // start goroutines; return an error only for unrecoverable conditions
+Stop() error                      // idempotent graceful shutdown
+State() health.State              // Healthy | Recovering | Failed
+LastBeat() time.Time              // atomic timestamp, updated by the component's own loop
+```
+
+- Constructed only through a `health.Factory` called by the supervisor; the component receives its
+  `health.Reporter` in the constructor and pushes state transitions (rare, discrete) through it.
+- Beat from the **loop**, not only after work: an idle aggregator or hub must still beat, a
+  reconnecting Modbus client beats on every attempt and while waiting in backoff.
+- Ordinary failures (poll timeout, read error, connection loss) are handled internally and reported
+  as `Recovering`; they never touch the restart counter.
+- No `Restart()` method. Restart = supervisor Stop → factory → Start.
+- Non-restartable parts (storage, cache, event bus, HTTP server) are `Watch`ed; if they fail the
+  supervisor cancels the root context with `ErrHealthFatal` and `main()` restarts the whole app.
+
+## Write Domains (v3)
+
+| Writer | May write | Via |
+|---|---|---|
+| poller | `daily_values` (non-net keys, max of the open day), `error_data` (on change), poller key domain in cache | `storage.PollerStore`, `cache.ReplaceDomain` |
+| aggregator | `monthly_values`, `yearly_values`, `total_values`, net daily rows, baselines/freeze marks in `meta`; computed keys in cache | `storage.AggregatorStore`, `cache.Merge` |
+| maintenance (CLI) | computed tables + baselines, only with the app stopped (flock) | `storage` + `aggregation` |
+| everyone else | nothing | read-only interfaces |
+
+Closed periods are immutable; storage rejects such writes with `ErrPeriodClosed`. Values are stored
+at full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ---
 
 ## Naming Conventions
 
 ### Packages
-- Lowercase, single word or hyphen-separated
-- Plural for collections (e.g., `handlers/`, `routes/`)
-- Singular for types (e.g., `config/`, `service/`)
+- Lowercase, singular or compound (Arch_Plan), e.g. `eventbus`, `httphandler`
+- Existing plural packages (`handlers/`, `routes/`, `utils/`) keep their names until a rename is
+  confirmed (Plan.md A3); do not create new plural package names
 
 ### Files
 - Lowercase, underscores for multi-word names
@@ -157,8 +312,11 @@ Design packages to be easily testable in isolation. Use interfaces for external 
 # Build the application
 go build -o server ./cmd
 
-# Run the application
+# Run the application (server mode)
 go run ./cmd
+
+# Maintenance mode (v3): runs a job against the DB and exits 0/1; app must be stopped
+go run ./cmd backfill --years 0
 
 # Build with race detector
 go build -race -o server ./cmd
@@ -205,7 +363,11 @@ go vuln ./...
 - Follow Go conventions (camelCase, short functions)
 - Comments for all public functions and types (Godoc style)
 - Functions ideally < 15 lines, max < 40 lines
-- Error handling: return errors explicitly, don't panic
+- Error handling: return errors explicitly, don't panic; wrap with `%w`; sentinel errors +
+  custom error types (with `Unwrap`/`Is`) per package; HTTP status via the central error mapper
+- Receivers: single letter (`s`, `p`, `c`, `h`); acronyms stdlib-style (`ID`, `URL`, `HTTP`)
+- Line length < 100, cyclomatic complexity < 8, no magic numbers (named constants)
+- Commits: short imperative subject, **no AI signatures / `Co-Authored-By` trailers**
 - Imports grouped: standard library, third-party, project
 
 ---
@@ -305,6 +467,26 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 }
 ```
 
+### Health Endpoint (v3, fail-closed)
+- `GET /health` reads the supervisor snapshot only; it never blocks on a component.
+- 200 with `ok` or `degraded` (+ details); **503** with the failed component and reason when any
+  component is failed/budget-exhausted or a non-restartable part failed. Never report `ok` when a
+  subsystem is dead.
+
+### WebSocket Protocol (v3)
+```json
+→ { "type": "subscribe",   "keys": ["pv_total_power", "solis_status"] }
+← { "type": "snapshot",    "values": { "pv_total_power": { "value": 5230, "timestamp": "…", "unit": "W" } } }
+← { "type": "update",      "ts": "…", "values": { "pv_total_power": { "value": 5102.5 } } }
+→ { "type": "unsubscribe", "keys": ["solis_status"] }
+← { "type": "error",       "code": "unknown_keys", "keys": ["foo"] }
+```
+- Only changed, subscribed keys are pushed (diff by value/status per client); pushes are coalesced
+  (~75 ms) so poller + aggregator events close together become one frame.
+- Unknown keys never drop the connection. `ping` from the client is accepted and ignored.
+- Upgrader is same-origin only. No history over WebSocket — history is REST only.
+- New UI-driven registers need no new endpoint/message: define the register in `solis`, clients subscribe.
+
 ---
 
 ## Service Layer Guidelines
@@ -313,24 +495,20 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 Use constructor pattern with dependency injection:
 
 ```go
-type Service struct {
-    modbusClient *modbus.TCPClient
-    config       *config.AppConfig
-    logger       *slog.Logger
+type ReadService struct {
+    store  ReadStore         // read-only view; history
+    cache  CacheReader       // current values
+    health HealthSnapshotter // /health
+    log    zerolog.Logger
 }
 
-func NewService(
-    modbusClient *modbus.TCPClient,
-    config *config.AppConfig,
-    logger *slog.Logger,
-) *Service {
-    return &Service{
-        modbusClient: modbusClient,
-        config:       config,
-        logger:       logger,
-    }
+func NewReadService(
+    store ReadStore, ca CacheReader, h HealthSnapshotter, log zerolog.Logger,
+) *ReadService {
+    return &ReadService{store: store, cache: ca, health: h, log: log}
 }
 ```
+The service never receives a Modbus client, poller or aggregator (v3).
 
 ### Business Logic
 Keep handlers thin, put logic in service layer:
@@ -361,22 +539,41 @@ func (s *Service) GetAllRegisters(ctx context.Context) (*solis.SolisData, error)
 
 Use Viper for YAML configuration with environment variable overrides:
 
+Env overrides use the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_HOST`). v3 shape (abridged):
+
 ```yaml
 # config.yaml
 app:
-  debug: true
-
-modbus:
-  host: 192.168.1.100
-  port: 502
-  timeout: 5s
-  unit_id: 1
-
-server:
-  host: 0.0.0.0
+  debug: INFO          # DEBUG, INFO, WARN, ERROR, FATAL
   port: 8080
   timeout: 30s
+
+poller:
+  interval: 5s         # also drives aggregator debounce (4x), heartbeat (5x), health graces
+  block_attempts: 2
+  block_retry_delay: 1s
+  block_interval: 0s
+  poll_timeout: 5s
+
+modbus:
+  type: tcp
+  host: 192.168.1.100
+  port: 502
+  timeout: 2s
+  unit_id: 1
+
+rollover:
+  time: "23:59"        # strict 24h HH:MM; anything else fails startup
+
+storage:
+  path: ./data/solis.db
+  # retention, WAL, backup and cleanup settings unchanged from v2
 ```
+
+- Removed in v3: `app.serve_only`, the whole `aggregator` section (incl.
+  `backfill_current_year_monthly` → use the `backfill` CLI).
+- Timezone comes from the `TZ` env var (`time.Local`), never from config. Pin `TZ` in
+  docker-compose; the image ships zoneinfo.
 
 ```go
 // In config/models.go
@@ -417,8 +614,9 @@ func LoadConfig(path string) (*AppConfig, error) {
 ## Testing
 
 ### Unit Tests
+- Framework: stdlib `testing` + testify (`require`/`assert`) + mockery mocks
 - Create `_test.go` files for each package
-- Aim for >90% coverage
+- Aim for >90% coverage (Arch_Plan minimums by gocyclo: <5 → 60 %, 5–9 → 70 %, ≥10 → 80 %)
 - Test both happy paths and error cases
 - Test edge cases (empty inputs, invalid data, etc.)
 
@@ -426,6 +624,13 @@ func LoadConfig(path string) (*AppConfig, error) {
 - Avoid global state in tests
 - Create fresh instances for each test
 - Use `t.Run()` for sub-tests
+
+### Time-Dependent Logic (v3)
+- Never sleep on wall-clock time in tests. Inject `utils.Clock` and drive a fake clock for
+  debounce/heartbeat, supervisor graces, rollover windows and backoff.
+- Rollover/attribution and `period` tests are table-driven and include midnight, DST
+  spring-forward and fall-back nights (`time.LoadLocation("Europe/Berlin")`).
+- Storage tests must cover closed-period rejection and write-domain guards.
 
 ### HTTP Tests
 ```go
@@ -444,6 +649,8 @@ func TestHealthHandler(t *testing.T) {
 ```
 
 ### Mocking Dependencies
+Use mockery-generated mocks (`.mockery.yaml`, output in `internal/<pkg>/mocks/`) with testify for
+all interfaces. The hand-written example below shows the shape only:
 ```go
 type MockModbusClient struct {
     readRegisterFunc func(address uint16, count uint16) ([]byte, error)
@@ -491,37 +698,77 @@ func TestService_ReadRegister(t *testing.T) {
 ## Register Development Guidelines
 
 ### Adding New Registers
-Use the `RegisterBuilder` fluent API:
+All registers live in one table in `internal/solis/registers.go` (v3 model, spec §4.1):
 
 ```go
-var BatteryVoltage = register.NewBuilder("battery_voltage", 0x1000).
-    WithName("Battery Voltage").
-    WithUnit("V").
-    WithDataType(register.Float32).
-    WithScale(0.1).
-    WithAccess(register.ReadOnly).
-    Build()
+{
+    Key:      "grid_power",
+    Name:     "Grid Power",
+    Address:  33130,          // 0 = computed/derived, never part of the poll plan
+    DataType: solis.Int32,    // register count is derived from the type
+    Scale:    1,
+    Unit:     "W",
+    Store:    solis.StoreNone, // none | daily | monthly | yearly | total | status
+},
 ```
 
-### Register Map
-All registers should be added to the `RegisterMap` for easy lookup:
+- `Store` decides the destination: `none` = cache only (live values), `status` = `error_data`
+  on change, `daily/monthly/yearly/total` = the matching table. `Net: true` marks export−import
+  registers (latest-value rule); net registers are always computed.
+- Computed registers (monthly/yearly/total/net) have **no address**; add their edge to the
+  daily→monthly/yearly/total maps or the net pair list instead.
+- Derived live values (e.g. `battery_power_signed`) have no address and are produced in
+  `solis.DeriveValues` after a full poll is decoded.
+- `solis.Validate()` must pass (unique keys/addresses, valid `Store`, map edges consistent);
+  the block-plan golden test must be updated when addresses change.
+- Do not add `Stability` or new `IsXxxRegister` lists — switch on `reg.Store`.
 
-```go
-var RegisterMap = register.NewMap(
-    BatteryVoltage,
-    BatteryCurrent,
-    // ... all other registers
-)
-```
+### Read Planning
+`solis.PlanBlocks` builds read blocks from addressed registers, merging nearby addresses up to
+the Modbus limit of 125 registers per read. Prefer an alternate address that falls inside an
+existing block over adding a new round-trip (e.g. `grid_power` at 33130 instead of 33263).
 
 ### Decoding
-Use type-safe decoding methods:
-
 ```go
-value, err := decoder.DecodeRegisterWithType(raw, reg.DataType)
-// or
-floatVal := decoder.GetFloat64(value, reg.Scale)
+value := solis.DecodeRegister(reg, raw) // raw []uint16 for exactly this register
+values := solis.DecodeRange(startAddr, blockRaw)
+solis.DeriveValues(values, pollStart)
 ```
+Decoded values are full precision; rounding to 2 decimals happens only in JSON serialization
+(v3 change: the v2 `RoundTo2DecimalPlaces` call inside `DecodeRegister` is removed).
+
+---
+
+## CLI Maintenance Mode (v3)
+
+- `solis <subcommand>` runs a job against the database and exits 0/1; without a subcommand the
+  binary runs the server. Subcommands never start the HTTP server, poller or WebSocket hub.
+- `solis backfill --years N` (default 0): recompute monthly + yearly (always both) for the current
+  year plus N closed years; refresh the total baseline when a closed year is touched.
+- Hard-refuse when the app is running: exclusive `flock` on a lock file next to the DB (the server
+  holds a shared lock). Always take a SHA-256-verified backup first (`database.CreateBackup`);
+  no backup → no write → exit 1.
+- Uses the same `aggregation` functions as the live aggregator. Output format: spec §12.1.
+- Dangerous behavior belongs in CLI jobs, never in config toggles.
+
+---
+
+## Frontend Guidelines (v3)
+
+- Stack: React 19, Vite, Tailwind 4, zustand, lucide-react, chart.js. Checks:
+  `npm run typecheck && npm run lint && npm run knip` in `frontend/`.
+- Live data comes only via WebSocket subscriptions: components call `useSubscription(keys)`;
+  the client ref-counts keys and re-subscribes on reconnect. History stays on REST.
+- Register metadata lives in `src/lib/config/data.ts` (single source of truth for the UI).
+- Mobile vs desktop: `useMobile()` (coarse pointer). The power-flow diagram uses the mobile
+  variant only for coarse pointer **and** width < 768 px; tablets get the desktop variant.
+- Power-flow diagram (`src/components/dashboard/flow/`): follow the prototype geometry; icons
+  from lucide-react; colors from CSS tokens in `src/index.css` (light + dark), never hardcoded hex;
+  edge animation via CSS keyframes (binary on/off, fixed speed, `prefers-reduced-motion` respected),
+  not `requestAnimationFrame` + state updates.
+- Direction rules: PV → inverter; inverter → household/backup; grid export out / import in;
+  battery `battery_power_signed > 0` = charging (into battery). Zero = shown as 0, edge stops;
+  missing data = node (or whole diagram) grayed out.
 
 ---
 
@@ -567,6 +814,10 @@ readService := service.NewReadService(cfg, client, st, pl)
 ```
 
 **Lesson:** When dealing with sequential-only devices, separate connections prevent one subsystem from blocking another, even though the device itself processes requests sequentially.
+
+**v3 note:** The HTTP layer no longer has a Modbus client at all (no direct reads, no `PollNow`);
+the poller is the only Modbus user, so there is exactly one connection and nothing to block on.
+Lessons #1 and #4 are kept as history — the "never implement direct again" rule still applies.
 
 ---
 

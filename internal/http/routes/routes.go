@@ -7,235 +7,165 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dombyte/solis/internal/http/handlers"
-	"github.com/dombyte/solis/internal/service"
-	"github.com/dombyte/solis/internal/websocket"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/rs/zerolog"
+
+	"github.com/dombyte/solis/internal/http/handlers"
+	"github.com/dombyte/solis/internal/http/middleware"
 )
 
-// cacheMiddleware sets cache headers based on the request path
-func cacheMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+// Default locations of the built frontend and docs.
+const (
+	FrontendDist = "./frontend/dist"
+	DocsDist     = "./docs/dist"
+)
 
-		// Set cache headers based on path patterns
+// Deps are the router dependencies.
+type Deps struct {
+	// Handlers are the API handler dependencies.
+	Handlers handlers.HandlerDeps
+	// WebSocket serves /ws.
+	WebSocket http.Handler
+	// FrontendDir and DocsDir override the dist folders (tests); empty = defaults.
+	FrontendDir string
+	DocsDir     string
+	Log         zerolog.Logger
+}
+
+// backendPrefixes never fall through to the SPA.
+func backendPrefixes() []string {
+	return []string{"/api/", "/health", "/ws", "/docs"}
+}
+
+// staticFiles are the root-level frontend files with their content types.
+func staticFiles() map[string]string {
+	return map[string]string{
+		"manifest.webmanifest": "application/manifest+json", "sw.js": "application/javascript",
+		"vite.svg": "image/svg+xml", "favicon.ico": "image/x-icon", "favicon.svg": "image/svg+xml",
+		"pwa-64x64.png": "image/png", "pwa-192x192.png": "image/png",
+		"pwa-512x512.png": "image/png", "maskable-icon-512x512.png": "image/png",
+		"apple-touch-icon-180x180.png": "image/png", "apple-touch-icon.png": "image/png",
+	}
+}
+
+// SetupRoutes builds the router.
+func SetupRoutes(d Deps) *chi.Mux {
+	if d.FrontendDir == "" {
+		d.FrontendDir = FrontendDist
+	}
+	if d.DocsDir == "" {
+		d.DocsDir = DocsDist
+	}
+	r := chi.NewRouter()
+	r.Use(middleware.Recover(d.Log))
+	r.Use(middleware.Logger(d.Log))
+	r.Use(chimw.RequestID)
+	r.Use(cacheHeaders)
+	r.Use(cors)
+
+	if d.WebSocket != nil {
+		r.Handle("/ws", d.WebSocket)
+		r.Handle("/ws/", d.WebSocket)
+	}
+	r.Method(http.MethodGet, "/health", handlers.GetHealthHandler(d.Handlers))
+	r.Route("/api", func(r chi.Router) {
+		r.Method(http.MethodGet, "/keys", handlers.GetKeysHandler(d.Handlers))
+		r.Method(http.MethodGet, "/data/{key}", handlers.GetDataHandler(d.Handlers))
+	})
+	mountDocs(r, d.DocsDir)
+	mountFrontend(r, d.FrontendDir)
+	return r
+}
+
+func mountDocs(r chi.Router, dir string) {
+	if _, err := os.Stat(dir); err != nil {
+		return
+	}
+	r.Handle("/docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
+	r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir(dir))))
+}
+
+func mountFrontend(r chi.Router, dir string) {
+	if _, err := os.Stat(dir); err != nil {
+		return
+	}
+	r.Handle("/assets/*", http.StripPrefix("/assets/",
+		http.FileServer(http.Dir(filepath.Join(dir, "assets")))))
+	r.Handle("/data/*", http.StripPrefix("/data/",
+		http.FileServer(http.Dir(filepath.Join(dir, "data")))))
+	for name, ct := range staticFiles() {
+		r.Handle("/"+name, serveFile(filepath.Join(dir, name), ct))
+	}
+	index := filepath.Join(dir, "index.html")
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) { http.ServeFile(w, req, index) })
+	r.NotFound(spaFallback(dir, index))
+}
+
+func serveFile(path, contentType string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		http.ServeFile(w, r, path)
+	})
+}
+
+// spaFallback serves existing files under dir and index.html for client-side routes.
+func spaFallback(dir, index string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || hasPrefix(r.URL.Path, backendPrefixes()) {
+			http.NotFound(w, r)
+			return
+		}
+		clean := filepath.Clean("/" + r.URL.Path) // rooted: no traversal above dir
+		path := filepath.Join(dir, clean)
+		// #nosec G703 -- path is Join(dir, Clean("/"+URL.Path)): rooted under dir, no traversal
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			http.ServeFile(w, r, path)
+			return
+		}
+		http.ServeFile(w, r, index)
+	}
+}
+
+func hasPrefix(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// cacheHeaders sets Cache-Control by path.
+func cacheHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
 		switch {
-		case strings.HasPrefix(path, "/assets/"):
-			// Assets: immutable, long cache
+		case strings.HasPrefix(p, "/assets/"):
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		case strings.HasPrefix(path, "/manifest.webmanifest"),
-			strings.HasPrefix(path, "/data/"):
-			// Manifest and data: no-cache
+		case strings.HasPrefix(p, "/manifest.webmanifest"), strings.HasPrefix(p, "/data/"):
 			w.Header().Set("Cache-Control", "no-cache")
-		case strings.HasPrefix(path, "/sw.js"):
-			// sw.js: no-cache with max-age=0
+		case strings.HasPrefix(p, "/sw.js"):
 			w.Header().Set("Cache-Control", "no-cache, max-age=0")
-		case strings.HasPrefix(path, "/favicon"),
-			strings.HasPrefix(path, "/vite.svg"),
-			strings.HasPrefix(path, "/pwa-"),
-			strings.HasPrefix(path, "/apple-touch"):
-			// Icons and static images: short cache
+		case hasPrefix(p, []string{"/favicon", "/vite.svg", "/pwa-", "/apple-touch", "/maskable"}):
 			w.Header().Set("Cache-Control", "public, max-age=86400")
-		case isFrontendRoute(path):
-			// Index and SPA routes: no-store
+		case !hasPrefix(p, backendPrefixes()):
 			w.Header().Set("Cache-Control", "no-store")
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }
 
-// isFrontendRoute checks if the path is a frontend route that should have no-store cache
-func isFrontendRoute(path string) bool {
-	// Check if path is a frontend route (not API, health, ws, docs, etc.)
-	backendPrefixes := []string{"/api/", "/health", "/ws", "/docs", "/assets/",
-		"/manifest.webmanifest", "/data/", "/sw.js", "/favicon",
-		"/vite.svg", "/pwa-", "/apple-touch"}
-	for _, prefix := range backendPrefixes {
-		if strings.HasPrefix(path, prefix) {
-			return false
-		}
-	}
-	return true
-}
-
-// HandlerDeps contains dependencies for HTTP handlers.
-type HandlerDeps struct {
-	// Service is the service layer for business logic.
-	Service *service.ReadService
-	// WebSocketHub is the WebSocket hub for real-time updates.
-	WebSocketHub *websocket.Hub
-}
-
-// serveFileHandler creates a handler that serves a file with the specified content type
-func serveFileHandler(basePath, filePath, contentType string) http.Handler {
+// cors keeps the v2 permissive CORS headers for the REST API.
+func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", contentType)
-		//nolint:gosec - filePath is a constant string, safe from path traversal
-		http.ServeFile(w, r, filepath.Join(basePath, filePath))
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
-}
-
-// NewRouter creates a new Chi router with all routes configured.
-func NewRouter(deps HandlerDeps) *chi.Mux {
-	r := chi.NewRouter()
-
-	// Add common middleware
-	// Use custom panic recovery middleware for better logging instead of chi's Recoverer
-	r.Use(handlers.PanicRecoveryMiddleware)
-	r.Use(middleware.Logger)
-	r.Use(middleware.RequestID)
-	// Add cache headers middleware
-	r.Use(cacheMiddleware)
-
-	// Add CORS middleware
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			if r.Method == "OPTIONS" {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	})
-
-	// Serve static files from frontend/dist directory
-	frontendDist := "./frontend/dist"
-	if _, err := os.Stat(frontendDist); err == nil {
-		// Serve static assets (js, css) from /assets/*
-		assetsFS := http.FileServer(http.Dir(filepath.Join(frontendDist, "assets")))
-		r.Handle("/assets/*", http.StripPrefix("/assets/", assetsFS))
-
-		// Serve data directory (licenses.json, version.json, etc.)
-		r.Handle("/data/*", http.StripPrefix("/data/",
-			http.FileServer(http.Dir(filepath.Join(frontendDist, "data")))))
-
-		// Serve manifest, sw.js, and vite.svg
-		r.Handle("/manifest.webmanifest", serveFileHandler(frontendDist, "manifest.webmanifest", "application/manifest+json"))
-		r.Handle("/sw.js", serveFileHandler(frontendDist, "sw.js", "application/javascript"))
-		r.Handle("/vite.svg", serveFileHandler(frontendDist, "vite.svg", "image/svg+xml"))
-
-		// Serve icon files
-		r.Handle("/favicon.ico", serveFileHandler(frontendDist, "favicon.ico", "image/x-icon"))
-		r.Handle("/favicon.svg", serveFileHandler(frontendDist, "favicon.svg", "image/svg+xml"))
-		r.Handle("/pwa-64x64.png", serveFileHandler(frontendDist, "pwa-64x64.png", "image/png"))
-		r.Handle("/pwa-192x192.png", serveFileHandler(frontendDist, "pwa-192x192.png", "image/png"))
-		r.Handle("/pwa-512x512.png", serveFileHandler(frontendDist, "pwa-512x512.png", "image/png"))
-		r.Handle("/maskable-icon-512x512.png",
-			serveFileHandler(frontendDist, "maskable-icon-512x512.png", "image/png"))
-		r.Handle("/apple-touch-icon-180x180.png",
-			serveFileHandler(frontendDist, "apple-touch-icon-180x180.png", "image/png"))
-		r.Handle("/apple-touch-icon.png",
-			serveFileHandler(frontendDist, "apple-touch-icon.png", "image/png"))
-
-		// For all other root-level requests, serve index.html
-		// This allows the frontend router to handle client-side routing
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			http.ServeFile(w, r, filepath.Join(frontendDist, "index.html"))
-		})
-	}
-
-	handlerDeps := handlers.HandlerDeps{
-		Service: deps.Service, // *service.ReadService implements handlers.ReadServiceInterface
-	}
-
-	// Serve static files from docs/dist directory
-	docsDist := "./docs/dist"
-	if _, err := os.Stat(docsDist); err == nil {
-		// Serve Swagger UI and documentation files
-		// Redirect /docs to /docs/ for consistency
-		r.Handle("/docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
-		r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir(docsDist))))
-	}
-
-	// WebSocket endpoint for real-time updates
-	if deps.WebSocketHub != nil {
-		r.Handle("/ws", websocket.Handler(deps.WebSocketHub))
-		r.Handle("/ws/", websocket.Handler(deps.WebSocketHub))
-	}
-
-	// Health check endpoint
-	r.Get("/health", handlers.GetHealthHandler(handlerDeps))
-
-	// New API endpoints at /api/
-	r.Route("/api", func(r chi.Router) {
-		// All register  keys with metadata (excludes daily, monthly, yearly, total)
-		r.Get("/keys", handlers.GetKeysHandler(handlerDeps))
-
-		// Data for specific register key - supports historical queries with start/end
-		r.Get("/data/{key}", handlers.GetDataHandler(handlerDeps))
-	})
-
-	// Frontend catch-all handler for client-side routing (SPA support)
-	// Serve index.html only for frontend routes (not API, docs, health, etc.)
-	if _, err := os.Stat(frontendDist); err == nil {
-		r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-			// Only serve index.html for GET requests to frontend routes
-			if r.Method != http.MethodGet {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-
-			// Check if this is a backend route that shouldn't serve index.html
-			path := r.URL.Path
-			backendPrefixes := []string{"/api/", "/health", "/ws", "/docs"}
-			for _, prefix := range backendPrefixes {
-				if strings.HasPrefix(path, prefix) {
-					w.WriteHeader(http.StatusNotFound)
-					return
-				}
-			}
-
-			// Try to serve the requested file from frontend/dist first
-			// Sanitize path to prevent path traversal
-			cleanPath := filepath.Clean(path)
-			if strings.HasPrefix(cleanPath, "..") {
-				// Path traversal detected, reject
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			filePath := filepath.Join(frontendDist, cleanPath)
-			if _, err := os.Stat(filePath); err == nil {
-				// File exists, serve it with appropriate content type
-				ext := filepath.Ext(filePath)
-				switch ext {
-				case ".svg":
-					w.Header().Set("Content-Type", "image/svg+xml")
-				case ".png":
-					w.Header().Set("Content-Type", "image/png")
-				case ".ico":
-					w.Header().Set("Content-Type", "image/x-icon")
-				case ".js":
-					w.Header().Set("Content-Type", "application/javascript")
-				case ".css":
-					w.Header().Set("Content-Type", "text/css")
-				case ".json":
-					w.Header().Set("Content-Type", "application/json")
-				case ".html":
-					w.Header().Set("Content-Type", "text/html")
-				default:
-					// Try to detect content type from file
-					contentType := http.DetectContentType([]byte{})
-					w.Header().Set("Content-Type", contentType)
-				}
-				http.ServeFile(w, r, filePath)
-				return
-			}
-
-			// This is a frontend route, serve index.html for SPA routing
-			// index.html is a constant string, so this is safe from path traversal
-			http.ServeFile(w, r, filepath.Join(frontendDist, "index.html"))
-		})
-	}
-
-	return r
-}
-
-// SetupRoutes is a convenience function to set up all routes.
-func SetupRoutes(deps HandlerDeps) *chi.Mux {
-	return NewRouter(deps)
 }

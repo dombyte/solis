@@ -6,7 +6,6 @@ app:
   debug: DEBUG
   port: 8080
   timeout: 30s
-  serve_only: false
 
 poller:
   # Base interval between poll cycles
@@ -26,6 +25,11 @@ modbus:
   port: 502
   timeout: 2s
   unit_id: 1
+
+# Local time at which the inverter's daily counters roll over (strict 24h HH:MM).
+# Timezone comes from the TZ environment variable (time.Local), never from this file.
+rollover:
+  time: "23:59"
 
 storage:
   path: ./data/solis.db
@@ -49,12 +53,7 @@ storage:
   backup_interval: 24h
   cleanup_interval: 20h
 
-# Aggregator settings for background computation of derived values
-aggregator:
-  # Interval for recomputing monthly/yearly/net values
-  # Default: 60s
-  interval: 30s
-  # WARNING: Only enable if you need to rebuild monthly aggregates from daily data.
-  # When enabled, this will OVERWRITE all monthly values for the current year on startup.
-  # Keep disabled (false) for normal operation to prevent accidental data loss.
-  backfill_current_year_monthly: false
+# There is no aggregator section: the aggregator is event-driven off the poller
+# (debounce/heartbeat derived from poller.interval) and has no config knobs of its own.
+# To recompute monthly/yearly values from daily data, stop the app and run:
+#   solis backfill --years N

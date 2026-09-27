@@ -1,471 +1,223 @@
-// Package modbus provides Modbus TCP client functionality for Solis inverter monitoring.
-// It uses simonvetter/modbus for low-level operations and provides automatic reconnection
-// with exponential backoff for reliable operation.
+// Package modbus is the Modbus TCP client used only by the poller. It is an external
+// layer: it depends on the standard library and simonvetter/modbus only (no config,
+// health or logging globals). Construction never touches the network; Run keeps the
+// single connection alive with exponential backoff and beats while it waits.
 package modbus
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/dombyte/solis/internal/config"
-	"github.com/dombyte/solis/internal/logging"
-	"github.com/simonvetter/modbus"
+	"github.com/rs/zerolog"
+	sv "github.com/simonvetter/modbus"
+
+	"github.com/dombyte/solis/internal/utils"
 )
 
-// logger is the package-level logger for modbus operations.
-var logger = logging.NewComponentLogger("modbus")
-
-// Use simonvetter's built-in RegType constants:
-// HOLDING_REGISTER = 0 (Modbus function code 0x03)
-// INPUT_REGISTER = 1 (Modbus function code 0x04)
-
-// ErrorType classifies errors for appropriate handling.
-type ErrorType int
-
+// Reconnect backoff bounds.
 const (
-	// ErrTypeUnknown is for errors that don't fit other categories.
-	ErrTypeUnknown ErrorType = iota
-	// ErrTypeConnection is for connection-related errors (should trigger reconnection).
-	ErrTypeConnection
-	// ErrTypeTimeout is for timeout errors (should trigger reconnection).
-	ErrTypeTimeout
+	InitialBackoff = time.Second
+	MaxBackoff     = 30 * time.Second
 )
 
-// ClientError is a structured error with type information.
-type ClientError struct {
-	Type    ErrorType
-	Message string
-	Cause   error
+var (
+	// ErrNotConnected is returned by reads while the connection is down.
+	ErrNotConnected = errors.New("modbus: not connected")
+	// ErrInvalidSettings is returned by Validate.
+	ErrInvalidSettings = errors.New("modbus: invalid settings")
+)
+
+// ReadError describes a failed register read.
+type ReadError struct {
+	// Addr is the first register address.
+	Addr uint16
+	// Count is the number of registers.
+	Count uint16
+	// Err is the underlying error.
+	Err error
 }
 
-// IsReconnectable returns true if this error should trigger a reconnection attempt.
-func (e *ClientError) IsReconnectable() bool {
-	return e.Type == ErrTypeConnection || e.Type == ErrTypeTimeout
+func (e *ReadError) Error() string {
+	return fmt.Sprintf("modbus: read %d registers at %d: %v", e.Count, e.Addr, e.Err)
 }
 
-// State represents the connection state.
-type State int
+// Unwrap returns the underlying error.
+func (e *ReadError) Unwrap() error { return e.Err }
 
-const (
-	// Disconnected indicates the connection is not established.
-	Disconnected State = iota
-	// Connecting indicates the connection is being established.
-	Connecting
-	// Connected indicates the connection is active.
-	Connected
-	// Error indicates the connection encountered an error.
-	Error
-)
+// Settings are the connection parameters.
+type Settings struct {
+	// Host is the device host name or IP.
+	Host string
+	// Port is the TCP port.
+	Port int
+	// UnitID is the Modbus unit (slave) id.
+	UnitID byte
+	// Timeout bounds connect and each request.
+	Timeout time.Duration
+}
 
-func (s State) String() string {
-	switch s {
-	case Disconnected:
-		return "disconnected"
-	case Connecting:
-		return "connecting"
-	case Connected:
-		return "connected"
-	case Error:
-		return "error"
-	default:
-		return "unknown"
+// Validate checks the settings.
+func (s Settings) Validate() error {
+	const maxPort = 65535
+	if s.Host == "" || s.Port <= 0 || s.Port > maxPort || s.Timeout <= 0 {
+		return fmt.Errorf("%w: host %q port %d timeout %s", ErrInvalidSettings, s.Host, s.Port,
+			s.Timeout)
 	}
+	return nil
 }
 
-// Client is a Modbus TCP client with automatic reconnection support.
+func (s Settings) url() string {
+	return "tcp://" + net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
+}
+
+// Client is a single Modbus TCP connection with automatic reconnection.
 type Client struct {
-	config *config.ModbusSettings
+	set   Settings
+	clock utils.Clock
+	log   zerolog.Logger
 
-	// Connection state
-	state     State
-	stateMu   sync.RWMutex
-	stateCond *sync.Cond // Condition variable for state changes
-
-	// simonvetter client (handles actual Modbus communication)
-	modbusClient *modbus.ModbusClient
-
-	// Reconnection settings
-	reconnectDelay        time.Duration
-	initialReconnectDelay time.Duration
-	maxReconnectDelay     time.Duration
-	maxReconnectAttempts  int
-
-	// Timeout for individual reads (simonvetter uses its own timeout)
-	readTimeout time.Duration
-
-	// For managing background reconnection loop
-	reconnectCtx    context.Context
-	reconnectCancel context.CancelFunc
+	mu        sync.Mutex // guards mc
+	mc        *sv.ModbusClient
+	connected atomic.Bool
+	lost      chan struct{} // wakes Run when a read marks the connection lost
 }
 
-// NewClient creates a new Modbus TCP client.
-// It initializes the connection to the device specified in the config.
-func NewClient(cfg *config.ModbusSettings) (*Client, error) {
-	if cfg.Type != "tcp" {
-		return nil, fmt.Errorf("unsupported modbus type: %s (only tcp is supported)", cfg.Type)
+// New creates a disconnected client; it never fails because the device is unreachable.
+func New(set Settings, clock utils.Clock, log zerolog.Logger) (*Client, error) {
+	if err := set.Validate(); err != nil {
+		return nil, err
 	}
+	return &Client{set: set, clock: clock, log: log, lost: make(chan struct{}, 1)}, nil
+}
 
-	logger.Info().Msgf("Creating Modbus TCP client for %s:%d", cfg.Host, cfg.Port)
+// IsConnected reports whether the connection is up.
+func (c *Client) IsConnected() bool { return c.connected.Load() }
 
-	c := &Client{
-		config:                cfg,
-		state:                 Disconnected,
-		reconnectDelay:        1 * time.Second,
-		initialReconnectDelay: 1 * time.Second,
-		maxReconnectDelay:     30 * time.Second,
-		maxReconnectAttempts:  3,
-		readTimeout:           cfg.Timeout,
-		modbusClient:          nil,
+// ReadRegisters reads count input registers starting at addr. A failed read marks the
+// connection lost; the Run loop reconnects.
+func (c *Client) ReadRegisters(ctx context.Context, addr, count uint16) ([]uint16, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	// Initialize condition variable for state synchronization
-	c.stateCond = sync.NewCond(&c.stateMu)
-
-	// Create simonvetter client configuration
-	url := fmt.Sprintf("tcp://%s:%d", cfg.Host, cfg.Port)
-	clientConfig := &modbus.ClientConfiguration{
-		URL:     url,
-		Timeout: c.readTimeout,
+	c.mu.Lock()
+	mc := c.mc
+	c.mu.Unlock()
+	if mc == nil || !c.connected.Load() {
+		return nil, ErrNotConnected
 	}
-
-	modbusClient, err := modbus.NewClient(clientConfig)
+	regs, err := mc.ReadRegisters(addr, count, sv.INPUT_REGISTER)
 	if err != nil {
-		logger.Error().Msgf("Failed to create simonvetter modbus client: %v", err)
-		return nil, fmt.Errorf("failed to create modbus client: %w", err)
+		c.markLost(err)
+		return nil, &ReadError{Addr: addr, Count: count, Err: err}
 	}
-
-	// Set the unit ID
-	if err := modbusClient.SetUnitId(cfg.UnitID); err != nil {
-		logger.Error().Msgf("Failed to set unit ID: %v", err)
-		return nil, fmt.Errorf("failed to set unit ID: %w", err)
-	}
-
-	c.modbusClient = modbusClient
-
-	// Try initial connection
-	ctx, cancel := context.WithTimeout(context.Background(), c.readTimeout)
-	defer cancel()
-
-	if err := c.Connect(ctx); err != nil {
-		logger.Warn().Msgf("Initial connection failed (will retry in background): %v", err)
-		// Return client anyway - caller can use StartReconnectionLoop
-		return c, nil
-	}
-
-	logger.Info().Msg("Modbus TCP client created and connected")
-	return c, nil
+	return regs, nil
 }
 
-// Connect establishes a connection to the Modbus device.
-func (c *Client) Connect(ctx context.Context) error {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-
-	if c.state == Connected {
-		logger.Debug().Msg("Already connected")
-		return nil
-	}
-
-	if c.state == Connecting {
-		logger.Debug().Msg("Connection already in progress")
-		// Wait for state change - waitForState now handles the lock internally
-		return c.waitForState(ctx, Connected, Error, Disconnected)
-	}
-
-	c.setState(Connecting)
-
-	// Close existing connection if any
-	if c.modbusClient != nil {
-		if err := c.modbusClient.Close(); err != nil {
-			logger.Warn().Msgf("Error closing existing connection: %v", err)
+func (c *Client) markLost(cause error) {
+	if c.connected.CompareAndSwap(true, false) {
+		c.log.Warn().Err(cause).Msg("modbus connection lost")
+		c.closeConn()
+		select {
+		case c.lost <- struct{}{}:
+		default:
 		}
 	}
+}
 
-	// Create fresh client
-	url := fmt.Sprintf("tcp://%s:%d", c.config.Host, c.config.Port)
-	clientConfig := &modbus.ClientConfiguration{
-		URL:     url,
-		Timeout: c.readTimeout,
-	}
-
-	modbusClient, err := modbus.NewClient(clientConfig)
+// connect opens a fresh connection.
+func (c *Client) connect() error {
+	mc, err := sv.NewClient(&sv.ClientConfiguration{URL: c.set.url(), Timeout: c.set.Timeout})
 	if err != nil {
-		c.setState(Error)
-		return fmt.Errorf("failed to create client: %w", err)
+		return fmt.Errorf("modbus: create client: %w", err)
 	}
-
-	// Set unit ID
-	if err := modbusClient.SetUnitId(c.config.UnitID); err != nil {
-		c.setState(Error)
-		return fmt.Errorf("failed to set unit ID: %w", err)
+	if err := mc.SetUnitId(c.set.UnitID); err != nil {
+		return fmt.Errorf("modbus: set unit id: %w", err)
 	}
-
-	c.modbusClient = modbusClient
-
-	// Open connection
-	if err := modbusClient.Open(); err != nil {
-		c.setState(Error)
-		return fmt.Errorf("connection failed: %w", err)
+	if err := mc.Open(); err != nil {
+		return fmt.Errorf("modbus: connect %s: %w", c.set.url(), err)
 	}
-
-	c.setState(Connected)
-	logger.Info().Msg("Modbus connection established")
+	c.mu.Lock()
+	c.mc = mc
+	c.mu.Unlock()
+	c.connected.Store(true)
+	c.log.Info().Str("url", c.set.url()).Msg("modbus connected")
 	return nil
 }
 
-// Disconnect closes the connection to the Modbus device.
-func (c *Client) Disconnect() error {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-
-	if c.state == Disconnected {
-		logger.Debug().Msg("Already disconnected")
-		return nil
-	}
-
-	if c.modbusClient != nil {
-		if err := c.modbusClient.Close(); err != nil {
-			logger.Error().Msgf("Error closing connection: %v", err)
-			c.setState(Error)
-			return err
+func (c *Client) closeConn() {
+	c.mu.Lock()
+	mc := c.mc
+	c.mc = nil
+	c.mu.Unlock()
+	if mc != nil {
+		if err := mc.Close(); err != nil {
+			c.log.Debug().Err(err).Msg("modbus close")
 		}
 	}
-
-	c.setState(Disconnected)
-	logger.Info().Msg("Modbus connection closed")
-	return nil
 }
 
-// Close is an alias for Disconnect.
+// Close drops the connection.
 func (c *Client) Close() error {
-	return c.Disconnect()
+	c.connected.Store(false)
+	c.closeConn()
+	return nil
 }
 
-// IsConnected returns whether the client is currently connected.
-func (c *Client) IsConnected() bool {
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	return c.state == Connected
-}
-
-// GetState returns the current connection state.
-func (c *Client) GetState() State {
-	c.stateMu.RLock()
-	defer c.stateMu.RUnlock()
-	return c.state
-}
-
-// Config returns the Modbus configuration.
-func (c *Client) Config() *config.ModbusSettings {
-	return c.config
-}
-
-// setState changes the state with logging and notifies waiting goroutines.
-// This method MUST be called with c.stateMu.Lock() held by the caller.
-func (c *Client) setState(newState State) {
-	oldState := c.state
-	c.state = newState
-
-	if oldState != newState {
-		logger.Info().Msgf("State: %s -> %s", oldState.String(), newState.String())
-		c.stateCond.Broadcast()
+// Run keeps the connection alive until ctx is done. beat is called on every connect
+// attempt and at least every beatEvery while waiting (also inside a long backoff), so a
+// reconnecting client never looks stale to the supervisor.
+func (c *Client) Run(ctx context.Context, beatEvery time.Duration, beat func()) {
+	if beatEvery <= 0 {
+		beatEvery = InitialBackoff
+	}
+	backoff := InitialBackoff
+	for ctx.Err() == nil {
+		beat()
+		if c.connected.Load() {
+			backoff = InitialBackoff
+			c.wait(ctx, beatEvery, beatEvery, beat, true)
+			continue
+		}
+		if err := c.connect(); err != nil {
+			c.log.Warn().Err(err).Dur("backoff", backoff).Msg("modbus reconnect failed")
+			c.wait(ctx, backoff, beatEvery, beat, false)
+			backoff = min(backoff*2, MaxBackoff)
+			continue
+		}
+		backoff = InitialBackoff
 	}
 }
 
-// waitForState blocks until the state changes to one of the desired states or context is canceled.
-// Uses condition variable for proper synchronization instead of busy-waiting.
-// Must be called with c.stateMu.Lock() held.
-func (c *Client) waitForState(ctx context.Context, desired ...State) error {
+// wait sleeps d, beating every beatEvery, and returns early when ctx is done or (with
+// stopOnLost) when a read marked the connection lost.
+func (c *Client) wait(ctx context.Context, d, beatEvery time.Duration, beat func(),
+	stopOnLost bool) {
+	lost := c.lost
+	if !stopOnLost {
+		lost = nil
+	}
+	deadline := c.clock.Now().Add(d)
 	for {
-		// Check if current state is desired
-		for _, d := range desired {
-			if c.state == d {
-				return nil
-			}
+		left := deadline.Sub(c.clock.Now())
+		if left <= 0 {
+			return
 		}
-
-		// Check if context is already canceled
+		t := c.clock.NewTimer(min(left, beatEvery))
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			// Context is still valid, wait for state change
-			// Wait() will release the lock and block until Broadcast() is called
-			c.stateCond.Wait()
-		}
-	}
-}
-
-// WaitForConnection blocks until the client is connected or context is canceled.
-func (c *Client) WaitForConnection(ctx context.Context) error {
-	return c.waitForState(ctx, Connected)
-}
-
-// classifyError classifies an error for reconnection decisions.
-// Uses a BLACKLIST approach: ALL errors are reconnectable EXCEPT context.Canceled.
-// This is more robust than whitelisting - network errors, timeouts, broken pipes,
-// connection resets, etc. should ALL trigger reconnection attempts.
-// Only explicit user cancellation (context.Canceled) should NOT trigger reconnection.
-// Note: context.DeadlineExceeded IS reconnectable as it may indicate device timeout.
-func classifyError(err error) *ClientError {
-	if err == nil {
-		return nil
-	}
-
-	// BLACKLIST: Only context.Canceled is NOT reconnectable
-	// All other errors (including context.DeadlineExceeded from simonvetter timeouts)
-	// are reconnectable
-	if errors.Is(err, context.Canceled) {
-		return &ClientError{
-			Type:    ErrTypeUnknown,
-			Message: "context canceled",
-			Cause:   err,
-		}
-	}
-
-	// All other errors are reconnectable
-	// Use ErrTypeConnection as the default (ErrTypeTimeout is also reconnectable)
-	return &ClientError{
-		Type:    ErrTypeConnection,
-		Message: err.Error(),
-		Cause:   err,
-	}
-}
-
-// ReadRegisters reads a range of input registers from the device.
-// It automatically handles reconnection if the connection is lost.
-// Uses a single TCP connection for the read operation.
-func (c *Client) ReadRegisters(ctx context.Context, address uint16, count uint16) ([]uint16, error) {
-	// Check context
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	// Ensure connected
-	if err := c.WaitForConnection(ctx); err != nil {
-		return nil, fmt.Errorf("not connected: %w", err)
-	}
-
-	return c.readWithRetry(ctx, address, count)
-}
-
-// readWithRetry reads registers and handles disconnection errors.
-// For reconnectable errors, it marks the client as disconnected and returns an error.
-// The background reconnection loop (started separately) handles automatic reconnection.
-// The poller handles retry logic with its own configuration.
-func (c *Client) readWithRetry(ctx context.Context, address uint16, count uint16) ([]uint16, error) {
-	// Get current client
-	c.stateMu.RLock()
-	client := c.modbusClient
-	c.stateMu.RUnlock()
-
-	// Read registers - simonvetter uses its own internal timeout
-	regs, err := client.ReadRegisters(address, count, modbus.INPUT_REGISTER)
-	if err == nil {
-		return regs, nil
-	}
-
-	// Classify the error
-	classifiedErr := classifyError(err)
-
-	logger.Debug().Msgf("Read error: %v [classified=%d]", err, classifiedErr.Type)
-
-	// Non-reconnectable error? Return immediately
-	if !classifiedErr.IsReconnectable() {
-		logger.Warn().Msgf("Non-reconnectable error: %v", err)
-		return nil, fmt.Errorf("modbus read failed: %w", err)
-	}
-
-	// For reconnectable errors, mark as disconnected
-	// The background reconnection loop will handle the reconnection
-	c.stateMu.Lock()
-	if c.state != Disconnected {
-		c.setState(Disconnected)
-		if closeErr := c.modbusClient.Close(); closeErr != nil {
-			logger.Warn().Msgf("Error closing: %v", closeErr)
-		}
-	}
-	c.stateMu.Unlock()
-
-	// Return error immediately - the poller will handle retries
-	// and the background loop will handle reconnection
-	return nil, fmt.Errorf("modbus read failed: %w", err)
-}
-
-// StartReconnectionLoop starts a background goroutine that monitors and reconnects.
-func (c *Client) StartReconnectionLoop(ctx context.Context) {
-	c.stateMu.Lock()
-	// Stop existing
-	if c.reconnectCancel != nil {
-		c.reconnectCancel()
-	}
-	c.reconnectCtx, c.reconnectCancel = context.WithCancel(ctx)
-	c.stateMu.Unlock()
-
-	go c.reconnectionLoop()
-}
-
-// StopReconnectionLoop stops the background reconnection loop.
-func (c *Client) StopReconnectionLoop() {
-	c.stateMu.Lock()
-	defer c.stateMu.Unlock()
-
-	if c.reconnectCancel != nil {
-		c.reconnectCancel()
-		c.reconnectCancel = nil
-	}
-}
-
-// reconnectionLoop runs in background to maintain connection.
-func (c *Client) reconnectionLoop() {
-	backoff := c.initialReconnectDelay
-
-	for {
-		select {
-		case <-c.reconnectCtx.Done():
-			logger.Info().Msg("Reconnection loop stopped")
+			t.Stop()
 			return
-		default:
-			c.stateMu.RLock()
-			connected := c.state == Connected
-			c.stateMu.RUnlock()
-
-			if connected {
-				// External connection succeeded, reset backoff
-				backoff = c.initialReconnectDelay
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			logger.Info().Msgf("Background reconnect attempt (backoff: %s)...", backoff)
-
-			connCtx, connCancel := context.WithTimeout(c.reconnectCtx, c.readTimeout)
-			if err := c.Connect(connCtx); err != nil {
-				connCancel()
-				logger.Warn().Msgf("Background reconnect failed: %v", err)
-
-				timer := time.NewTimer(backoff)
-				select {
-				case <-c.reconnectCtx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
-				}
-
-				backoff *= 2
-				if backoff > c.maxReconnectDelay {
-					backoff = c.maxReconnectDelay
-				}
-			} else {
-				connCancel()
-				logger.Info().Msg("Background reconnection successful")
-				backoff = c.initialReconnectDelay
-			}
+		case <-lost:
+			t.Stop()
+			return
+		case <-t.C():
+			beat()
 		}
 	}
 }

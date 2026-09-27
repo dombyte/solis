@@ -1,575 +1,223 @@
-// Package handlers provides HTTP request handlers for the Solis monitor API.
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
+	"context"
 	"fmt"
 	"net/http"
-	"sort"
-	"strings"
 	"time"
 
-	"github.com/dombyte/solis/internal/logging"
+	"github.com/go-chi/chi/v5"
+
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/go-chi/chi/v5"
+	"github.com/dombyte/solis/internal/utils"
 )
 
-// logger is the package-level logger for handler operations.
-var logger = logging.NewComponentLogger("http.handlers")
+// defaultHistoryWindow is the default history range when start is omitted.
+const defaultHistoryWindow = 30 * 24 * time.Hour
 
-// getHTTPStatusCode determines the appropriate HTTP status code for an error.
-// This ensures proper REST API semantics:
-// - 400 for bad requests/validation errors
-// - 404 for resource not found
-// - 500 for internal server errors
-func getHTTPStatusCode(err error) int {
-	if err == nil {
-		return http.StatusOK
-	}
-
-	// Check if it's a validation error (already has status code)
-	var validationErr *registerValidationError
-	if errors.As(err, &validationErr) {
-		return validationErr.statusCode
-	}
-
-	// Check error message for common patterns to determine status code
-	return getStatusCodeFromErrorString(err.Error())
+// ReadService is what the handlers need from the service layer.
+type ReadService interface {
+	Health() health.Snapshot
+	Keys() []solis.Register
+	Register(key string) (solis.Register, error)
+	Current(key string) (*solis.Value, error)
+	DailyHistory(ctx context.Context, key string, start, end time.Time) (
+		[]*storage.DailyDataPoint, error)
+	MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
+		[]*storage.MonthlyDataPoint, error)
+	YearlyHistory(ctx context.Context, key string, start, end time.Time) (
+		[]*storage.YearlyDataPoint, error)
+	Total(ctx context.Context, key string) (*storage.TotalDataPoint, error)
+	StatusHistory(ctx context.Context, key string) (service.StatusHistory, error)
 }
 
-// getStatusCodeFromErrorString determines the HTTP status code based on error message patterns.
-func getStatusCodeFromErrorString(errStr string) int {
-	// 404 - Resource not found
-	if strings.Contains(errStr, "unknown register key") ||
-		strings.Contains(errStr, "not found") ||
-		strings.Contains(errStr, "no rows") ||
-		strings.Contains(errStr, "no data") {
-		return http.StatusNotFound
-	}
-
-	// 400 - Bad request (validation, parsing errors)
-	if strings.Contains(errStr, "invalid") ||
-		strings.Contains(errStr, "bad request") ||
-		strings.Contains(errStr, "parse") {
-		return http.StatusBadRequest
-	}
-
-	// 500 - Internal server error (database, storage, etc.)
-	return http.StatusInternalServerError
-}
-
-// sanitizeErrorMessage removes sensitive information from error messages.
-// This prevents information disclosure in HTTP responses.
-func sanitizeErrorMessage(err error) string {
-	if err == nil {
-		return ""
-	}
-
-	// For validation errors, return the message as-is (it's already safe)
-	var validationErr *registerValidationError
-	if errors.As(err, &validationErr) {
-		return validationErr.message
-	}
-
-	errStr := err.Error()
-
-	// Remove potentially sensitive information
-	// Database paths, file paths, internal details
-	sanitized := removeSensitivePaths(errStr)
-
-	// Generic messages for common error types
-	return getSanitizedErrorMessage(sanitized, err)
-}
-
-// removeSensitivePaths removes file paths and database extensions from error strings.
-func removeSensitivePaths(errStr string) string {
-	sanitized := errStr
-	// Remove file paths (common in SQLite errors)
-	sanitized = strings.ReplaceAll(sanitized, "./data/", "")
-	sanitized = strings.ReplaceAll(sanitized, "/data/", "/")
-	// Remove database file extensions
-	sanitized = strings.ReplaceAll(sanitized, ".db", "")
-	sanitized = strings.ReplaceAll(sanitized, ".sqlite", "")
-	return sanitized
-}
-
-// getSanitizedErrorMessage returns a sanitized error message based on patterns.
-func getSanitizedErrorMessage(sanitizedErrStr string, originalErr error) string {
-	// Map of error patterns to sanitized messages
-	errorPatterns := []struct {
-		pattern string
-		message string
-	}{
-		{"no rows", "resource not found"},
-		{"not found", "resource not found"},
-		{"database", "database error"},
-		{"sqlite", "database error"},
-		{"timeout", "request timeout"},
-		{"context", "request timeout"},
-		{"connection", "service unavailable"},
-		{"network", "service unavailable"},
-	}
-
-	for _, ep := range errorPatterns {
-		if strings.Contains(sanitizedErrStr, ep.pattern) {
-			return ep.message
-		}
-	}
-
-	// Return a generic message but log the full error
-	logger.Warn().Msgf("Returning sanitized error to client, full error: %v", originalErr)
-	return "internal server error"
-}
-
-// ReadServiceInterface defines the methods from service.ReadService that handlers need.
-// This allows for easier testing with mocks.
-type ReadServiceInterface interface {
-	HealthCheck() (map[string]string, error)
-	IsRegisterEnabled(key string) bool
-	GetKeys() []string
-	GetValues(keys []string) (map[string]*solis.Value, error)
-	GetRegister(key string) (*solis.Value, error)
-	GetErrorHistory(key string, start, end time.Time) ([]*storage.ErrorDataPoint, error)
-	GetHistoricalData(key string, start, end time.Time, interval storage.Interval) (*storage.HistoryResult, error)
-	GetDailyHistory(key string, start, end time.Time) ([]*storage.DailyDataPoint, error)
-	GetMonthlyHistory(key string, start, end time.Time) ([]*storage.MonthlyDataPoint, error)
-	GetYearlyHistory(key string, start, end time.Time) ([]*storage.YearlyDataPoint, error)
-	GetTotalHistory(key string) (*storage.TotalDataPoint, error)
-}
-
-// HandlerDeps contains dependencies for HTTP handlers.
+// HandlerDeps are the handler dependencies.
 type HandlerDeps struct {
-	// Service is the service layer for business logic.
-	Service ReadServiceInterface
+	Service ReadService
+	Errors  *ErrorMapper
+	Clock   utils.Clock
 }
 
-// ErrorResponse represents an error response.
-type ErrorResponse struct {
-	// Error is the HTTP status text
-	Error string `json:"error"`
-	// Message is the detailed error message
-	Message string `json:"message"`
-	// Code is the HTTP status code
-	Code int `json:"code"`
-}
-
-// StatusHistoryEntry represents a single decoded status entry in the history.
-type StatusHistoryEntry struct {
-	Timestamp     string      `json:"timestamp"`
-	StatusDecoded interface{} `json:"status_decoded"`
-}
-
-// StatusResponse represents the response for status register requests.
-type StatusResponse struct {
-	Key     string               `json:"key"`
-	Name    string               `json:"name"`
-	History []StatusHistoryEntry `json:"history"`
-}
-
-// WriteJSON writes a JSON response.
-func WriteJSON(w http.ResponseWriter, data any, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		logger.Error().Msgf("Failed to encode JSON: %v", err)
-	}
-}
-
-// PanicRecoveryMiddleware recovers from panics in HTTP handlers.
-// This ensures the server never crashes due to a panic in a handler.
-func PanicRecoveryMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.Error().Msgf("PANIC in HTTP handler: %v", r)
-				WriteJSON(w, ErrorResponse{
-					Error:   "Internal Server Error",
-					Message: fmt.Sprintf("Panic recovered: %v", r),
-					Code:    http.StatusInternalServerError,
-				}, http.StatusInternalServerError)
-			}
-		}()
-		next.ServeHTTP(w, r)
+// GetHealthHandler serves the supervisor snapshot: 200 for ok/degraded, 503 when any
+// component failed (fail-closed). It never blocks on a component.
+func GetHealthHandler(deps HandlerDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		snap := deps.Service.Health()
+		status := http.StatusOK
+		if snap.Status == health.StatusFailed {
+			status = http.StatusServiceUnavailable
+		}
+		WriteJSON(w, status, snap)
 	})
 }
 
-// WriteError writes an error response as JSON with proper status code.
-// It uses the message for both error and message fields for backward compatibility.
-func WriteError(w http.ResponseWriter, message string, statusCode int) {
-	response := map[string]any{
-		"error":   message,
-		"status":  statusCode,
-		"message": message,
-	}
-	WriteJSON(w, response, statusCode)
-}
-
-// WriteErrorWithCode writes an error response with automatic status code determination.
-// It uses getHTTPStatusCode to determine the appropriate status code based on the error.
-func WriteErrorWithCode(w http.ResponseWriter, err error) {
-	statusCode := getHTTPStatusCode(err)
-	sanitizedMsg := sanitizeErrorMessage(err)
-	WriteError(w, sanitizedMsg, statusCode)
-}
-
-// GetHealthHandler returns a handler for the health check endpoint.
-func GetHealthHandler(deps HandlerDeps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		status, err := deps.Service.HealthCheck()
-		if err != nil {
-			WriteError(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		status["timestamp"] = time.Now().UTC().Format(time.RFC3339)
-		WriteJSON(w, status, http.StatusOK)
-	}
-}
-
-// RegisterInfo represents metadata about a register for the /api/v1/keys endpoint.
+// RegisterInfo is one /api/keys entry (v3: "stability" removed, "store" added).
 type RegisterInfo struct {
-	// Key is the unique identifier for this register
-	Key string `json:"key"`
-	// Name is the human-readable name of the register
-	Name string `json:"name"`
-	// Address is the Modbus register address
-	Address uint16 `json:"address"`
-	// DataType is the type of value stored in this register
-	DataType string `json:"data_type"`
-	// Unit is the unit of measurement
-	Unit string `json:"unit"`
-	// Stability indicates how often this value changes
-	Stability string `json:"stability"`
-	// Description combines name and unit for display
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Address     uint16 `json:"address,omitempty"`
+	DataType    string `json:"data_type"`
+	Unit        string `json:"unit"`
+	Store       string `json:"store"`
 	Description string `json:"description"`
 }
 
-// GetKeysHandler returns a handler for getting all register keys with metadata.
-func GetKeysHandler(deps HandlerDeps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		// Get enabled register keys from the service
-		enabledKeys := deps.Service.GetKeys()
-
-		// Convert to RegisterInfo slice
-		infos := make([]RegisterInfo, 0, len(enabledKeys))
-		for _, key := range enabledKeys {
-			if reg, ok := solis.RegisterMapByKey[key]; ok {
-				// Build description with unit
-				description := fmt.Sprintf("%s (%s)", reg.Name, reg.Unit)
-
-				// Append usage note for history-only registers
-				isPeriodic := solis.IsDailyRegister(key) || solis.IsMonthlyRegister(key) ||
-					solis.IsYearlyRegister(key) || solis.IsTotalRegister(key)
-				if isPeriodic {
-					description += " - Use with start/end query parameters for historical data"
-				}
-
-				infos = append(infos, RegisterInfo{
-					Key:         reg.Key,
-					Name:        reg.Name,
-					Address:     reg.Address,
-					DataType:    reg.DataType.String(),
-					Unit:        reg.Unit,
-					Stability:   reg.Stability.String(),
-					Description: description,
-				})
+// GetKeysHandler lists every register with metadata.
+func GetKeysHandler(deps HandlerDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		regs := deps.Service.Keys()
+		infos := make([]RegisterInfo, 0, len(regs))
+		for _, r := range regs {
+			desc := fmt.Sprintf("%s (%s)", r.Name, r.Unit)
+			if _, periodic := r.Store.Level(); periodic {
+				desc += " - Use with start/end query parameters for historical data"
 			}
+			infos = append(infos, RegisterInfo{Key: r.Key, Name: r.Name, Address: r.Address,
+				DataType: r.DataType.String(), Unit: r.Unit, Store: r.Store.String(),
+				Description: desc})
 		}
-
-		WriteJSON(w, infos, http.StatusOK)
-	}
+		WriteJSON(w, http.StatusOK, infos)
+	})
 }
 
-// GetDataHandler returns a handler for getting data for a specific register key.
-// This implements the v2 API design:
-// - NO query params: Returns latest current value (from cache)
-// - ?start=2026-08-01&end=2026-08-03: For daily/monthly/yearly keys, returns historical data
-// - For total keys: Always returns lifetime value regardless of query params
-func GetDataHandler(deps HandlerDeps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key, reg, err := validateAndGetRegister(r, deps.Service)
+// GetDataHandler serves /api/data/{key}: no params = latest cached value; start/end on
+// daily/monthly/yearly keys = history; total keys = lifetime value; status keys = decoded
+// change history.
+func GetDataHandler(deps HandlerDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := chi.URLParam(r, "key")
+		reg, err := deps.Service.Register(key)
 		if err != nil {
-			// Validation errors already have the correct status code
-			WriteError(w, err.message, err.statusCode)
+			deps.Errors.Write(w, err)
 			return
 		}
-
-		startStr := r.URL.Query().Get("start")
-		endStr := r.URL.Query().Get("end")
-		hasQueryParams := startStr != "" || endStr != ""
-
-		keyType := GetKeyType(key)
-
-		if hasQueryParams && keyType == "current" {
-			WriteError(w,
-				fmt.Sprintf("historical queries not supported for %s - only periodic registers", key),
-				http.StatusBadRequest)
+		q := r.URL.Query()
+		hasRange := q.Get("start") != "" || q.Get("end") != ""
+		if hasRange && !historyCapable(reg.Store) {
+			WriteError(w, http.StatusBadRequest, fmt.Sprintf(
+				"historical queries not supported for %s - only periodic registers", key))
 			return
 		}
+		body, err := dispatch(r.Context(), deps, dataRequest{reg: reg, hasRange: hasRange,
+			start: q.Get("start"), end: q.Get("end")})
+		if err != nil {
+			deps.Errors.Write(w, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, body)
+	})
+}
 
-		switch keyType {
-		case "daily":
-			handleDailyRegister(w, r, key, deps.Service, hasQueryParams)
-		case "monthly":
-			handleMonthlyRegister(w, r, key, deps.Service, hasQueryParams)
-		case "yearly":
-			handleYearlyRegister(w, r, key, deps.Service, hasQueryParams)
-		case "total":
-			handleTotalRegister(w, key, reg, deps.Service)
-		default:
-			handleDefaultRegister(w, r, key, reg, deps.Service)
+func historyCapable(s solis.Store) bool {
+	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly ||
+		s == solis.StoreTotal
+}
+
+// dataRequest is one parsed /api/data request.
+type dataRequest struct {
+	reg        solis.Register
+	hasRange   bool
+	start, end string
+}
+
+// dispatch selects the read by register store (enum switch).
+func dispatch(ctx context.Context, deps HandlerDeps, req dataRequest) (any, error) {
+	switch {
+	case req.reg.Store == solis.StoreTotal:
+		return total(ctx, deps, req.reg)
+	case req.reg.Store == solis.StoreStatus:
+		return deps.Service.StatusHistory(ctx, req.reg.Key)
+	case req.hasRange:
+		return history(ctx, deps, req.reg, req.start, req.end)
+	default:
+		v, err := deps.Service.Current(req.reg.Key)
+		if err != nil {
+			return nil, err
+		}
+		return NewDataResponse(v), nil
+	}
+}
+
+func history(ctx context.Context, deps HandlerDeps, reg solis.Register, start, end string) (
+	any, error) {
+	tr, err := ParseTimeRange(start, end, deps.Clock.Now())
+	if err != nil {
+		return nil, err
+	}
+	switch reg.Store {
+	case solis.StoreMonthly:
+		return deps.Service.MonthlyHistory(ctx, reg.Key, tr.Start, tr.End)
+	case solis.StoreYearly:
+		return deps.Service.YearlyHistory(ctx, reg.Key, tr.Start, tr.End)
+	default:
+		return deps.Service.DailyHistory(ctx, reg.Key, tr.Start, tr.End)
+	}
+}
+
+func total(ctx context.Context, deps HandlerDeps, reg solis.Register) (any, error) {
+	dp, err := deps.Service.Total(ctx, reg.Key)
+	if err != nil {
+		return nil, err
+	}
+	return DataResponse{Key: reg.Key, Name: reg.Name, Unit: reg.Unit,
+		Value: round(dp.Value), RawValue: round(dp.RawValue), Timestamp: dp.Timestamp}, nil
+}
+
+// DataResponse is a single current or total value (values rounded to two decimals).
+type DataResponse struct {
+	Key           string                     `json:"key"`
+	Name          string                     `json:"name,omitempty"`
+	Unit          string                     `json:"unit,omitempty"`
+	Value         utils.Float64With2Decimals `json:"value"`
+	RawValue      utils.Float64With2Decimals `json:"raw_value"`
+	Timestamp     string                     `json:"timestamp,omitempty"`
+	StatusDecoded any                        `json:"status_decoded,omitempty"`
+}
+
+// NewDataResponse renders a cached value.
+func NewDataResponse(v *solis.Value) DataResponse {
+	return DataResponse{Key: v.Key, Name: v.Name, Unit: v.Unit, Value: round(v.DecodedValue),
+		RawValue: round(v.RawValue), Timestamp: v.Timestamp.Format(time.RFC3339),
+		StatusDecoded: v.StatusDecoded}
+}
+
+func round(f float64) utils.Float64With2Decimals {
+	return utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(f))
+}
+
+// TimeRange is a parsed history range.
+type TimeRange struct {
+	Start time.Time
+	End   time.Time
+}
+
+// ParseTimeRange parses start/end as YYYY-MM-DD, YYYY-MM or YYYY; start defaults to 30
+// days before now and end to now.
+func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
+	s, err := parseTime(start, now.Add(-defaultHistoryWindow))
+	if err != nil {
+		return TimeRange{}, err
+	}
+	e, err := parseTime(end, now)
+	if err != nil {
+		return TimeRange{}, err
+	}
+	return TimeRange{Start: s, End: e}, nil
+}
+
+func parseTime(s string, def time.Time) (time.Time, error) {
+	if s == "" {
+		return def, nil
+	}
+	for _, layout := range []string{period.DayLayout, period.MonthLayout, period.YearLayout} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
 		}
 	}
+	return time.Time{}, fmt.Errorf("%w: %q (want YYYY-MM-DD, YYYY-MM or YYYY)",
+		service.ErrInvalidRange, s)
 }
-
-// registerValidationError is a custom error type for validation failures
-type registerValidationError struct {
-	message    string
-	statusCode int
-}
-
-func (e *registerValidationError) Error() string {
-	return e.message
-}
-
-// validateAndGetRegister validates the request and returns the register key and metadata
-func validateAndGetRegister(
-	r *http.Request,
-	service ReadServiceInterface,
-) (string, *solis.Register, *registerValidationError) {
-	key := chi.URLParam(r, "key")
-	if key == "" {
-		return "", nil,
-			&registerValidationError{message: "register key is required", statusCode: http.StatusBadRequest}
-	}
-
-	if !service.IsRegisterEnabled(key) {
-		return "", nil,
-			&registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
-	}
-
-	reg, ok := solis.RegisterMapByKey[key]
-	if !ok {
-		return "", nil,
-			&registerValidationError{message: fmt.Sprintf("unknown register key: %s", key), statusCode: http.StatusNotFound}
-	}
-
-	return key, reg, nil
-}
-
-// handleDailyRegister handles daily register requests
-//
-
-func handleDailyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
-		HasQueryParams: hasQueryParams,
-		GetHistory:     getDailyHistory,
-	})
-}
-
-// handleMonthlyRegister handles monthly register requests
-//
-
-func handleMonthlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
-		HasQueryParams: hasQueryParams,
-		GetHistory:     getMonthlyHistory,
-	})
-}
-
-// handleYearlyRegister handles yearly register requests
-//
-
-func handleYearlyRegister(w http.ResponseWriter, r *http.Request, key string, service ReadServiceInterface, hasQueryParams bool) {
-	handleRegisterWithOptionalHistory(w, r, key, service, RegisterHandlerConfig{
-		HasQueryParams: hasQueryParams,
-		GetHistory:     getYearlyHistory,
-	})
-}
-
-// getDailyHistory returns the daily history for a register
-//
-
-func getDailyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
-	return s.GetDailyHistory(k, start, end)
-}
-
-// getMonthlyHistory returns the monthly history for a register
-//
-
-func getMonthlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
-	return s.GetMonthlyHistory(k, start, end)
-}
-
-// getYearlyHistory returns the yearly history for a register
-//
-
-func getYearlyHistory(s ReadServiceInterface, k string, start, end time.Time) (interface{}, error) {
-	return s.GetYearlyHistory(k, start, end)
-}
-
-// RegisterHistoryConfig holds configuration for handling register history requests
-type RegisterHistoryConfig struct {
-	GetHistory func(ReadServiceInterface, string, time.Time, time.Time) (interface{}, error)
-}
-
-// handleHistoryWithParams is a generic handler for history requests with time range parameters
-func handleHistoryWithParams(
-	w http.ResponseWriter,
-	r *http.Request,
-	key string,
-	service ReadServiceInterface,
-	cfg RegisterHistoryConfig,
-) {
-	timeRange, err := ParseTimeRange(r.URL.Query().Get("start"), r.URL.Query().Get("end"))
-	if err != nil {
-		WriteError(w, fmt.Sprintf("invalid time range: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	history, err := cfg.GetHistory(service, key, timeRange.Start, timeRange.End)
-	if err != nil {
-		// Storage/database errors should return 500, not 404
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	WriteJSON(w, history, http.StatusOK)
-}
-
-// RegisterHandlerConfig holds configuration for handling register requests
-type RegisterHandlerConfig struct {
-	HasQueryParams bool
-	GetHistory     func(ReadServiceInterface, string, time.Time, time.Time) (interface{}, error)
-}
-
-// handleRegisterWithOptionalHistory handles register requests with optional history query parameters.
-// If HasQueryParams is true, it retrieves history using the provided getHistory function.
-// Otherwise, it returns the current value.
-func handleRegisterWithOptionalHistory(
-	w http.ResponseWriter,
-	r *http.Request,
-	key string,
-	service ReadServiceInterface,
-	cfg RegisterHandlerConfig,
-) {
-	if cfg.HasQueryParams {
-		handleHistoryWithParams(w, r, key, service, RegisterHistoryConfig{cfg.GetHistory})
-		return
-	}
-	handleCurrentValue(w, key, service)
-}
-
-// handleTotalRegister handles total register requests
-func handleTotalRegister(w http.ResponseWriter, key string, reg *solis.Register, service ReadServiceInterface) {
-	history, err := service.GetTotalHistory(key)
-	if err != nil {
-		// Storage/database errors should return 500, not 404
-		WriteErrorWithCode(w, err)
-		return
-	}
-	if history == nil {
-		// This is a genuine "not found" case
-		WriteError(w, fmt.Sprintf("no total data found for register %s", key), http.StatusNotFound)
-		return
-	}
-
-	response := DataResponse{
-		Key:       key,
-		Name:      reg.Name,
-		Unit:      reg.Unit,
-		Value:     history.Value,
-		RawValue:  history.RawValue,
-		Timestamp: history.Timestamp,
-	}
-
-	WriteJSON(w, response, http.StatusOK)
-}
-
-// handleCurrentValue handles requests for current value of a register
-func handleCurrentValue(w http.ResponseWriter, key string, service ReadServiceInterface) {
-	value, err := service.GetRegister(key)
-	if err != nil {
-		// GetRegister can fail for various reasons - determine appropriate status code
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	WriteJSON(w, buildDataResponse(key, value), http.StatusOK)
-}
-
-// handleDefaultRegister handles default case (status and current registers)
-func handleDefaultRegister(w http.ResponseWriter, r *http.Request, key string, reg *solis.Register, service ReadServiceInterface) {
-	if reg.Status {
-		handleStatusRegister(w, r, key, reg, service)
-		return
-	}
-
-	value, err := service.GetRegister(key)
-	if err != nil {
-		// GetRegister can fail for various reasons - determine appropriate status code
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	WriteJSON(w, buildDataResponse(key, value), http.StatusOK)
-}
-
-// handleStatusRegister handles status register requests with error history
-func handleStatusRegister(w http.ResponseWriter, r *http.Request, key string, reg *solis.Register, service ReadServiceInterface) {
-	startTime := time.Unix(0, 0)
-	endTime := time.Unix(1<<63-1, 0)
-
-	errorHistory, err := service.GetErrorHistory(key, startTime, endTime)
-	entries := make([]StatusHistoryEntry, 0, len(errorHistory)+1)
-
-	if err != nil {
-		// Log the error but don't fail the request - we can still return the current value
-		logger.Warn().Msgf("Failed to get error history for %s: %v", key, err)
-	} else {
-		addErrorHistoryEntries(&entries, errorHistory, reg)
-	}
-
-	value, err := service.GetRegister(key)
-	if err != nil {
-		// GetRegister can fail for various reasons - determine appropriate status code
-		WriteErrorWithCode(w, err)
-		return
-	}
-
-	if value.StatusDecoded != nil {
-		entries = append(entries, StatusHistoryEntry{
-			Timestamp:     value.Timestamp.Format(time.RFC3339),
-			StatusDecoded: value.StatusDecoded,
-		})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Timestamp > entries[j].Timestamp
-	})
-
-	WriteJSON(w, StatusResponse{
-		Key:     key,
-		Name:    value.Name,
-		History: entries,
-	}, http.StatusOK)
-}
-
-// addErrorHistoryEntries adds error history entries to the StatusHistoryEntry slice
-func addErrorHistoryEntries(entries *[]StatusHistoryEntry, errorHistory []*storage.ErrorDataPoint, reg *solis.Register) {
-	for _, dp := range errorHistory {
-		rawUint16 := uint16(dp.RawValue)
-		decodedValue := solis.DecodeRegister(reg, []uint16{rawUint16})
-
-		if decodedValue.StatusDecoded != nil {
-			*entries = append(*entries, StatusHistoryEntry{
-				Timestamp:     dp.Timestamp,
-				StatusDecoded: decodedValue.StatusDecoded,
-			})
-		}
-	}
-}
-
-// GetDailyHandler returns daily aggregated values for energy registers.

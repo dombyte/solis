@@ -1,47 +1,59 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestMain_FunctionExists(t *testing.T) {
-	// This is a placeholder test to ensure the main package has tests
-	// The actual main() function can't be easily tested as it calls os.Exit
-	// But we can at least verify the package compiles and has this test file
-	t.Log("main package test file exists")
+func TestDispatch_HelpAndUnknown(t *testing.T) {
+	var out, errOut bytes.Buffer
+	assert.Equal(t, 0, dispatch([]string{"help"}, &out, &errOut))
+	assert.Contains(t, out.String(), "solis backfill --years N")
+	assert.Equal(t, 1, dispatch([]string{"frobnicate"}, &out, &errOut))
+	assert.Contains(t, errOut.String(), `unknown command "frobnicate"`)
 }
 
-func TestConfiguration_Loading(t *testing.T) {
-	// This test verifies that the configuration loading logic works
-	// by testing the config package separately
-	// The actual main() function's config loading is tested in config_test.go
-	t.Log("Configuration loading is tested in config package")
+func TestRestartLoop(t *testing.T) {
+	var logs bytes.Buffer
+	assert.Equal(t, 0, restartLoop(&logs, func() error { return nil }, 3, 0))
+
+	calls := 0
+	code := restartLoop(&logs, func() error {
+		calls++
+		if calls == 1 {
+			panic("boom")
+		}
+		return errors.New("health fatal: poller")
+	}, 3, 0)
+	assert.Equal(t, 1, code, "shared restart ceiling reached")
+	assert.Equal(t, 3, calls)
+	assert.Contains(t, logs.String(), "panic: boom")
 }
 
-func TestServer_Initialization(t *testing.T) {
-	// This test verifies that server initialization works
-	// by testing the server package separately
-	// The actual main() function's server initialization is tested in server_test.go
-	t.Log("Server initialization is tested in server package")
-}
+func TestBackfill_FlagsAndConfig(t *testing.T) {
+	var out, errOut bytes.Buffer
+	assert.Equal(t, 1, runBackfill([]string{"--years", "x"}, &out, &errOut))
 
-func TestPoller_Initialization(t *testing.T) {
-	// This test verifies that poller initialization works
-	// by testing the poller package separately
-	// The actual main() function's poller initialization is tested in poller_test.go
-	t.Log("Poller initialization is tested in poller package")
-}
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, configPath),
+		[]byte("storage:\n  path: ./data/solis.db\n  enable_backup: true\n"), 0o600))
 
-func TestModbus_Initialization(t *testing.T) {
-	// This test verifies that modbus client initialization works
-	// by testing the modbus package separately
-	// The actual main() function's modbus initialization is tested in modbus_test.go
-	t.Log("Modbus initialization is tested in modbus package")
-}
+	errOut.Reset()
+	assert.Equal(t, 1, runBackfill([]string{"--years", "-1"}, &out, &errOut))
+	assert.Contains(t, errOut.String(), "--years must be >= 0")
 
-func TestStorage_Initialization(t *testing.T) {
-	// This test verifies that storage initialization works
-	// by testing the storage package separately
-	// The actual main() function's storage initialization is tested in storage_test.go
-	t.Log("Storage initialization is tested in storage package")
+	// Empty database: backup fails because the file does not exist yet -> exit 1.
+	errOut.Reset()
+	assert.Equal(t, 1, runBackfill(nil, &out, &errOut))
+	assert.Contains(t, errOut.String(), "nothing was written")
 }

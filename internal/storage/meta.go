@@ -1,0 +1,247 @@
+package storage
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"maps"
+	"strconv"
+	"strings"
+
+	"github.com/dombyte/solis/internal/period"
+)
+
+// Meta table keys (Plan.md D1).
+const (
+	metaCutover        = "v3_cutover_date"
+	metaClosedDaily    = "closed:daily:" // + daily key (poller)
+	metaClosedNetDaily = "closed:netdaily"
+	metaClosedMonthly  = "closed:monthly"
+	metaClosedYearly   = "closed:yearly"
+	metaBaseline       = "baseline:" // + total key
+	metaBaselineYear   = "baseline_year"
+	floatBits          = 64
+)
+
+// metaState is the in-memory copy of the meta table.
+type metaState struct {
+	cutover      string
+	closedDaily  map[string]string
+	frozen       map[period.Level]string // Daily = net daily
+	baselineYear string
+	baseline     map[string]float64
+}
+
+func newMetaState() metaState {
+	return metaState{
+		closedDaily: make(map[string]string),
+		frozen:      make(map[period.Level]string),
+		baseline:    make(map[string]float64),
+	}
+}
+
+func (m metaState) clone() metaState {
+	c := m
+	c.closedDaily = maps.Clone(m.closedDaily)
+	c.frozen = maps.Clone(m.frozen)
+	c.baseline = maps.Clone(m.baseline)
+	return c
+}
+
+func frozenKey(l period.Level) (string, error) {
+	switch l {
+	case period.Daily:
+		return metaClosedNetDaily, nil
+	case period.Monthly:
+		return metaClosedMonthly, nil
+	case period.Yearly:
+		return metaClosedYearly, nil
+	default:
+		return "", fmt.Errorf("storage: level %s cannot be frozen", l)
+	}
+}
+
+// loadMeta reads the meta table into memory.
+func (s *Storage) loadMeta(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM meta`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	m := newMetaState()
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return err
+		}
+		if err := m.apply(k, v); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.meta = m
+	s.mu.Unlock()
+	return nil
+}
+
+// apply sets one meta row on the state.
+func (m *metaState) apply(k, v string) error {
+	switch k {
+	case metaCutover:
+		m.cutover = v
+	case metaBaselineYear:
+		m.baselineYear = v
+	case metaClosedNetDaily:
+		m.frozen[period.Daily] = v
+	case metaClosedMonthly:
+		m.frozen[period.Monthly] = v
+	case metaClosedYearly:
+		m.frozen[period.Yearly] = v
+	default:
+		return m.applyPrefixed(k, v)
+	}
+	return nil
+}
+
+// applyPrefixed sets a per-key meta row (daily close watermark or total baseline).
+func (m *metaState) applyPrefixed(k, v string) error {
+	if day, ok := strings.CutPrefix(k, metaClosedDaily); ok {
+		m.closedDaily[day] = v
+		return nil
+	}
+	key, ok := strings.CutPrefix(k, metaBaseline)
+	if !ok {
+		return nil
+	}
+	f, err := strconv.ParseFloat(v, floatBits)
+	if err != nil {
+		return fmt.Errorf("storage: meta %s: %w", k, err)
+	}
+	m.baseline[key] = f
+	return nil
+}
+
+func putMeta(tx *sql.Tx, k, v string) error {
+	_, err := tx.Exec(`INSERT INTO meta (key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, v)
+	if err != nil {
+		return fmt.Errorf("storage: write meta %s: %w", k, err)
+	}
+	return nil
+}
+
+func formatFloat(f float64) string {
+	return strconv.FormatFloat(f, 'g', -1, floatBits)
+}
+
+// advance sets watermark k to v when v is later; returns the new value.
+func advance(tx *sql.Tx, k, cur, v string) (string, error) {
+	if v <= cur {
+		return cur, nil
+	}
+	return v, putMeta(tx, k, v)
+}
+
+// EnsureCutover records the v3 cutover on first start (spec §11) and initialises the
+// watermarks so pre-cutover monthly/yearly rows stay frozen as authoritative history.
+// It returns the cutover day and whether it was created now.
+func (s *Storage) EnsureCutover(ctx context.Context, p period.Period) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.meta.cutover != "" {
+		return s.meta.cutover, false, nil
+	}
+	next := s.meta.clone()
+	err := s.withTx(ctx, func(tx *sql.Tx) error { return s.writeCutover(tx, &next, p) })
+	if err != nil {
+		return "", false, err
+	}
+	s.meta = next
+	return p.Day, true, nil
+}
+
+// cutoverMargin keeps the previous day writable so a first start inside the rollover
+// window can still finish yesterday.
+const cutoverMargin = -2
+
+func (s *Storage) writeCutover(tx *sql.Tx, m *metaState, p period.Period) error {
+	prevMonth, err := period.AddMonths(p.Month, -1)
+	if err != nil {
+		return err
+	}
+	prevYear, err := period.AddYears(p.Year, -1)
+	if err != nil {
+		return err
+	}
+	closedDay, err := period.AddDays(p.Day, cutoverMargin)
+	if err != nil {
+		return err
+	}
+	if err := putMeta(tx, metaCutover, p.Day); err != nil {
+		return err
+	}
+	m.cutover = p.Day
+	marks := []struct {
+		level period.Level
+		key   string
+		value string
+	}{
+		{period.Monthly, metaClosedMonthly, prevMonth},
+		{period.Yearly, metaClosedYearly, prevYear},
+		{period.Daily, metaClosedNetDaily, closedDay},
+	}
+	for _, mk := range marks {
+		if m.frozen[mk.level], err = advance(tx, mk.key, m.frozen[mk.level], mk.value); err != nil {
+			return err
+		}
+	}
+	return s.initDayMarks(tx, m, closedDay, prevYear)
+}
+
+func (s *Storage) initDayMarks(tx *sql.Tx, m *metaState, closedDay, prevYear string) error {
+	var err error
+	for _, k := range s.keys.DailyKeys() {
+		if m.closedDaily[k], err = advance(tx, metaClosedDaily+k, m.closedDaily[k],
+			closedDay); err != nil {
+			return err
+		}
+	}
+	if m.baselineYear == "" {
+		m.baselineYear = prevYear
+		return putMeta(tx, metaBaselineYear, prevYear)
+	}
+	return nil
+}
+
+// CloseState returns a copy of the persisted close/baseline state.
+func (s *Storage) CloseState(_ context.Context) (CloseState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return CloseState{
+		Cutover:       s.meta.cutover,
+		FrozenMonth:   s.meta.frozen[period.Monthly],
+		FrozenYear:    s.meta.frozen[period.Yearly],
+		FrozenNetDay:  s.meta.frozen[period.Daily],
+		ClosedThrough: s.closedThrough(),
+		BaselineYear:  s.meta.baselineYear,
+		Baseline:      maps.Clone(s.meta.baseline),
+	}, nil
+}
+
+// closedThrough is the minimum closed day over all daily keys; caller holds mu.
+func (s *Storage) closedThrough() string {
+	low := ""
+	for i, k := range s.keys.DailyKeys() {
+		d := s.meta.closedDaily[k]
+		if d == "" {
+			return ""
+		}
+		if i == 0 || d < low {
+			low = d
+		}
+	}
+	return low
+}
