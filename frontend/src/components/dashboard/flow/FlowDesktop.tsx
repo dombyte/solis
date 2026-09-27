@@ -77,7 +77,7 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
   const batteryGauge = <BatteryGauge soc={nodes.battery.soc ?? 0} />;
 
   return (
-    <div className="w-full max-w-4xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
+    <div className="w-full">
     <svg
       viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
       className="w-full h-auto"

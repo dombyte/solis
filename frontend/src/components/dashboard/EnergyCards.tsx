@@ -16,7 +16,7 @@ interface EnergyCardProps {
 // Mobile-collapsible energy card (spec §14.3): mobile shows the first dataId
 // (always PV Energy, per groups.ts ordering) by default, the rest expand on tap.
 // Desktop is unaffected and always shows every dataId, same as DataCard.
-function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement | null {
+export function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement | null {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
   const isMobile = useMobile();
   const [expanded, setExpanded] = useState(false);
@@ -83,19 +83,5 @@ function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElem
         )}
       </CardContent>
     </Card>
-  );
-}
-
-interface EnergyCardsProps {
-  groups: GroupConfig[];
-}
-
-export function EnergyCards({ groups }: EnergyCardsProps): React.ReactElement {
-  return (
-    <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6 w-full">
-      {groups.map(group => (
-        <EnergyCard key={group.id} group={group} />
-      ))}
-    </div>
   );
 }

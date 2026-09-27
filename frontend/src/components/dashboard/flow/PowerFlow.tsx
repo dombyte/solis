@@ -3,6 +3,7 @@ import { useMobile } from '../../../hooks/useMobile';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { useSubscription } from '../../../lib/hooks/useSubscription';
 import { useRegisterStore } from '../../../lib/stores/useRegisterStore';
+import { Card } from '../../ui/card';
 import { buildFlowViewModel, POWER_FLOW_KEYS } from './model';
 import { FlowDesktop } from './FlowDesktop';
 import { FlowMobile } from './FlowMobile';
@@ -37,10 +38,13 @@ export function PowerFlow(): React.ReactElement {
   // "same determination… tablet shows desktop"
   // mobile = coarse pointer AND width < 768px
   const mobileVariant = isMobile && isTablet;
-  
-  if (mobileVariant) {
-    return <FlowMobile viewModel={viewModel} />;
-  }
-  
-  return <FlowDesktop viewModel={viewModel} />;
+
+  return (
+    // h-full + centering: the grid row stretches every card to the same height, so
+    // this fills that height (instead of staying content-sized and leaving a gap
+    // beneath it) and centers the diagram within any extra vertical space.
+    <Card className="w-full min-w-0 h-full p-3 sm:p-4 flex flex-col justify-center">
+      {mobileVariant ? <FlowMobile viewModel={viewModel} /> : <FlowDesktop viewModel={viewModel} />}
+    </Card>
+  );
 }

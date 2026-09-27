@@ -1,6 +1,6 @@
 import React from 'react';
 import { DataCard } from '../components/dashboard/DataCard';
-import { EnergyCards } from '../components/dashboard/EnergyCards';
+import { EnergyCard } from '../components/dashboard/EnergyCards';
 import { PowerFlow } from '../components/dashboard/flow';
 import { dashboardGroups } from '../lib/config/groups';
 import { useSubscription } from '../lib/hooks/useSubscription';
@@ -21,10 +21,10 @@ export function Dashboard(): React.ReactElement {
   const sortedGroups = [...dashboardGroups].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   // Separate energy groups (Today, Month, Year, Total) for full-width display
-  const energyGroups = sortedGroups.filter(g => 
+  const energyGroups = sortedGroups.filter(g =>
     ['energy_daily', 'energy_monthly', 'energy_yearly', 'energy_total'].includes(g.id)
   );
-  
+
   // Other groups except power_flow (which is shown separately) and system_status (shown in inverter box)
   const otherGroups = sortedGroups.filter(g => 
     g.id !== 'system_status' && 
@@ -34,39 +34,47 @@ export function Dashboard(): React.ReactElement {
 
   return (
     <div className="p-2 sm:p-4 md:p-6 lg:p-8 w-full overflow-x-hidden">
-      <div className="w-full overflow-x-hidden">
+      {/* Caps the whole page (hero row + card grids) together on ultra-wide monitors, so
+          they stay aligned and the flow-chart hero doesn't turn into a shrinking island
+          against an ever-widening grid as the viewport grows past typical desktop sizes. */}
+      <div className="w-full max-w-[1800px] mx-auto overflow-x-hidden">
         {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Dashboard</h1> : null}
         
-        {/* Power Flow Diagram - shown first */}
+        {/* Power flow chart + energy cards share one grid, capped at 3 columns (unlike
+            the 4-column grid below) so the layout always settles into chart+Today on
+            row one and Month/Year/Total on row two, instead of a 4th column pulling
+            Month up next to the chart on very wide screens. The flow card only spans
+            2 columns from `sm` up - at the true single-column mobile tier a span-2 has
+            nowhere explicit to go, so the browser creates an implicit 2nd column and
+            auto-places the next card into it, breaking the single-column stack. Default
+            (stretch) row alignment plus h-full/centering in PowerFlow keeps every card
+            in a row the same height with no dead gap next to the shorter ones. */}
         <div className="px-2 mb-3 sm:mb-4 md:mb-5 lg:mb-6">
-          <PowerFlow />
-        </div>
-        
-        {isLoading ? (
-          <div className="flex flex-col gap-3 sm:gap-4 md:gap-5 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
-            {energyGroups.length > 0 && (
-              <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6 w-full">
-                {energyGroups.map(group => (
-                  <SkeletonCard key={group.id} className="w-full" />
-                ))}
-              </div>
-            )}
-            <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
-              {otherGroups.map(group => (
+          <div className="grid grid-cols-3-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
+            <div className="sm:col-span-2 min-w-0">
+              <PowerFlow />
+            </div>
+            {energyGroups.map(group =>
+              isLoading ? (
                 <SkeletonCard key={group.id} className="w-full" />
-              ))}
-            </div>
+              ) : (
+                <EnergyCard key={group.id} group={group} />
+              )
+            )}
           </div>
-        ) : (
-          <div className="flex flex-col gap-3 sm:gap-4 md:gap-5 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
-            {energyGroups.length > 0 && <EnergyCards groups={energyGroups} />}
-            <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
-              {otherGroups.map(group => (
+        </div>
+
+        <div className="flex flex-col gap-3 sm:gap-4 md:gap-5 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
+          <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
+            {otherGroups.map(group =>
+              isLoading ? (
+                <SkeletonCard key={group.id} className="w-full" />
+              ) : (
                 <DataCard key={group.id} group={group} />
-              ))}
-            </div>
+              )
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
