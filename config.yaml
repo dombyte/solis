@@ -26,6 +26,17 @@ modbus:
   timeout: 2s
   slave_id: 1
 
+# modbus:
+#   # Address selects the transport via URL scheme: tcp://host:port or rtu://<device path>
+#   # (e.g. rtu:///dev/ttyUSB0). speed/data_bits/parity/stop_bits apply to rtu only.
+#   address: "rtu:///tmp/ttyV1"
+#   timeout: 2s
+#   slave_id: 1
+#   speed: 9600
+#   data_bits: 8
+#   parity: "N"
+#   stop_bits: 1
+
 # Local time at which the inverter's daily counters roll over (strict 24h HH:MM).
 # Timezone comes from the TZ environment variable (time.Local), never from this file.
 rollover:
