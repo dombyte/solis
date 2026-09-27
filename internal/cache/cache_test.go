@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -19,7 +20,7 @@ var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 func val(v float64) *solis.Value { return &solis.Value{DecodedValue: v} }
 
 func TestReplaceDomain_KeepsOtherDomains(t *testing.T) {
-	c := New(eventbus.New())
+	c := New(eventbus.New(), zerolog.Nop())
 	c.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{"a": val(1), "b": val(2)}, t0)
 	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"m": val(9)}, t0)
 
@@ -36,7 +37,7 @@ func TestReplaceDomain_KeepsOtherDomains(t *testing.T) {
 }
 
 func TestMerge_DoesNotRemove(t *testing.T) {
-	c := New(eventbus.New())
+	c := New(eventbus.New(), zerolog.Nop())
 	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"m": val(1)}, t0)
 	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"y": val(2)}, t0)
 	got := c.GetMultiple([]string{"m", "y", "missing"})
@@ -53,7 +54,7 @@ func TestWritesPublishEvents(t *testing.T) {
 		return e.Domain == eventbus.DomainAggregator
 	})).Once()
 
-	c := New(pub)
+	c := New(pub, zerolog.Nop())
 	c.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{"b": val(1), "a": val(2)}, t0)
 	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"m": val(1)}, t0)
 }
@@ -64,7 +65,7 @@ func TestEventsReachBusSubscriber(t *testing.T) {
 	require.NoError(t, err)
 	defer cancel()
 
-	c := New(bus)
+	c := New(bus, zerolog.Nop())
 	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"m": val(1)}, t0)
 	select {
 	case e := <-ch:
@@ -75,7 +76,7 @@ func TestEventsReachBusSubscriber(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	c := New(eventbus.New())
+	c := New(eventbus.New(), zerolog.Nop())
 	var wg sync.WaitGroup
 	for i := range 4 {
 		wg.Add(2)

@@ -43,10 +43,10 @@ func newEnv(t *testing.T) *env {
 	clk := clocktest.New(t0)
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
-	hub, err := NewHub(HubDeps{Bus: bus, Cache: cache.New(eventbus.New()), Keys: reg,
+	hub, err := NewHub(HubDeps{Bus: bus, Cache: cache.New(eventbus.New(), zerolog.Nop()), Keys: reg,
 		Clock: clk, PollInterval: 5 * time.Second, Reporter: rep, Log: zerolog.Nop()})
 	require.NoError(t, err)
-	e := &env{t: t, clk: clk, cache: cache.New(bus), hub: hub, slot: &utils.Slot[*Hub]{}}
+	e := &env{t: t, clk: clk, cache: cache.New(bus, zerolog.Nop()), hub: hub, slot: &utils.Slot[*Hub]{}}
 	hub.d.Cache = e.cache // the hub reads the same cache that publishes on the bus
 	require.NoError(t, hub.Start(context.Background()))
 	t.Cleanup(func() { _ = hub.Stop() })

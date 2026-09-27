@@ -92,6 +92,7 @@ func configurePragmas(db *sql.DB, cfg *config.StorageSettings, log zerolog.Logge
 		pragmas = append(pragmas, "PRAGMA temp_store="+cfg.TempStore+";")
 	}
 	for _, p := range pragmas {
+		log.Debug().Str("pragma", p).Msg("applying pragma")
 		if _, err := db.Exec(p); err != nil {
 			log.Warn().Err(err).Str("pragma", p).Msg("failed to apply pragma")
 		}

@@ -47,6 +47,7 @@ func sumDaily(ctx context.Context, q queryer, key, from, to string) (float64, er
 // open periods, then freezes, then the baseline fold. Rows targeting closed periods or
 // keys outside the aggregator domain are skipped and reported in the joined error.
 func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
+	s.log.Debug().Int("rows", len(w.Rows)).Int("freezes", len(w.Freezes)).Int("folds", len(w.Folds)).Msg("write computed starting")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.meta.clone()
@@ -74,6 +75,11 @@ func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
 		return err
 	}
 	s.meta = next
+	if len(rejected) > 0 {
+		s.log.Debug().Int("rejected", len(rejected)).Msg("write computed completed with rejections")
+	} else {
+		s.log.Debug().Msg("write computed completed")
+	}
 	return errors.Join(rejected...)
 }
 

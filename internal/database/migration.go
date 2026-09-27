@@ -102,7 +102,7 @@ func applyInTx(tx *sql.Tx, migration Migration) error {
 func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion int) (int, error) {
 	pending := e.GetPendingMigrations(currentVersion)
 	if len(pending) == 0 {
-		e.log.Info().Msgf("No pending migrations (current_version: %d)", currentVersion)
+		e.log.Info().Int("current_version", currentVersion).Msg("no pending migrations")
 		return 0, nil
 	}
 
@@ -111,6 +111,7 @@ func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion in
 
 	appliedCount := 0
 	for _, migration := range pending {
+		e.log.Debug().Int("version", migration.Version()).Msg("migration starting")
 		if err := e.ApplyMigration(db, migration); err != nil {
 			return appliedCount, fmt.Errorf("failed to apply migration %d: %w", migration.Version(), err)
 		}

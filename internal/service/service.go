@@ -121,8 +121,10 @@ func (s *ReadService) Current(key string) (*solis.Value, error) {
 	}
 	v := s.d.Cache.Get(key)
 	if v == nil {
+		s.d.Log.Debug().Str("key", key).Msg("cache miss")
 		return nil, &KeyError{Key: key, Detail: "no current value", Err: ErrNoData}
 	}
+	s.d.Log.Debug().Str("key", key).Msg("cache hit")
 	return v, nil
 }
 
@@ -144,6 +146,7 @@ func (s *ReadService) DailyHistory(ctx context.Context, key string, start, end t
 	if err := s.requireStore(key, solis.StoreDaily); err != nil {
 		return nil, err
 	}
+	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting daily history")
 	return s.d.Store.GetDailyHistory(ctx, key, start, end)
 }
 
@@ -153,6 +156,7 @@ func (s *ReadService) MonthlyHistory(ctx context.Context, key string, start, end
 	if err := s.requireStore(key, solis.StoreMonthly); err != nil {
 		return nil, err
 	}
+	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting monthly history")
 	return s.d.Store.GetMonthlyHistory(ctx, key, start, end)
 }
 
@@ -162,6 +166,7 @@ func (s *ReadService) YearlyHistory(ctx context.Context, key string, start, end 
 	if err := s.requireStore(key, solis.StoreYearly); err != nil {
 		return nil, err
 	}
+	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting yearly history")
 	return s.d.Store.GetYearlyHistory(ctx, key, start, end)
 }
 
@@ -170,6 +175,7 @@ func (s *ReadService) Total(ctx context.Context, key string) (*storage.TotalData
 	if err := s.requireStore(key, solis.StoreTotal); err != nil {
 		return nil, err
 	}
+	s.d.Log.Debug().Str("key", key).Msg("getting total")
 	dp, err := s.d.Store.GetTotalHistory(ctx, key)
 	if err != nil {
 		return nil, err
@@ -198,6 +204,7 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 	if err := s.requireStore(key, solis.StoreStatus); err != nil {
 		return StatusHistory{}, err
 	}
+	s.d.Log.Debug().Str("key", key).Msg("getting status history")
 	reg, _ := s.d.Registry.ByKey(key)
 	out := StatusHistory{Key: key, Name: reg.Name, History: []StatusEntry{}}
 	points, err := s.d.Store.GetErrorHistory(ctx, key, time.Time{}, maxTime())

@@ -173,6 +173,7 @@ func (c *Client) Close() error {
 // attempt and at least every beatEvery while waiting (also inside a long backoff), so a
 // reconnecting client never looks stale to the supervisor.
 func (c *Client) Run(ctx context.Context, beatEvery time.Duration, beat func()) {
+	c.log.Debug().Dur("beat_every", beatEvery).Msg("modbus run started")
 	if beatEvery <= 0 {
 		beatEvery = InitialBackoff
 	}
@@ -184,12 +185,14 @@ func (c *Client) Run(ctx context.Context, beatEvery time.Duration, beat func()) 
 			c.wait(ctx, beatEvery, beatEvery, beat, true)
 			continue
 		}
+		c.log.Debug().Dur("backoff", backoff).Msg("modbus reconnecting")
 		if err := c.connect(); err != nil {
 			c.log.Warn().Err(err).Dur("backoff", backoff).Msg("modbus reconnect failed")
 			c.wait(ctx, backoff, beatEvery, beat, false)
 			backoff = min(backoff*2, MaxBackoff)
 			continue
 		}
+		c.log.Debug().Msg("modbus reconnected")
 		backoff = InitialBackoff
 	}
 }

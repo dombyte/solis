@@ -81,6 +81,7 @@ func (a *App) build(ctx context.Context, root zerolog.Logger) error {
 }
 
 func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
+	a.log.Debug().Str("path", a.cfg.Storage.Path).Msg("building storage")
 	lock, err := maintenance.AcquireShared(a.cfg.Storage.Path)
 	if err != nil {
 		return fmt.Errorf("app: %w (is a maintenance job running?)", err)
@@ -89,6 +90,7 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 	if a.reg, err = solis.NewRegistry(); err != nil {
 		return err
 	}
+	a.log.Debug().Msg("registry created")
 	st := &a.cfg.Storage
 	a.dbm = database.NewManager(st, &database.BackupConfig{Enabled: st.EnableBackup,
 		MaxBackups: st.MaxBackups, BackupInterval: st.BackupInterval}, a.clock,
@@ -96,9 +98,11 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 	if err := a.dbm.Prepare(ctx); err != nil {
 		return fmt.Errorf("app: prepare database: %w", err)
 	}
+	a.log.Debug().Msg("database prepared")
 	if a.store, err = storage.New(st, a.reg, a.clock, logging.Component(root, "storage")); err != nil {
 		return err
 	}
+	a.log.Debug().Msg("storage created")
 	day, created, err := a.store.EnsureCutover(ctx, period.Of(a.clock.Now()))
 	if err != nil {
 		return fmt.Errorf("app: record v3 cutover: %w", err)
@@ -110,9 +114,12 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 }
 
 func (a *App) buildCore(_ context.Context, root zerolog.Logger) error {
+	a.log.Debug().Msg("building core components")
 	a.decoder = solis.NewDecoder(a.reg, logging.Component(root, "decoder"))
+	a.log.Debug().Msg("decoder created")
 	a.bus = eventbus.New()
-	a.cache = cache.New(a.bus)
+	a.cache = cache.New(a.bus, logging.Component(root, "cache"))
+	a.log.Debug().Msg("cache created")
 	return nil
 }
 

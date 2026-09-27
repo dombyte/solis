@@ -49,6 +49,7 @@ func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.C
 // pending migrations on a temporary connection. Storage opens its own connection
 // afterwards.
 func (m *Manager) Prepare(ctx context.Context) (err error) {
+	m.log.Debug().Str("path", m.cfg.Path).Msg("database prepare starting")
 	_, statErr := os.Stat(m.cfg.Path)
 	exists := statErr == nil
 	db, err := openMigrationDB(ctx, m.cfg.Path)
@@ -69,6 +70,7 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		m.log.Info().Int("version", current).Msg("database schema is up to date")
 		return nil
 	}
+	m.log.Debug().Int("current_version", current).Msg("database migrations pending")
 	if exists {
 		m.backupBeforeMigration()
 	}
@@ -79,6 +81,7 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		m.log.Warn().Err(err).Msg("WAL checkpoint after migrations failed")
 	}
 	m.cleanupBackups()
+	m.log.Debug().Msg("database prepare completed")
 	return nil
 }
 

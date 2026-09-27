@@ -139,6 +139,7 @@ func (h *Hub) Stop() error {
 
 // Register hands a new client to the hub loop.
 func (h *Hub) Register(c *Client) error {
+	h.d.Log.Debug().Msg("websocket client registered")
 	if !h.do(func(ls *loopState) {
 		ls.clients[c] = &clientState{subs: map[string]struct{}{}, last: map[string]pushed{}}
 	}) {
@@ -172,6 +173,7 @@ func (h *Hub) do(op func(*loopState)) bool {
 
 // loop owns all client state.
 func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
+	h.d.Log.Debug().Dur("interval", h.d.PollInterval).Msg("websocket hub loop started")
 	defer close(h.done)
 	ls := &loopState{clients: make(map[*Client]*clientState),
 		flush: h.d.Clock.NewTimer(time.Hour)}
@@ -186,6 +188,14 @@ func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 		case op := <-h.ops:
 			op(ls)
 		case e := <-events:
+			kind := "unknown"
+			switch e.Kind {
+			case eventbus.ValuesUpdated:
+				kind = "ValuesUpdated"
+			case eventbus.PeriodClosed:
+				kind = "PeriodClosed"
+			}
+			h.d.Log.Debug().Str("kind", kind).Str("domain", e.Domain).Int("keys", len(e.Keys)).Msg("websocket event received")
 			ls.onEvent(e)
 			h.events.Add(1)
 		case <-ls.flush.C():

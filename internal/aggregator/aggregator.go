@@ -127,6 +127,7 @@ func (a *Aggregator) Stop() error {
 
 // loop multiplexes events, the debounce timer, the heartbeat and the liveness beat.
 func (a *Aggregator) loop(ctx context.Context, events <-chan eventbus.Event) {
+	a.d.Log.Debug().Dur("interval", a.d.PollInterval).Msg("aggregator loop started")
 	defer close(a.done)
 	iv := a.d.PollInterval
 	beat := a.d.Clock.NewTicker(iv)
@@ -142,11 +143,20 @@ func (a *Aggregator) loop(ctx context.Context, events <-chan eventbus.Event) {
 		case <-ctx.Done():
 			return
 		case e := <-events:
+			kind := "unknown"
+			switch e.Kind {
+			case eventbus.ValuesUpdated:
+				kind = "ValuesUpdated"
+			case eventbus.PeriodClosed:
+				kind = "PeriodClosed"
+			}
+			a.d.Log.Debug().Str("kind", kind).Str("domain", e.Domain).Int("keys", len(e.Keys)).Msg("event received")
 			armed = a.onEvent(ctx, e, debounce, armed)
 		case <-debounce.C():
 			armed = false
 			a.run(ctx)
 		case <-heartbeat.C():
+			a.d.Log.Debug().Msg("heartbeat triggered")
 			a.run(ctx)
 		case <-beat.C():
 			a.Beat()
@@ -200,9 +210,11 @@ func (a *Aggregator) run(ctx context.Context) {
 	defer cancel()
 	ok, err := a.d.Store.HasDailyData(rctx)
 	if err == nil && !ok {
+		a.d.Log.Debug().Msg("aggregation skipped: no daily data yet")
 		return // cold start: stay idle until daily data exists
 	}
 	a.lastRun = now
+	a.d.Log.Debug().Msg("aggregation run starting")
 	if err == nil {
 		err = a.execute(rctx, now)
 	}
@@ -211,6 +223,7 @@ func (a *Aggregator) run(ctx context.Context) {
 		a.Set(health.Recovering, err.Error())
 		return
 	}
+	a.d.Log.Debug().Msg("aggregation run completed")
 	a.Set(health.Healthy, "")
 }
 

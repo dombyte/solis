@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/solis"
 )
@@ -19,15 +21,17 @@ type Cache struct {
 	owner   map[string]string    // key -> domain
 	updated map[string]time.Time // domain -> last write
 	pub     eventbus.Publisher
+	log     zerolog.Logger
 }
 
-// New creates an empty cache publishing on pub.
-func New(pub eventbus.Publisher) *Cache {
+// New creates an empty cache publishing on pub with the injected logger.
+func New(pub eventbus.Publisher, log zerolog.Logger) *Cache {
 	return &Cache{
 		data:    make(map[string]*solis.Value),
 		owner:   make(map[string]string),
 		updated: make(map[string]time.Time),
 		pub:     pub,
+		log:     log,
 	}
 }
 
@@ -36,17 +40,20 @@ func New(pub eventbus.Publisher) *Cache {
 // Values must not be mutated after the call.
 func (c *Cache) ReplaceDomain(domain string, values map[string]*solis.Value, at time.Time) {
 	c.mu.Lock()
+	removed := 0
 	for k, d := range c.owner {
 		if d == domain {
 			if _, keep := values[k]; !keep {
 				delete(c.data, k)
 				delete(c.owner, k)
+				removed++
 			}
 		}
 	}
 	keys := c.put(domain, values, at)
 	c.mu.Unlock()
 	c.publish(domain, keys, at)
+	c.log.Debug().Str("domain", domain).Int("added", len(keys)).Int("removed", removed).Msg("cache replace domain")
 }
 
 // Merge upserts values into domain without removing other keys of the domain.
@@ -55,6 +62,7 @@ func (c *Cache) Merge(domain string, values map[string]*solis.Value, at time.Tim
 	keys := c.put(domain, values, at)
 	c.mu.Unlock()
 	c.publish(domain, keys, at)
+	c.log.Debug().Str("domain", domain).Int("keys", len(keys)).Msg("cache merge")
 }
 
 // put stores values; caller holds mu.

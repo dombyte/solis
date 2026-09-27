@@ -91,7 +91,7 @@ func newEnv(t *testing.T, start, cutover time.Time) *env {
 	require.NoError(t, err)
 	bus := eventbus.New()
 	e := &env{t: t, clk: clk, st: st, store: &countingStore{Store: st}, bus: bus,
-		cache: &countingCache{Cache: cache.New(bus)}, reg: reg}
+		cache: &countingCache{Cache: cache.New(bus, zerolog.Nop())}, reg: reg}
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Recovering, "disk I/O error").Maybe()
 	rep.EXPECT().Report(health.Healthy, "").Maybe()

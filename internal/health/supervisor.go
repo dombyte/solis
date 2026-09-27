@@ -64,6 +64,7 @@ func (s *Supervisor) Manage(name string, f Factory) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.managed = append(s.managed, &managed{name: name, factory: f})
+	s.log.Debug().Str("component", name).Msg("registered managed component")
 }
 
 // Watch registers a non-restartable part whose failure escalates immediately.
@@ -71,6 +72,7 @@ func (s *Supervisor) Watch(name string, p Probe) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.watched = append(s.watched, &watched{name: name, probe: p})
+	s.log.Debug().Str("component", name).Msg("registered watched component")
 }
 
 // Snapshot returns the last published health snapshot; it never blocks on components.
@@ -164,6 +166,7 @@ func (s *Supervisor) start(m *managed) {
 		return
 	}
 	m.comp = comp
+	s.log.Debug().Str("component", m.name).Msg("component created")
 	ctx, cancel := context.WithCancel(s.ctx)
 	m.cancel = cancel
 	go func() {

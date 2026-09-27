@@ -134,7 +134,7 @@ func (d *Decoder) DecodeStatus(key string, raw uint16) any {
 func (d *Decoder) decodeSolisStatus(raw uint16) map[string]string {
 	c, ok := d.codes[raw]
 	if !ok {
-		d.log.Debug().Msgf("unknown status code 0x%04X", raw)
+		d.log.Debug().Uint16("status_code", raw).Msg("unknown status code")
 		return map[string]string{
 			"name":        fmt.Sprintf("Unknown Status (0x%04X)", raw),
 			"description": fmt.Sprintf("Unknown status code: 0x%04X", raw),

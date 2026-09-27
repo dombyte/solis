@@ -105,7 +105,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 	require.NoError(t, err)
 	t.Cleanup(unsub)
 
-	e := &env{t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus), bus: bus,
+	e := &env{t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
 		events: events}
 	var src utils.Slot[Reader]
 	src.Store(e.dev)

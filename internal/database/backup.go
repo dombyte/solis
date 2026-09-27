@@ -205,12 +205,12 @@ func verifyBackupFile(destPath string, log zerolog.Logger) error {
 	backupChecksum, err := calculateSHA256(destPath)
 	if err != nil {
 		if removeErr := os.Remove(destPath); removeErr != nil {
-			log.Warn().Msgf("Failed to remove incomplete backup file: %v", removeErr)
+			log.Warn().Err(removeErr).Msg("failed to remove incomplete backup file")
 		}
 		return fmt.Errorf("failed to verify backup file: %w", err)
 	}
 
-	log.Debug().Msgf("Backup created with checksum: %s", backupChecksum)
+	log.Debug().Str("checksum", backupChecksum).Msg("backup created with checksum")
 
 	backupInfo, err := os.Stat(destPath)
 	if err != nil {
@@ -219,7 +219,7 @@ func verifyBackupFile(destPath string, log zerolog.Logger) error {
 
 	if backupInfo.Size() == 0 {
 		if removeErr := os.Remove(destPath); removeErr != nil {
-			log.Warn().Msgf("Failed to remove empty backup file: %v", removeErr)
+			log.Warn().Err(removeErr).Msg("failed to remove empty backup file")
 		}
 		return errors.New("backup file is empty")
 	}
@@ -254,7 +254,7 @@ func CreateBackup(dbPath string, config *BackupConfig, log zerolog.Logger) (stri
 	// Generate backup filename
 	backupPath := GenerateBackupFilename(dbPath)
 
-	log.Info().Msgf("Creating backup (source: %s, destination: %s)", dbPath, backupPath)
+	log.Info().Str("source", dbPath).Str("destination", backupPath).Msg("creating backup")
 
 	// Create the backup using SQLite native backup API
 	if err := createSQLiteBackup(dbPath, backupPath, log); err != nil {
@@ -267,7 +267,7 @@ func CreateBackup(dbPath string, config *BackupConfig, log zerolog.Logger) (stri
 		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	log.Info().Msgf("Backup created successfully (file: %s, size: %d)", backupPath, backupInfo.Size())
+	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).Msg("backup created successfully")
 
 	return backupPath, nil
 }
@@ -347,16 +347,16 @@ func CleanupBackups(dbPath string, maxBackups int, log zerolog.Logger) error {
 	toRemove := len(backups) - maxBackups
 	backupsToRemove := backups[maxBackups:]
 
-	log.Info().Msgf("Cleaning up old backups (to_remove: %d, keeping: %d)", toRemove, maxBackups)
+	log.Info().Int("to_remove", toRemove).Int("keeping", maxBackups).Msg("cleaning up old backups")
 
 	// Remove the oldest backups
 	for _, backup := range backupsToRemove {
 		if err := os.Remove(backup.Filename); err != nil {
-			log.Error().Msgf("Failed to remove backup (file: %s, error: %v)", backup.Filename, err)
+			log.Error().Err(err).Str("file", backup.Filename).Msg("failed to remove backup")
 			// Continue with cleanup even if one file fails
 			continue
 		}
-		log.Debug().Msgf("Removed old backup (file: %s)", backup.Filename)
+		log.Debug().Str("file", backup.Filename).Msg("removed old backup")
 	}
 
 	return nil
