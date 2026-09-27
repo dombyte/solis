@@ -71,6 +71,39 @@
     --chart-bg-9: color-mix(in oklch, var(--chart-9), transparent 80%);
     
     /* ====================================================================
+       FLOW DIAGRAM COLORS - Power flow visualization colors
+       Based on prototype palette, matched to existing theme
+       ==================================================================== */
+    /* Node colors - sources and consumers */
+    --flow-pv: var(--chart-4);         /* PV: amber/gold (#fbbf24 in prototype light) */
+    --flow-grid: var(--chart-2);        /* Grid: blue (#60a5fa in prototype dark) */
+    --flow-batt: var(--chart-1);        /* Battery: green (#34d399 in prototype dark) */
+    --flow-hh: var(--chart-5);          /* Household: purple/pink (#a78bfa in prototype light) */
+    --flow-bk: var(--chart-7);          /* Backup: gray/slate (#94a3b8 in prototype light) */
+    
+    /* Inverter box colors */
+    --flow-inv-bg: var(--muted);         /* Inverter background - slightly darker than card */
+    --flow-inv-title: var(--foreground);
+    --flow-inv-sub: var(--muted-foreground);
+    
+    /* Battery gauge colors */
+    --flow-batt-low: var(--destructive);     /* Low SOC: red */
+    --flow-batt-mid: var(--warning);        /* Mid SOC: yellow/amber */
+    --flow-batt-high: var(--success);       /* High SOC: green */
+    
+    /* Edge/track colors */
+    --flow-track: var(--border);            /* Track/background edge color */
+    
+    /* SOC color variants for battery segments */
+    --flow-batt-icon-bg: var(--muted);      /* More distinct background for battery gauge */
+    --flow-batt-icon-stroke: var(--foreground);
+    
+    /* Status colors */
+    --flow-status-ok: var(--success);
+    --flow-status-warning: var(--warning);
+    --flow-status-error: var(--destructive);
+
+    /* ====================================================================
        DERIVED COLORS - Calculated from base palette
        Using transparency for modern glassmorphism effect
        ==================================================================== */
@@ -181,6 +214,38 @@
     --chart-bg-9: color-mix(in oklch, var(--chart-9), transparent 80%);
     
     /* ====================================================================
+       FLOW DIAGRAM COLORS - Power flow visualization colors (dark mode)
+       ==================================================================== */
+    /* Node colors - sources and consumers */
+    --flow-pv: var(--chart-4);         /* PV: golden yellow */
+    --flow-grid: var(--chart-2);        /* Grid: electric blue */
+    --flow-batt: var(--chart-1);        /* Battery: bright green */
+    --flow-hh: var(--chart-5);          /* Household: hot pink */
+    --flow-bk: var(--chart-7);          /* Backup: red-orange */
+    
+    /* Inverter box colors */
+    --flow-inv-bg: var(--muted);         /* Inverter background - more distinct */
+    --flow-inv-title: var(--foreground);
+    --flow-inv-sub: var(--muted-foreground);
+    
+    /* Battery gauge colors */
+    --flow-batt-low: var(--destructive);     /* Low SOC: red */
+    --flow-batt-mid: var(--warning);        /* Mid SOC: amber */
+    --flow-batt-high: var(--success);       /* High SOC: green */
+    
+    /* Edge/track colors */
+    --flow-track: var(--border);            /* Track/background edge color */
+    
+    /* SOC color variants for battery segments */
+    --flow-batt-icon-bg: var(--muted);      /* More distinct background for battery gauge */
+    --flow-batt-icon-stroke: var(--foreground);
+    
+    /* Status colors */
+    --flow-status-ok: var(--success);
+    --flow-status-warning: var(--warning);
+    --flow-status-error: var(--destructive);
+    
+    /* ====================================================================
        DERIVED COLORS - Calculated from base palette
        Heavy use of transparency for glassmorphism
        ==================================================================== */
@@ -288,6 +353,25 @@
     --color-chart-bg-7: var(--chart-bg-7);
     --color-chart-bg-8: var(--chart-bg-8);
     --color-chart-bg-9: var(--chart-bg-9);
+    
+    /* Flow diagram colors */
+    --color-flow-pv: var(--flow-pv);
+    --color-flow-grid: var(--flow-grid);
+    --color-flow-batt: var(--flow-batt);
+    --color-flow-hh: var(--flow-hh);
+    --color-flow-bk: var(--flow-bk);
+    --color-flow-inv-bg: var(--flow-inv-bg);
+    --color-flow-inv-title: var(--flow-inv-title);
+    --color-flow-inv-sub: var(--flow-inv-sub);
+    --color-flow-track: var(--flow-track);
+    --color-flow-batt-low: var(--flow-batt-low);
+    --color-flow-batt-mid: var(--flow-batt-mid);
+    --color-flow-batt-high: var(--flow-batt-high);
+    --color-flow-batt-icon-bg: var(--flow-batt-icon-bg);
+    --color-flow-batt-icon-stroke: var(--flow-batt-icon-stroke);
+    --color-flow-status-ok: var(--flow-status-ok);
+    --color-flow-status-warning: var(--flow-status-warning);
+    --color-flow-status-error: var(--flow-status-error);
     
     /* Sidebar colors */
     --color-sidebar: var(--sidebar);
@@ -566,6 +650,52 @@
   [aria-label^="Info about"] svg {
     width: 20px !important;
     height: 20px !important;
+  }
+}
+
+/* ========================================================================
+   FLOW DIAGRAM ANIMATIONS
+   CSS keyframes for animated flow edges (replaces requestAnimationFrame)
+   ========================================================================== */
+
+/* Animation for the glow edge (10 12 dash pattern, ~42px/s speed) */
+@keyframes flowGlow {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -22;
+  }
+}
+
+/* Animation for the main edge (8 9 dash pattern, ~42px/s speed) */
+@keyframes flowDash {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -17;
+  }
+}
+
+/* Animation for mobile rail connectors (7 8 dash pattern) */
+@keyframes flowRail {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -15;
+  }
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

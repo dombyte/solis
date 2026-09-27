@@ -3,13 +3,22 @@ import type { GroupConfig } from '../../types';
 // Dashboard group configurations
 export const dashboardGroups: GroupConfig[] = [
   {
+    id: 'power_flow',
+    title: 'Power Flow',
+    description: 'Live power flow visualization',
+    dataIds: ['pv_total_power', 'battery_soc', 'battery_power_signed', 'household_load_power', 'backup_load_power', 'grid_power'],
+    category: 'power_flow',
+    layout: 'grid',
+    order: 1,
+  },
+  {
     id: 'system_status',
     title: 'System Status',
     description: 'System status and fault information',
     dataIds: ['solis_status', 'operating_status', 'grid_fault_1', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'],
     category: 'status',
     layout: 'list',
-    order: 1,
+    order: 2,
   },
   {
     id: 'energy_daily',
