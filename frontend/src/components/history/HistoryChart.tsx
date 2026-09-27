@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../theme-provider';
 import { useMobile } from '../../hooks/useMobile';
@@ -16,6 +16,7 @@ interface HistoryChartProps {
 export function HistoryChart({ data, className = '', datasetCount = 0 }: HistoryChartProps): React.ReactElement {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [datasetVisibility, setDatasetVisibility] = React.useState<Record<string, boolean>>({});
 
   // Reset dataset visibility when a new `data` object arrives, without a dedicated
@@ -43,6 +44,16 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     });
     chart.update();
   }, [datasetVisibility, data]);
+
+  // Open the chart scrolled to the most recent data (labels are sorted oldest -> newest,
+  // so "most recent" is the right edge) instead of defaulting to the oldest entries.
+  // useLayoutEffect avoids a visible left-to-right jump after the width-driving inner
+  // div has committed its minWidth style.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollLeft = container.scrollWidth;
+  }, [data]);
 
   const toggleDatasetVisibility = (key: string) => {
     setDatasetVisibility(prev => {
@@ -137,10 +148,9 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         labels: data.labels,
         datasets: data.datasets.map((ds, datasetIndex) => {
           const { border, background } = getColorForKey(ds.key, datasetIndex);
-          // Calculate bar width based on number of datasets
-          // For 1-2 datasets, use smaller bars to fit more
-          // On mobile, use slightly smaller bars to create more space between dates
-          const barPercentage = isMobile ? (datasetCount <= 2 ? 0.5 : 0.7) : (datasetCount <= 2 ? 0.4 : 0.8);
+          // Scale bar width smoothly with the number of datasets (rather than a binary
+          // <=2 cutoff) so bars slim down gradually as more series are overlaid.
+          const barPercentage = Math.min(0.85, Math.max(0.4, 0.85 - (datasetCount - 1) * 0.05));
           const categoryPercentage = isMobile ? 0.8 : 0.9;
           return {
             label: ds.label,
@@ -153,6 +163,11 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             // Bar width settings
             barPercentage,
             categoryPercentage,
+            // Caps a bar's absolute pixel width so a category with few bars (e.g. a
+            // single data point) doesn't stretch to fill the whole plot area -
+            // barPercentage/categoryPercentage only control a bar's *fraction* of its
+            // category slot, which is the entire plot width when there's 1 category.
+            maxBarThickness: isMobile ? 40 : 56,
             // Minimum bar length in pixels to prevent bars from getting too thin
             minBarLength: isMobile ? 8 : 10,
           };
@@ -294,11 +309,15 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     );
   }
 
-  // Calculate minimum width based on number of data points and datasets
-  // When 1-2 categories are selected, reduce spacing to show more time period
+  // Calculate the chart's content width based on number of data points and datasets.
+  // Scales smoothly with datasetCount (more series per category need more horizontal
+  // room) instead of a binary cutoff, and has no artificial floor: `w-full` fills the
+  // container when the content is narrower than it, so scrolling only appears once
+  // there's genuinely more content than fits (e.g. it no longer forces a sliver of
+  // scroll for a single bar).
   const dataPointCount = data.labels?.length || 0;
-  const pointWidth = datasetCount <= 2 ? 60 : 80;
-  const minWidth = Math.min(Math.max(dataPointCount * pointWidth, 800), 4000);
+  const pointWidth = Math.min(160, Math.max(60, 40 + datasetCount * 14));
+  const minWidth = Math.min(dataPointCount * pointWidth, 4000);
 
   // Function to get color for a dataset by index
   const getColorForDataset = (datasetIndex: number): string => {
@@ -325,7 +344,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
 
   return (
     <div className={`relative w-full ${className}`}>
-      <div 
+      <div
+        ref={scrollContainerRef}
         className="overflow-x-auto history-chart-scroll w-full"
         style={{ minHeight: '200px', maxHeight: '500px' }}
       >
