@@ -1,5 +1,6 @@
 import React from 'react';
 import { DataCard } from '../components/dashboard/DataCard';
+import { EnergyCards } from '../components/dashboard/EnergyCards';
 import { PowerFlow } from '../components/dashboard/flow';
 import { dashboardGroups } from '../lib/config/groups';
 import { useSubscription } from '../lib/hooks/useSubscription';
@@ -58,13 +59,7 @@ export function Dashboard(): React.ReactElement {
           </div>
         ) : (
           <div className="flex flex-col gap-3 sm:gap-4 md:gap-5 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
-            {energyGroups.length > 0 && (
-              <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6 w-full">
-                {energyGroups.map(group => (
-                  <DataCard key={group.id} group={group} />
-                ))}
-              </div>
-            )}
+            {energyGroups.length > 0 && <EnergyCards groups={energyGroups} />}
             <div className="grid grid-cols-4-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
               {otherGroups.map(group => (
                 <DataCard key={group.id} group={group} />

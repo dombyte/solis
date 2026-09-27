@@ -1,4 +1,5 @@
-import type { RegisterValue } from '../../../types';
+import type { RegisterMetadata, RegisterValue } from '../../../types';
+import { isAlertStatus } from '../../../lib/utils/status';
 
 // Flow register keys that are used for the power flow diagram
 export const FLOW_KEYS = [
@@ -68,7 +69,7 @@ export interface NodeViewModel {
   label: string;
   icon: React.ReactNode; // Icon component (lucide-react)
   soc?: number;          // For battery only
-  stale: boolean;        // Data is stale/unavailable
+  stale: boolean;        // This node has no data of its own (grayed independently of the rest)
 }
 
 /**
@@ -130,10 +131,10 @@ function getNodeDirection(node: FlowNode, values: Record<string, number | null>)
       return values.battery_power_signed > 0 ? 'in' : 'out';
     case 'household':
       // Household always consumes (out from inverter)
-      return values.household_load_power !== null && values.household_load_power > 0 ? 'in' : 'none';
+      return values.household_load_power !== null && values.household_load_power > 0 ? 'out' : 'none';
     case 'backup':
       // Backup always consumes (out from inverter)
-      return values.backup_load_power !== null && values.backup_load_power > 0 ? 'in' : 'none';
+      return values.backup_load_power !== null && values.backup_load_power > 0 ? 'out' : 'none';
     case 'inverter':
       // Inverter is the center - no direction
       return 'none';
@@ -176,9 +177,11 @@ function getEdgeState(edge: FlowEdgeName, values: Record<string, number | null>)
         reverse: values.battery_power_signed > 0 // charging: inverter -> battery
       };
     case 'inverter_to_household':
+      // The desktop path is drawn node -> inverter (same as pv/grid/battery), but household
+      // only ever consumes (inverter -> household), so it always needs the reverse flag.
       return {
         active: values.household_load_power !== null && values.household_load_power !== 0,
-        reverse: false // Always inverter -> household
+        reverse: true
       };
     case 'inverter_to_backup':
       return {
@@ -191,79 +194,55 @@ function getEdgeState(edge: FlowEdgeName, values: Record<string, number | null>)
 }
 
 /**
- * Check if a status indicates an alert condition
- */
-export function isAlertStatus(status: string | undefined): boolean {
-  if (!status) return false;
-  const alertStatuses = [
-    'Fault', 'Error', 'Warning', 'Alarm', 'Abnormal', 'Failure',
-    'Overload', 'Overvoltage', 'Undervoltage', 'Overcurrent',
-    'Island', 'Communication Error', 'Grid Fault',
-  ];
-  return alertStatuses.some(s => status.toLowerCase().includes(s.toLowerCase()));
-}
-
-/**
- * Build the complete flow view model from register values
+ * Build the complete flow view model from register values.
+ *
+ * `registerMetadataByKey` is the store's key-indexed metadata map (not the
+ * id-indexed one), so each of the fixed FLOW_KEYS/STATUS_KEYS resolves in O(1).
  */
 export function buildFlowViewModel(
   registerValues: Map<string, RegisterValue>,
-  registerMetadata: Map<string, { key: string; id: string }>,
+  registerMetadataByKey: Map<string, RegisterMetadata>,
   stale: boolean = false
 ): FlowViewModel {
+  const getRegisterAndValue = (key: string): { register: RegisterMetadata | undefined; value: RegisterValue | undefined } => {
+    const register = registerMetadataByKey.get(key);
+    const value = register ? registerValues.get(register.id) : undefined;
+    return { register, value };
+  };
+
+  const getValue = (key: string): number | null => {
+    const { value } = getRegisterAndValue(key);
+    return value && typeof value.value === 'number' ? value.value : null;
+  };
+
+  const getStatusName = (value: RegisterValue | undefined): string | undefined => {
+    if (!value) return undefined;
+    if (value.statusDecoded && typeof value.statusDecoded === 'object' && 'name' in value.statusDecoded) {
+      return (value.statusDecoded as { name: string }).name;
+    }
+    if (typeof value.value === 'string') {
+      return value.value;
+    }
+    return undefined;
+  };
+
   // Extract values from the store
   const values: Record<string, number | null> = {
-    pv_total_power: null,
-    battery_soc: null,
-    battery_power_signed: null,
-    household_load_power: null,
-    backup_load_power: null,
-    grid_power: null,
+    pv_total_power: getValue('pv_total_power'),
+    battery_soc: getValue('battery_soc'),
+    battery_power_signed: getValue('battery_power_signed'),
+    household_load_power: getValue('household_load_power'),
+    backup_load_power: getValue('backup_load_power'),
+    grid_power: getValue('grid_power'),
   };
 
-  // Get the metadata keys we need
-  const getValue = (key: string): number | null => {
-    // Try to find by key first
-    for (const [id, meta] of registerMetadata) {
-      if (meta.key === key) {
-        const val = registerValues.get(id);
-        if (val && typeof val.value === 'number') {
-          return val.value;
-        }
-        break;
-      }
-    }
-    return null;
-  };
-
-  values.pv_total_power = getValue('pv_total_power');
-  values.battery_soc = getValue('battery_soc');
-  values.battery_power_signed = getValue('battery_power_signed');
-  values.household_load_power = getValue('household_load_power');
-  values.backup_load_power = getValue('backup_load_power');
-  values.grid_power = getValue('grid_power');
-
-  // Get status values
-  let solisStatus: string | undefined;
-  let operatingStatus: string | undefined;
-
-  for (const [id, meta] of registerMetadata) {
-    if (meta.key === 'solis_status') {
-      const val = registerValues.get(id);
-      if (val && val.statusDecoded && typeof val.statusDecoded === 'object' && 'name' in val.statusDecoded) {
-        solisStatus = (val.statusDecoded as { name: string }).name;
-      } else if (val && typeof val.value === 'string') {
-        solisStatus = val.value;
-      }
-    } else if (meta.key === 'operating_status') {
-      const val = registerValues.get(id);
-      if (val && val.statusDecoded && typeof val.statusDecoded === 'object' && 'name' in val.statusDecoded) {
-        operatingStatus = (val.statusDecoded as { name: string }).name;
-      } else if (val && typeof val.value === 'string') {
-        operatingStatus = val.value;
-      }
-    }
-  }
+  // Status values + alert detection - reuses the same isAlertStatus logic as
+  // the Status page (StatusDisplay.tsx) so the two surfaces never disagree.
+  const solis = getRegisterAndValue('solis_status');
+  const operating = getRegisterAndValue('operating_status');
+  const solisStatus = getStatusName(solis.value);
+  const operatingStatus = getStatusName(operating.value);
+  const alert = isAlertStatus(solis.register, solis.value) || isAlertStatus(operating.register, operating.value);
 
   // Check if all nodes have data
   const allPresent = 
@@ -274,11 +253,19 @@ export function buildFlowViewModel(
     values.backup_load_power !== null &&
     values.grid_power !== null;
 
+  // Per-node presence: a node grays out on its own when only its data is
+  // missing, independent of the diagram-wide `stale` flag (spec §14.2).
+  const pvPresent = values.pv_total_power !== null;
+  const gridPresent = values.grid_power !== null;
+  const batteryPresent = values.battery_soc !== null && values.battery_power_signed !== null;
+  const householdPresent = values.household_load_power !== null;
+  const backupPresent = values.backup_load_power !== null;
+
   // Node view models
   const nodes: Record<FlowNode, NodeViewModel> = {
     pv: {
       id: 'pv',
-      present: values.pv_total_power !== null,
+      present: pvPresent,
       active: values.pv_total_power !== null && values.pv_total_power !== 0,
       value: values.pv_total_power,
       displayValue: formatPowerW(values.pv_total_power),
@@ -286,11 +273,11 @@ export function buildFlowViewModel(
       color: '--flow-pv',
       label: 'PV',
       icon: null, // Will be set in component
-      stale,
+      stale: !pvPresent,
     },
     grid: {
       id: 'grid',
-      present: values.grid_power !== null,
+      present: gridPresent,
       active: values.grid_power !== null && values.grid_power !== 0,
       value: values.grid_power,
       displayValue: formatPowerW(values.grid_power !== null ? Math.abs(values.grid_power) : null),
@@ -298,11 +285,11 @@ export function buildFlowViewModel(
       color: '--flow-grid',
       label: 'Grid',
       icon: null,
-      stale,
+      stale: !gridPresent,
     },
     battery: {
       id: 'battery',
-      present: values.battery_soc !== null && values.battery_power_signed !== null,
+      present: batteryPresent,
       active: values.battery_power_signed !== null && values.battery_power_signed !== 0,
       value: values.battery_power_signed,
       displayValue: formatPowerW(values.battery_power_signed),
@@ -311,11 +298,11 @@ export function buildFlowViewModel(
       label: 'Battery',
       icon: null,
       soc: values.battery_soc ?? 0,
-      stale,
+      stale: !batteryPresent,
     },
     household: {
       id: 'household',
-      present: values.household_load_power !== null,
+      present: householdPresent,
       active: values.household_load_power !== null && values.household_load_power !== 0,
       value: values.household_load_power,
       displayValue: formatPowerW(values.household_load_power),
@@ -323,11 +310,11 @@ export function buildFlowViewModel(
       color: '--flow-hh',
       label: 'House',
       icon: null,
-      stale,
+      stale: !householdPresent,
     },
     backup: {
       id: 'backup',
-      present: values.backup_load_power !== null,
+      present: backupPresent,
       active: values.backup_load_power !== null && values.backup_load_power !== 0,
       value: values.backup_load_power,
       displayValue: formatPowerW(values.backup_load_power),
@@ -335,7 +322,7 @@ export function buildFlowViewModel(
       color: '--flow-bk',
       label: 'Backup',
       icon: null,
-      stale,
+      stale: !backupPresent,
     },
     inverter: {
       id: 'inverter',
@@ -347,7 +334,7 @@ export function buildFlowViewModel(
       color: '--flow-inv-bg',
       label: 'Inverter',
       icon: null,
-      stale,
+      stale: false,
     },
   };
 
@@ -391,7 +378,7 @@ export function buildFlowViewModel(
     inverter: {
       status: solisStatus ?? 'Unknown',
       operatingStatus: operatingStatus ?? 'Unknown',
-      alert: isAlertStatus(solisStatus) || isAlertStatus(operatingStatus),
+      alert,
     },
     allPresent,
     stale,

@@ -23,15 +23,15 @@ export function PowerFlow(): React.ReactElement {
   
   // Get data from store
   const registerValues = useRegisterStore(state => state.registerValues);
-  const registerMetadata = useRegisterStore(state => state.registerMetadata);
+  const registerMetadataByKey = useRegisterStore(state => state.registerMetadataByKey);
   const isLoading = useRegisterStore(state => state.isLoading);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
-  
+
   // Determine if data is stale (no updates or still loading)
   const stale = isLoading || lastUpdated === null;
-  
+
   // Build the view model
-  const viewModel = buildFlowViewModel(registerValues, registerMetadata, stale);
+  const viewModel = buildFlowViewModel(registerValues, registerMetadataByKey, stale);
   
   // Variant selection per spec §14.2:
   // "same determination… tablet shows desktop"

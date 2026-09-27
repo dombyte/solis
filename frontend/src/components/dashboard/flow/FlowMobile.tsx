@@ -25,10 +25,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       sub: '',
       color: 'var(--color-flow-pv)',
       active: nodes.pv.active,
-      connector: { 
-        active: nodes.pv.active, 
+      stale: nodes.pv.stale,
+      connector: {
+        active: nodes.pv.active,
         reverse: true,
-        color: 'var(--color-flow-pv)' 
+        color: 'var(--color-flow-pv)'
       },
     },
     {
@@ -38,10 +39,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       sub: getGridSubStatus(nodes.grid.value),
       color: 'var(--color-flow-grid)',
       active: nodes.grid.active,
-      connector: { 
-        active: nodes.grid.active, 
+      stale: nodes.grid.stale,
+      connector: {
+        active: nodes.grid.active,
         reverse: nodes.grid.value !== null ? nodes.grid.value < 0 : false,
-        color: 'var(--color-flow-grid)' 
+        color: 'var(--color-flow-grid)'
       },
     },
     {
@@ -51,10 +53,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       sub: getBatterySubStatus(nodes.battery.value),
       color: 'var(--color-flow-batt)',
       active: nodes.battery.active,
-      connector: { 
-        active: nodes.battery.active, 
+      stale: nodes.battery.stale,
+      connector: {
+        active: nodes.battery.active,
         reverse: nodes.battery.value !== null ? nodes.battery.value < 0 : false,
-        color: 'var(--color-flow-batt)' 
+        color: 'var(--color-flow-batt)'
       },
     },
     {
@@ -64,10 +67,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       sub: '',
       color: 'var(--color-flow-hh)',
       active: nodes.household.active,
-      connector: { 
-        active: nodes.household.active, 
+      stale: nodes.household.stale,
+      connector: {
+        active: nodes.household.active,
         reverse: false,
-        color: 'var(--color-flow-hh)' 
+        color: 'var(--color-flow-hh)'
       },
     },
     {
@@ -77,10 +81,11 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       sub: getBackupSubStatus(nodes.backup.value),
       color: 'var(--color-flow-bk)',
       active: nodes.backup.active,
-      connector: { 
-        active: nodes.backup.active, 
+      stale: nodes.backup.stale,
+      connector: {
+        active: nodes.backup.active,
         reverse: false,
-        color: 'var(--color-flow-bk)' 
+        color: 'var(--color-flow-bk)'
       },
     },
   ];
@@ -156,7 +161,9 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
                 style={{
                   background: 'var(--color-card)',
                   border: `1.5px solid ${card.color}`,
-                  width: '70%'
+                  width: '70%',
+                  opacity: card.stale ? 0.35 : 1,
+                  transition: 'opacity 0.5s ease'
                 }}
               >
                 <div className="flex items-center gap-3">
