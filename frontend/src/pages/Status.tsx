@@ -183,7 +183,7 @@ export function Status(): React.ReactElement {
             return (
               <Card
                 key={reg.id}
-                className="w-full cursor-pointer hover:shadow-md transition-shadow"
+                className="w-full cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-shadow"
                 onClick={() => handleStatusClick(reg.id)}
                 role="button"
                 tabIndex={0}

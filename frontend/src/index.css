@@ -426,15 +426,15 @@
     }
   }
   
-  /* 3 columns from 1000px to 1899px */
-  @media (min-width: 1000px) and (max-width: 1899px) {
+  /* 3 columns from 1024px (Tailwind's lg) to 1899px */
+  @media (min-width: 1024px) and (max-width: 1899px) {
     .grid-cols-4-custom {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
   
-  /* 2 columns from 640px to 999px */
-  @media (min-width: 640px) and (max-width: 999px) {
+  /* 2 columns from 640px (Tailwind's sm) to 1023px */
+  @media (min-width: 640px) and (max-width: 1023px) {
     .grid-cols-4-custom {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -643,8 +643,8 @@
   /* Make info icon buttons larger for touch */
   [aria-label^="Info about"] {
     padding: 8px !important;
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 44px;
+    min-height: 44px;
   }
   
   [aria-label^="Info about"] svg {
