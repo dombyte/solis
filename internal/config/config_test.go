@@ -16,7 +16,7 @@ func validConfig() AppConfig {
 	return AppConfig{
 		App:      AppSettings{Debug: "INFO", Port: 8080, Timeout: 30 * time.Second},
 		Poller:   PollerSettings{Interval: 5 * time.Second, BlockAttempts: 2, PollTimeout: 5 * time.Second},
-		Modbus:   ModbusSettings{Type: "tcp", Host: "h", Port: 502},
+		Modbus:   ModbusSettings{Address: "tcp://h:502", Timeout: time.Second},
 		Rollover: RolloverSettings{Time: "23:59"},
 		Storage: StorageSettings{
 			Path: "x.db", DailyRetention: time.Hour, MonthlyRetention: time.Hour,
@@ -33,9 +33,23 @@ func TestValidate(t *testing.T) {
 		want   string
 	}{
 		{"valid", func(*AppConfig) {}, ""},
-		{"modbus type", func(c *AppConfig) { c.Modbus.Type = "rtu" }, "invalid modbus type"},
-		{"modbus host", func(c *AppConfig) { c.Modbus.Host = "" }, "modbus host is required"},
-		{"modbus port", func(c *AppConfig) { c.Modbus.Port = 70000 }, "invalid modbus port"},
+		{"modbus rtu valid", func(c *AppConfig) {
+			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}
+		}, ""},
+		{"modbus scheme", func(c *AppConfig) { c.Modbus.Address = "udp://h:502" },
+			"scheme must be tcp or rtu"},
+		{"modbus no scheme", func(c *AppConfig) { c.Modbus.Address = "h:502" },
+			"invalid modbus address"},
+		{"modbus host", func(c *AppConfig) { c.Modbus.Address = "tcp://:502" },
+			"host:port required"},
+		{"modbus port", func(c *AppConfig) { c.Modbus.Address = "tcp://h:70000" },
+			"invalid modbus port"},
+		{"modbus timeout", func(c *AppConfig) { c.Modbus.Timeout = 0 },
+			"modbus timeout must be positive"},
+		{"modbus parity", func(c *AppConfig) {
+			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+				Parity: "X"}
+		}, "invalid modbus parity"},
 		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
 		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be positive"},
 		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
@@ -88,7 +102,7 @@ app:
   debug: DEBUG
   port: 8081
 modbus:
-  host: 10.1.1.1
+  address: "tcp://10.1.1.1:502"
 poller:
   interval: 15m
 rollover:
@@ -97,7 +111,7 @@ rollover:
 	require.NoError(t, err)
 	assert.Equal(t, 8081, cfg.App.Port)
 	assert.Equal(t, "DEBUG", cfg.App.Debug)
-	assert.Equal(t, "10.1.1.1", cfg.Modbus.Host)
+	assert.Equal(t, "tcp://10.1.1.1:502", cfg.Modbus.Address)
 	assert.Equal(t, 15*time.Minute, cfg.Poller.Interval)
 	assert.Equal(t, "00:30", cfg.Rollover.Time)
 	assert.Empty(t, cfg.Warnings)
@@ -122,12 +136,12 @@ func TestLoadConfig_MissingFileUsesDefaults(t *testing.T) {
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
 	t.Setenv("SOLIS_APP_PORT", "9090")
-	t.Setenv("SOLIS_MODBUS_HOST", "10.0.0.1")
+	t.Setenv("SOLIS_MODBUS_ADDRESS", "tcp://10.0.0.1:502")
 	t.Setenv("SOLIS_ROLLOVER_TIME", "22:00")
-	cfg, err := LoadConfig(writeConfig(t, "modbus:\n  host: 192.168.1.1\n"))
+	cfg, err := LoadConfig(writeConfig(t, "modbus:\n  address: \"tcp://192.168.1.1:502\"\n"))
 	require.NoError(t, err)
 	assert.Equal(t, 9090, cfg.App.Port)
-	assert.Equal(t, "10.0.0.1", cfg.Modbus.Host)
+	assert.Equal(t, "tcp://10.0.0.1:502", cfg.Modbus.Address)
 	assert.Equal(t, "22:00", cfg.Rollover.Time)
 }
 

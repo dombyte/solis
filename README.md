@@ -1,6 +1,6 @@
 # Solis Monitor
 
-Monitoring solution for Solis hybrid inverters over Modbus TCP. Polls register data, stores
+Monitoring solution for Solis hybrid inverters over Modbus (TCP or RTU). Polls register data, stores
 daily energy counters and status/fault changes in SQLite, computes monthly/yearly/total values
 itself, and serves a React dashboard (REST + WebSocket) from the same Go binary.
 
@@ -25,7 +25,7 @@ failed or has exhausted its restart budget. It never blocks on a component.
 ## Configuration
 
 Copy `config.yaml` and adjust settings. All options can be overridden via environment variables
-using the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_HOST=192.168.1.200`).
+using the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502`).
 
 The inverter's local timezone comes from the `TZ` environment variable (`time.Local`), never
 from the config file.
@@ -46,11 +46,11 @@ poller:
   poll_timeout: 30s
 
 modbus:
-  type: tcp
-  host: 192.168.2.151
-  port: 502
+  # tcp://host:port or rtu://<device path> (e.g. rtu:///dev/ttyUSB0)
+  address: "tcp://192.168.2.151:502"
   timeout: 5s
-  unit_id: 1
+  slave_id: 1
+  # speed/data_bits/parity/stop_bits apply to rtu only (defaults: 19200 8N2)
 
 rollover:
   time: "23:59"
@@ -93,11 +93,13 @@ storage:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `type` | string | tcp | Connection type |
-| `host` | string | 192.168.1.100 | Modbus server IP/hostname |
-| `port` | int | 502 | Modbus server port |
+| `address` | string | tcp://192.168.1.100:502 | Connection URL: `tcp://host:port` or `rtu://<device path>` (e.g. `rtu:///dev/ttyUSB0`) |
 | `timeout` | duration | 5s | Connection/read timeout |
-| `unit_id` | byte | 1 | Modbus unit/slave ID (1-247) |
+| `slave_id` | byte | 1 | Modbus unit/slave ID (1-247) |
+| `speed` | uint | 19200 (rtu default) | Serial link speed in bps (rtu only) |
+| `data_bits` | uint | 8 (rtu default) | Bits per serial character (rtu only) |
+| `parity` | string | N | Serial parity: `N`, `E`, or `O` (rtu only) |
+| `stop_bits` | uint | 2, or 1 with parity (rtu default) | Serial stop bits (rtu only) |
 
 The Modbus client never fails construction on an unreachable device: it starts in a
 `recovering` state and reconnects with exponential backoff, reflected in `/health`.

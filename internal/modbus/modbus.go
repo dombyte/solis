@@ -1,15 +1,15 @@
-// Package modbus is the Modbus TCP client used only by the poller. It is an external
-// layer: it depends on the standard library and simonvetter/modbus only (no config,
-// health or logging globals). Construction never touches the network; Run keeps the
-// single connection alive with exponential backoff and beats while it waits.
+// Package modbus is the Modbus client (TCP or RTU) used only by the poller. It is an
+// external layer: it depends on the standard library and simonvetter/modbus only (no
+// config, health or logging globals). Construction never touches the network/serial
+// line; Run keeps the single connection alive with exponential backoff and beats while
+// it waits.
 package modbus
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,30 +50,61 @@ func (e *ReadError) Error() string {
 // Unwrap returns the underlying error.
 func (e *ReadError) Unwrap() error { return e.Err }
 
-// Settings are the connection parameters.
+// Settings are the connection parameters. Address selects the transport via URL scheme:
+// "tcp://host:port" or "rtu://<serial device path>" (e.g. "rtu:///dev/ttyUSB0"). Speed,
+// DataBits, Parity and StopBits apply to rtu only; zero/empty values fall back to the
+// library defaults (19200 8N2).
 type Settings struct {
-	// Host is the device host name or IP.
-	Host string
-	// Port is the TCP port.
-	Port int
+	// Address is the connection URL, e.g. "tcp://192.168.1.100:502" or "rtu:///dev/ttyUSB0".
+	Address string
 	// UnitID is the Modbus unit (slave) id.
 	UnitID byte
 	// Timeout bounds connect and each request.
 	Timeout time.Duration
+	// Speed is the serial link speed in bps (rtu only).
+	Speed uint
+	// DataBits is the number of bits per serial character (rtu only).
+	DataBits uint
+	// Parity is the serial link parity: "N", "E", or "O" (rtu only, default "N").
+	Parity string
+	// StopBits is the number of serial stop bits (rtu only).
+	StopBits uint
+}
+
+// scheme returns the URL scheme of Address ("tcp" or "rtu"), and the remainder.
+func (s Settings) scheme() (scheme, rest string, ok bool) {
+	scheme, rest, ok = strings.Cut(s.Address, "://")
+	return scheme, rest, ok && rest != ""
 }
 
 // Validate checks the settings.
 func (s Settings) Validate() error {
-	const maxPort = 65535
-	if s.Host == "" || s.Port <= 0 || s.Port > maxPort || s.Timeout <= 0 {
-		return fmt.Errorf("%w: host %q port %d timeout %s", ErrInvalidSettings, s.Host, s.Port,
-			s.Timeout)
+	scheme, _, ok := s.scheme()
+	if !ok || (scheme != "tcp" && scheme != "rtu") {
+		return fmt.Errorf("%w: address %q must be tcp://host:port or rtu://<device>",
+			ErrInvalidSettings, s.Address)
+	}
+	if s.Timeout <= 0 {
+		return fmt.Errorf("%w: timeout %s must be positive", ErrInvalidSettings, s.Timeout)
+	}
+	if _, err := parity(s.Parity); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidSettings, err)
 	}
 	return nil
 }
 
-func (s Settings) url() string {
-	return "tcp://" + net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
+// parity maps a config parity letter to the simonvetter/modbus constant.
+func parity(p string) (uint, error) {
+	switch strings.ToUpper(p) {
+	case "", "N":
+		return sv.PARITY_NONE, nil
+	case "E":
+		return sv.PARITY_EVEN, nil
+	case "O":
+		return sv.PARITY_ODD, nil
+	default:
+		return 0, fmt.Errorf("invalid parity %q: must be N, E, or O", p)
+	}
 }
 
 // Client is a single Modbus TCP connection with automatic reconnection.
@@ -132,7 +163,18 @@ func (c *Client) markLost(cause error) {
 
 // connect opens a fresh connection.
 func (c *Client) connect() error {
-	mc, err := sv.NewClient(&sv.ClientConfiguration{URL: c.set.url(), Timeout: c.set.Timeout})
+	par, err := parity(c.set.Parity)
+	if err != nil {
+		return fmt.Errorf("modbus: %w", err)
+	}
+	mc, err := sv.NewClient(&sv.ClientConfiguration{
+		URL:      c.set.Address,
+		Timeout:  c.set.Timeout,
+		Speed:    c.set.Speed,
+		DataBits: c.set.DataBits,
+		Parity:   par,
+		StopBits: c.set.StopBits,
+	})
 	if err != nil {
 		return fmt.Errorf("modbus: create client: %w", err)
 	}
@@ -140,13 +182,13 @@ func (c *Client) connect() error {
 		return fmt.Errorf("modbus: set unit id: %w", err)
 	}
 	if err := mc.Open(); err != nil {
-		return fmt.Errorf("modbus: connect %s: %w", c.set.url(), err)
+		return fmt.Errorf("modbus: connect %s: %w", c.set.Address, err)
 	}
 	c.mu.Lock()
 	c.mc = mc
 	c.mu.Unlock()
 	c.connected.Store(true)
-	c.log.Info().Str("url", c.set.url()).Msg("modbus connected")
+	c.log.Info().Str("address", c.set.Address).Msg("modbus connected")
 	return nil
 }
 

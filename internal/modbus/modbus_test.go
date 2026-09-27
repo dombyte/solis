@@ -57,17 +57,53 @@ func startDevice(t *testing.T, port int) *sv.ModbusServer {
 }
 
 func settings(port int) Settings {
-	return Settings{Host: "127.0.0.1", Port: port, UnitID: 1, Timeout: 500 * time.Millisecond}
+	return Settings{Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
+		Timeout: 500 * time.Millisecond}
 }
 
 func TestSettingsValidate(t *testing.T) {
 	assert.NoError(t, settings(502).Validate())
-	for _, s := range []Settings{{}, {Host: "h", Port: 0, Timeout: 1}, {Host: "h", Port: 70000,
-		Timeout: 1}, {Host: "h", Port: 1}} {
+	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}.Validate())
+	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+		Parity: "e"}.Validate())
+	for _, s := range []Settings{
+		{},
+		{Address: "tcp://h:502", Timeout: 0},
+		{Address: "udp://h:502", Timeout: 1},
+		{Address: "tcp://", Timeout: 1},
+		{Address: "rtu://", Timeout: 1},
+		{Address: "rtu:///dev/ttyUSB0", Timeout: 1, Parity: "X"},
+	} {
 		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings)
 	}
 	_, err := New(Settings{}, utils.NewRealClock(), zerolog.Nop())
 	assert.ErrorIs(t, err, ErrInvalidSettings)
+}
+
+func TestParity(t *testing.T) {
+	p, err := parity("")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_NONE, p)
+	p, err = parity("n")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_NONE, p)
+	p, err = parity("E")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_EVEN, p)
+	p, err = parity("O")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_ODD, p)
+	_, err = parity("X")
+	assert.Error(t, err)
+}
+
+func TestConnect_RTUMissingDevice(t *testing.T) {
+	c, err := New(Settings{Address: "rtu:///dev/nonexistent-solis-test", Timeout: time.Second},
+		utils.NewRealClock(), zerolog.Nop())
+	require.NoError(t, err)
+	err = c.connect()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rtu:///dev/nonexistent-solis-test")
 }
 
 func TestNew_DoesNotConnect(t *testing.T) {

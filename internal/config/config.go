@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,18 +70,24 @@ type PollerSettings struct {
 	PollTimeout time.Duration `mapstructure:"poll_timeout"`
 }
 
-// ModbusSettings contains Modbus connection configuration. Only TCP is supported.
+// ModbusSettings contains Modbus connection configuration. Address selects the
+// transport via URL scheme: "tcp://host:port" or "rtu://<serial device path>" (e.g.
+// "rtu:///dev/ttyUSB0"). Speed, DataBits, Parity and StopBits apply to rtu only.
 type ModbusSettings struct {
-	// Type is the connection type: only "tcp" is supported.
-	Type string `mapstructure:"type"`
-	// Host is the Modbus server IP address or hostname.
-	Host string `mapstructure:"host"`
-	// Port is the Modbus server port (default: 502).
-	Port int `mapstructure:"port"`
+	// Address is the connection URL, e.g. "tcp://192.168.1.100:502" or "rtu:///dev/ttyUSB0".
+	Address string `mapstructure:"address"`
 	// Timeout is the connection/read timeout.
 	Timeout time.Duration `mapstructure:"timeout"`
-	// UnitID is the Modbus unit/slave ID.
-	UnitID byte `mapstructure:"unit_id"`
+	// SlaveID is the Modbus unit/slave ID.
+	SlaveID byte `mapstructure:"slave_id"`
+	// Speed is the serial link speed in bps (rtu only, library default 19200).
+	Speed uint `mapstructure:"speed"`
+	// DataBits is the number of bits per serial character (rtu only, library default 8).
+	DataBits uint `mapstructure:"data_bits"`
+	// Parity is the serial link parity: N, E, or O (rtu only, default N).
+	Parity string `mapstructure:"parity"`
+	// StopBits is the number of serial stop bits (rtu only, library default 2, or 1 with parity).
+	StopBits uint `mapstructure:"stop_bits"`
 }
 
 // RolloverSettings contains the daily rollover configuration.
@@ -125,8 +133,8 @@ func setDefaults(v *viper.Viper) {
 		"poller.interval": "30s", "poller.block_attempts": 3,
 		"poller.block_retry_delay": "1s", "poller.block_interval": "0s",
 		"poller.poll_timeout": "30s",
-		"modbus.type":         "tcp", "modbus.host": "192.168.1.100", "modbus.port": 502,
-		"modbus.timeout": "5s", "modbus.unit_id": 1,
+		"modbus.address":      "tcp://192.168.1.100:502",
+		"modbus.timeout":      "5s", "modbus.slave_id": 1,
 		"rollover.time":           "23:59",
 		"storage.path":            "./data/solis.db",
 		"storage.daily_retention": "8760h", "storage.monthly_retention": "8760h",
@@ -142,7 +150,7 @@ func setDefaults(v *viper.Viper) {
 }
 
 // LoadConfig loads configuration from a YAML file and environment variables.
-// Environment variables use the SOLIS_ prefix with underscores (e.g. SOLIS_MODBUS_HOST).
+// Environment variables use the SOLIS_ prefix with underscores (e.g. SOLIS_MODBUS_ADDRESS).
 // A missing file falls back to defaults; an invalid configuration is an error.
 func LoadConfig(configPath string) (*AppConfig, error) {
 	v := viper.New()
@@ -194,13 +202,46 @@ func (c *AppConfig) Validate() error {
 
 // Validate validates Modbus configuration.
 func (m *ModbusSettings) Validate() error {
-	if m.Type != "tcp" {
-		return fmt.Errorf("invalid modbus type: %s (only tcp is supported)", m.Type)
+	scheme, rest, ok := strings.Cut(m.Address, "://")
+	if !ok || rest == "" {
+		return fmt.Errorf("invalid modbus address %q: expected tcp://host:port or "+
+			"rtu://<device>", m.Address)
 	}
-	if m.Host == "" {
-		return errors.New("modbus host is required for tcp connections")
+	var err error
+	switch scheme {
+	case "tcp":
+		err = validateModbusTCP(m.Address, rest)
+	case "rtu":
+		err = validateModbusRTU(m.Parity)
+	default:
+		err = fmt.Errorf("invalid modbus address %q: scheme must be tcp or rtu", m.Address)
 	}
-	return validatePort("modbus port", m.Port)
+	if err != nil {
+		return err
+	}
+	if m.Timeout <= 0 {
+		return errors.New("modbus timeout must be positive")
+	}
+	return nil
+}
+
+func validateModbusTCP(address, hostport string) error {
+	host, portStr, err := net.SplitHostPort(hostport)
+	if err != nil || host == "" {
+		return fmt.Errorf("invalid modbus tcp address %q: host:port required", address)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("invalid modbus tcp port %q", portStr)
+	}
+	return validatePort("modbus port", port)
+}
+
+func validateModbusRTU(parity string) error {
+	if !oneOf(strings.ToUpper(parity), "", "N", "E", "O") {
+		return fmt.Errorf("invalid modbus parity: %s (must be N, E, or O)", parity)
+	}
+	return nil
 }
 
 // Validate validates App configuration.

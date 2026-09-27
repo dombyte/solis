@@ -216,7 +216,7 @@ func (a *App) serve() error {
 
 func (a *App) logStartup() {
 	a.log.Info().Int("port", a.cfg.App.Port).Dur("poll_interval", a.cfg.Poller.Interval).
-		Str("modbus", fmt.Sprintf("%s:%d", a.cfg.Modbus.Host, a.cfg.Modbus.Port)).
+		Str("modbus", a.cfg.Modbus.Address).
 		Str("rollover", a.cfg.Rollover.Time).Str("tz", time.Local.String()).
 		Msg("Solis Monitor started (/api, /ws, /health, /docs)")
 }

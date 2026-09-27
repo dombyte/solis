@@ -3,7 +3,7 @@
 
 ## Project Overview
 
-Solis Monitor polls a Solis hybrid inverter over Modbus TCP, stores daily energy counters and
+Solis Monitor polls a Solis hybrid inverter over Modbus (TCP or RTU), stores daily energy counters and
 status/fault changes in SQLite, computes monthly/yearly/total values itself, and serves a React
 dashboard (REST + WebSocket) from the same Go binary.
 
@@ -53,7 +53,7 @@ internal/
   eventbus/      *new*   event bus (ValuesUpdated, PeriodClosed), non-blocking, per-subscriber policy
   health/        *new*   supervisor, component contract, restart budget, ErrHealthFatal, snapshot
   solis/                 register table (Store enum), computed defs, block planning, decode, derive
-  modbus/                Modbus TCP client, reconnect loop, Source slot for the poller
+  modbus/                Modbus TCP/RTU client, reconnect loop, Source slot for the poller
   poller/                poll loop, DayAttributor (day attribution + rollover), cold-start seeding
   aggregation/   *new*   PURE period math (monthly/yearly/total/net) shared by aggregator + CLI
   aggregator/            event-driven runner (debounce/heartbeat/catch-up) using aggregation
@@ -102,7 +102,9 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 - Configure middleware chain
 
 ### Modbus Package (`internal/modbus/`)
-- Modbus client implementation (single TCP connection, used **only by the poller**)
+- Modbus client implementation (single TCP or RTU connection, used **only by the poller**);
+  transport is selected by the `modbus.address` URL scheme (`tcp://host:port` or
+  `rtu://<device path>`)
 - Reconnection loop with exponential backoff; beats while waiting so it never looks stale
 - Raw Modbus read operations and error classification
 - Construction never fails on an unreachable device — it starts `recovering` and reconnects
@@ -539,7 +541,7 @@ func (s *Service) GetAllRegisters(ctx context.Context) (*solis.SolisData, error)
 
 Use Viper for YAML configuration with environment variable overrides:
 
-Env overrides use the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_HOST`). v3 shape (abridged):
+Env overrides use the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_ADDRESS`). v3 shape (abridged):
 
 ```yaml
 # config.yaml
@@ -556,11 +558,15 @@ poller:
   poll_timeout: 5s
 
 modbus:
-  type: tcp
-  host: 192.168.1.100
-  port: 502
+  # Address selects the transport via URL scheme: tcp://host:port or rtu://<device path>
+  address: "tcp://192.168.1.100:502"   # or "rtu:///dev/ttyUSB0"
   timeout: 2s
-  unit_id: 1
+  slave_id: 1
+  # speed/data_bits/parity/stop_bits apply to rtu only (defaults: 19200 8N2)
+  speed: 9600
+  data_bits: 8
+  parity: "N"
+  stop_bits: 1
 
 rollover:
   time: "23:59"        # strict 24h HH:MM; anything else fails startup

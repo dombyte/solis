@@ -20,11 +20,11 @@ poller:
   poll_timeout: 5s
 
 modbus:
-  type: tcp
-  host: stratopi.welan
-  port: 502
+  # Address selects the transport via URL scheme: tcp://host:port or rtu://<device path>
+  # (e.g. rtu:///dev/ttyUSB0). speed/data_bits/parity/stop_bits apply to rtu only.
+  address: "tcp://stratopi.welan:502"
   timeout: 2s
-  unit_id: 1
+  slave_id: 1
 
 # Local time at which the inverter's daily counters roll over (strict 24h HH:MM).
 # Timezone comes from the TZ environment variable (time.Local), never from this file.
@@ -38,7 +38,7 @@ storage:
   monthly_retention: 87600h # 10 year
   yearly_retention: 87600h # 10 year
   # Retention period for error/fault data
-  error_retention: 87600h # 30 days
+  error_retention: 87600h # 10 year
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
