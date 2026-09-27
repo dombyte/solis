@@ -15,7 +15,6 @@ services:
       # - "4174:8080"
       - "8080:8080"
       - "9090:9090"
-    command: serve -c /app/config.yaml
     deploy:
       resources:
         limits:

@@ -38,7 +38,7 @@ storage:
   monthly_retention: 87600h # 10 year
   yearly_retention: 87600h # 10 year
   # Retention period for error/fault data
-  error_retention: 720h # 30 days
+  error_retention: 87600h # 30 days
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
