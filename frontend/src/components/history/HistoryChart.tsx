@@ -16,6 +16,8 @@ interface HistoryChartProps {
 export function HistoryChart({ data, className = '', datasetCount = 0 }: HistoryChartProps): React.ReactElement {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
+  const yAxisRef = useRef<HTMLCanvasElement>(null);
+  const yAxisInstanceRef = useRef<Chart | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [datasetVisibility, setDatasetVisibility] = React.useState<Record<string, boolean>>({});
 
@@ -87,16 +89,21 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   }, [currentThemeClass]);
 
   useEffect(() => {
-    if (!chartRef.current || !data) return;
-    
-    // Clean up previous chart instance
+    if (!chartRef.current || !yAxisRef.current || !data) return;
+
+    // Clean up previous chart instances
     if (chartInstanceRef.current) {
       chartInstanceRef.current.destroy();
       chartInstanceRef.current = null;
     }
+    if (yAxisInstanceRef.current) {
+      yAxisInstanceRef.current.destroy();
+      yAxisInstanceRef.current = null;
+    }
 
     const ctx = chartRef.current.getContext('2d');
-    if (!ctx) return;
+    const yAxisCtx = yAxisRef.current.getContext('2d');
+    if (!ctx || !yAxisCtx) return;
 
     // Get colors from CSS variables for theme-aware styling
     const getCssVar = (varName: string) => {
@@ -275,11 +282,69 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             }
           },
           y: {
-            grid: { 
+            grid: {
               color: borderColorVar
             },
-            ticks: { 
-              font: { 
+            // Labels are drawn by the separate, non-scrolling yAxisInstance chart
+            // below instead, so they stay pinned to the left while this chart's
+            // bars/x-axis scroll horizontally. The grid lines stay here since they
+            // belong to the scrollable plot area.
+            ticks: {
+              display: false,
+            },
+            border: {
+              display: false
+            }
+          }
+        },
+      },
+    });
+
+    // Build a second, non-scrolling chart containing only the y-axis, pinned to the
+    // left of the scroll container. It mirrors the main chart's y scale exactly (same
+    // min/max and the exact tick values the main chart already computed) so grid lines
+    // and labels line up, and it reserves the same bottom height as the main chart's
+    // x-axis (via afterFit) so the label rows sit at the same vertical position.
+    const mainYScale = chartInstanceRef.current.scales.y;
+    const mainXScale = chartInstanceRef.current.scales.x;
+    const tickValues = mainYScale.ticks.map(t => t.value);
+    const xAxisHeight = mainXScale.height;
+
+    yAxisInstanceRef.current = new Chart(yAxisCtx, {
+      type: 'bar',
+      data: { labels: [''], datasets: [] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        events: [],
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: false },
+        },
+        scales: {
+          x: {
+            display: true,
+            ticks: { display: false },
+            grid: { display: false },
+            border: { display: false },
+            // Force this hidden x-axis to reserve the same height as the main
+            // chart's visible (rotated-label) x-axis, so the two canvases' plot
+            // areas span the same vertical range.
+            afterFit: (scale) => {
+              scale.height = xAxisHeight;
+            },
+          },
+          y: {
+            min: mainYScale.min,
+            max: mainYScale.max,
+            // Reuse the main chart's already-computed tick values instead of letting
+            // this chart compute its own, so both axes always agree exactly.
+            afterBuildTicks: (scale) => {
+              scale.ticks = tickValues.map(value => ({ value }));
+            },
+            grid: { display: false },
+            ticks: {
+              font: {
                 size: 10,
                 family: 'Inter Variable, sans-serif'
               },
@@ -297,6 +362,10 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
       if (chartInstanceRef.current) {
         chartInstanceRef.current.destroy();
         chartInstanceRef.current = null;
+      }
+      if (yAxisInstanceRef.current) {
+        yAxisInstanceRef.current.destroy();
+        yAxisInstanceRef.current = null;
       }
     };
   }, [data, theme, currentThemeClass, datasetCount, isMobile]);
@@ -318,6 +387,17 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const dataPointCount = data.labels?.length || 0;
   const pointWidth = Math.min(160, Math.max(60, 40 + datasetCount * 14));
   const minWidth = Math.min(dataPointCount * pointWidth, 4000);
+
+  // Estimate the pinned y-axis column's width straight from the raw data rather than
+  // from Chart.js's own computed scale: reading that back out only after the chart
+  // renders means the column is sized one render late (and briefly wrong/clipped)
+  // every time the value range changes. Chart.js rounds its axis max up to a "nice"
+  // number, so pad the raw max by ~15% to estimate that headroom for sizing purposes.
+  const allValues = data.datasets.flatMap(ds => ds.data).filter((v): v is number => v !== null && v !== undefined);
+  const maxAbsValue = allValues.length > 0 ? Math.max(...allValues.map(v => Math.abs(v))) : 0;
+  const estimatedTickMax = Math.ceil(maxAbsValue * 1.15);
+  const maxLabelLength = estimatedTickMax.toLocaleString().length;
+  const yAxisWidth = Math.max(44, maxLabelLength * 10 + 30);
 
   // Function to get color for a dataset by index
   const getColorForDataset = (datasetIndex: number): string => {
@@ -344,18 +424,23 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
 
   return (
     <div className={`relative w-full ${className}`}>
-      <div
-        ref={scrollContainerRef}
-        className="overflow-x-auto history-chart-scroll w-full"
-        style={{ minHeight: '200px', maxHeight: '500px' }}
-      >
-        <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
-          <canvas
-            ref={chartRef}
-            role="img"
-            aria-label={`Bar chart of ${data.datasets.length} dataset${data.datasets.length === 1 ? '' : 's'} across ${dataPointCount} period${dataPointCount === 1 ? '' : 's'}`}
-            aria-describedby={validStats.length > 0 ? 'history-chart-stats' : undefined}
-          />
+      <div className="flex w-full" style={{ minHeight: '200px', maxHeight: '500px' }}>
+        {/* Pinned y-axis - lives outside the scroll container so it never scrolls */}
+        <div className="flex-shrink-0" style={{ width: `${yAxisWidth}px`, height: '400px' }}>
+          <canvas ref={yAxisRef} aria-hidden="true" />
+        </div>
+        <div
+          ref={scrollContainerRef}
+          className="overflow-x-auto history-chart-scroll flex-1 min-w-0"
+        >
+          <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
+            <canvas
+              ref={chartRef}
+              role="img"
+              aria-label={`Bar chart of ${data.datasets.length} dataset${data.datasets.length === 1 ? '' : 's'} across ${dataPointCount} period${dataPointCount === 1 ? '' : 's'}`}
+              aria-describedby={validStats.length > 0 ? 'history-chart-stats' : undefined}
+            />
+          </div>
         </div>
       </div>
       {/* Statistics display per category in table format with toggle */}
