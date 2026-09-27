@@ -28,19 +28,15 @@ export function DatePickerWithRange({
   hideLabel?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const [numberOfMonths, setNumberOfMonths] = useState(2)
-  
+
   // Use a ref to track the previous date prop to avoid unnecessary state updates
   const prevDateRef = React.useRef(date)
-  
+
   // Derived state for tempRange - initialized from date prop
   const [tempRange, setTempRange] = useState<DateRange | undefined>(date)
 
   const isMobile = useMobile();
-
-  useEffect(() => {
-    setNumberOfMonths(isMobile ? 1 : 2);
-  }, [isMobile])
+  const numberOfMonths = isMobile ? 1 : 2
 
   // Sync tempRange when popover opens - only update if date has changed since last open
   useEffect(() => {

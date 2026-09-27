@@ -153,6 +153,10 @@ export function ThemeProvider({
         return
       }
 
+      if (document.querySelector('[role="dialog"]')) {
+        return
+      }
+
       if (event.key.toLowerCase() !== "d") {
         return
       }

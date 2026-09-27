@@ -663,14 +663,6 @@ function getDataObjectById(id: string): ApiDataObject | undefined {
 }
 
 /**
- * Get the key for a given internal ID
- */
-export function getKeyById(id: string): string | undefined {
-  const obj = getDataObjectById(id);
-  return obj?.key;
-}
-
-/**
  * Get the source path for a given internal ID
  */
 export function getSourceById(id: string): string | undefined {

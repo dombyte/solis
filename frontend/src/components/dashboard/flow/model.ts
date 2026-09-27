@@ -2,7 +2,7 @@ import type { RegisterMetadata, RegisterValue } from '../../../types';
 import { isAlertStatus } from '../../../lib/utils/status';
 
 // Flow register keys that are used for the power flow diagram
-export const FLOW_KEYS = [
+const FLOW_KEYS = [
   'pv_total_power',
   'battery_soc',
   'battery_power_signed',
@@ -11,15 +11,11 @@ export const FLOW_KEYS = [
   'grid_power',
 ] as const;
 
-export type FlowKey = typeof FLOW_KEYS[number];
-
 // Status keys for the inverter status
-export const STATUS_KEYS = [
+const STATUS_KEYS = [
   'solis_status',
   'operating_status',
 ] as const;
-
-export type StatusKey = typeof STATUS_KEYS[number];
 
 // All keys needed for the power flow diagram
 export const POWER_FLOW_KEYS = [...FLOW_KEYS, ...STATUS_KEYS] as const;
@@ -37,7 +33,7 @@ export const POWER_FLOW_KEYS = [...FLOW_KEYS, ...STATUS_KEYS] as const;
 /**
  * Node identifiers in the flow diagram
  */
-export type FlowNode = 
+type FlowNode =
   | 'pv'
   | 'grid'
   | 'battery'
@@ -48,7 +44,7 @@ export type FlowNode =
 /**
  * Edge identifiers connecting nodes
  */
-export type FlowEdgeName = 
+type FlowEdgeName =
   | 'pv_to_inverter'
   | 'grid_to_inverter'
   | 'battery_to_inverter'
@@ -67,7 +63,6 @@ export interface NodeViewModel {
   direction: 'in' | 'out' | 'none';
   color: string;         // CSS token color
   label: string;
-  icon: React.ReactNode; // Icon component (lucide-react)
   soc?: number;          // For battery only
   stale: boolean;        // This node has no data of its own (grayed independently of the rest)
 }
@@ -75,7 +70,7 @@ export interface NodeViewModel {
 /**
  * View model for a flow edge
  */
-export interface EdgeViewModel {
+interface EdgeViewModel {
   id: FlowEdgeName;
   path: string;          // SVG path definition
   active: boolean;       // Edge is active (non-zero flow)
@@ -102,7 +97,7 @@ export interface FlowViewModel {
  * Format power value according to spec §14.2:
  * 2 decimals, W < 1000 ≤ kW; grid/battery show magnitude, sign conveyed by animation
  */
-export function formatPowerW(value: number | null): string {
+function formatPowerW(value: number | null): string {
   if (value === null || value === 0) return '0.00 W';
   const abs = Math.abs(value);
   const formatted = abs >= 1000 
@@ -272,7 +267,6 @@ export function buildFlowViewModel(
       direction: getNodeDirection('pv', values),
       color: '--flow-pv',
       label: 'PV',
-      icon: null, // Will be set in component
       stale: !pvPresent,
     },
     grid: {
@@ -284,7 +278,6 @@ export function buildFlowViewModel(
       direction: getNodeDirection('grid', values),
       color: '--flow-grid',
       label: 'Grid',
-      icon: null,
       stale: !gridPresent,
     },
     battery: {
@@ -296,7 +289,6 @@ export function buildFlowViewModel(
       direction: getNodeDirection('battery', values),
       color: '--flow-batt',
       label: 'Battery',
-      icon: null,
       soc: values.battery_soc ?? 0,
       stale: !batteryPresent,
     },
@@ -309,7 +301,6 @@ export function buildFlowViewModel(
       direction: getNodeDirection('household', values),
       color: '--flow-hh',
       label: 'House',
-      icon: null,
       stale: !householdPresent,
     },
     backup: {
@@ -321,7 +312,6 @@ export function buildFlowViewModel(
       direction: getNodeDirection('backup', values),
       color: '--flow-bk',
       label: 'Backup',
-      icon: null,
       stale: !backupPresent,
     },
     inverter: {
@@ -333,7 +323,6 @@ export function buildFlowViewModel(
       direction: 'none',
       color: '--flow-inv-bg',
       label: 'Inverter',
-      icon: null,
       stale: false,
     },
   };
@@ -411,4 +400,27 @@ export function getBatterySubStatus(batteryPower: number | null): string {
   if (batteryPower > 0) return 'charging';
   if (batteryPower < 0) return 'discharging';
   return 'idle';
+}
+
+/**
+ * Plain-text summary of the whole diagram, for a screen-reader-only aria-live
+ * region: the SVG/card nodes carry their own per-node label, but only a single
+ * live region lets assistive tech hear values change on every WebSocket tick.
+ */
+export function buildFlowSummary(viewModel: FlowViewModel): string {
+  const { nodes, inverter } = viewModel;
+
+  const describe = (node: NodeViewModel, sub?: string): string =>
+    node.stale ? `${node.label}: no data` : `${node.label} ${node.displayValue}${sub ? ` (${sub})` : ''}`;
+
+  return [
+    describe(nodes.pv),
+    describe(nodes.grid, getGridSubStatus(nodes.grid.value)),
+    nodes.battery.stale
+      ? 'Battery: no data'
+      : `Battery ${Math.round(nodes.battery.soc ?? 0)}% ${nodes.battery.displayValue} (${getBatterySubStatus(nodes.battery.value)})`,
+    describe(nodes.household),
+    describe(nodes.backup, getBackupSubStatus(nodes.backup.value)),
+    `Inverter: ${inverter.status}, ${inverter.operatingStatus}`,
+  ].join(', ');
 }

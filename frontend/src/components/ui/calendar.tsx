@@ -177,6 +177,7 @@ export function Calendar({
             type="button"
             onClick={prevYear}
             className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+            aria-label="Previous years"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -185,6 +186,7 @@ export function Calendar({
             type="button"
             onClick={nextYear}
             className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+            aria-label="Next years"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -212,7 +214,7 @@ export function Calendar({
                     : "bg-transparent hover:bg-muted/80 dark:hover:bg-muted/80"
                   }
                 `}
-                aria-selected={isInSelectedRange}
+                aria-pressed={isInSelectedRange}
               >
                 {year}
               </button>
@@ -232,6 +234,7 @@ export function Calendar({
             type="button"
             onClick={prevYear}
             className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+            aria-label="Previous year"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -240,6 +243,7 @@ export function Calendar({
             type="button"
             onClick={nextYear}
             className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+            aria-label="Next year"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
@@ -270,7 +274,7 @@ export function Calendar({
                     : "bg-transparent hover:bg-muted/80 dark:hover:bg-muted/80"
                   }
                 `}
-                aria-selected={isInSelectedRange}
+                aria-pressed={isInSelectedRange}
               >
                 {monthLabel}
               </button>
@@ -289,6 +293,7 @@ export function Calendar({
           type="button"
           onClick={prevMonth}
           className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+          aria-label="Previous month"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -296,6 +301,7 @@ export function Calendar({
           type="button"
           onClick={nextMonth}
           className="p-1 rounded hover:bg-muted/80 dark:hover:bg-muted/80"
+          aria-label="Next month"
         >
           <ChevronRight className="h-5 w-5" />
         </button>
@@ -356,7 +362,7 @@ export function Calendar({
                             : "bg-transparent hover:bg-muted/80 dark:hover:bg-muted/80"
                           }
                         `}
-                        aria-selected={isInSelectedRange}
+                        aria-pressed={isInSelectedRange}
                       >
                         {format(day, "d")}
                       </button>

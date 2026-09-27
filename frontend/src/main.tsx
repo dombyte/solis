@@ -49,11 +49,6 @@ function OnlineStatusProvider({ children }: { children: React.ReactNode }) {
     const unsubscribeConnect = websocketClient.onConnect(handleConnect);
     const unsubscribeDisconnect = websocketClient.onDisconnect(handleDisconnect);
 
-    // Check initial state
-    if (websocketClient.isConnected()) {
-      setConsecutiveFailures(0);
-    }
-
     // Periodic check: if still disconnected after some time, count as additional failure
     const intervalId = setInterval(() => {
       if (!websocketClient.isConnected()) {

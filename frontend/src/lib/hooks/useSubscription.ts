@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { websocketClient } from '../api/websocket';
 
 /**
@@ -7,11 +7,14 @@ import { websocketClient } from '../api/websocket';
  * components are safe, and re-subscribes the active set on reconnect.
  */
 export function useSubscription(keys: string[]): void {
-  const keysKey = keys.join(',');
+  // JSON-encode rather than comma-join so a register key could safely contain a comma,
+  // and stringify inside useMemo so effect deps stay stable across re-renders with the
+  // same keys but a new array reference.
+  const keysKey = useMemo(() => JSON.stringify(keys), [keys]);
 
   useEffect(() => {
-    if (!keysKey) return;
-    const list = keysKey.split(',');
+    const list = JSON.parse(keysKey) as string[];
+    if (list.length === 0) return;
     const unsubscribe = websocketClient.subscribe(list);
     return unsubscribe;
   }, [keysKey]);

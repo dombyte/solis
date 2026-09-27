@@ -24,8 +24,8 @@ export default defineConfig({
                 let repoUrl: string;
                 if (typeof dep.repository === 'string') {
                   repoUrl = dep.repository;
-                } else if (dep.repository && typeof dep.repository === 'object') {
-                  repoUrl = (dep.repository as any).url || `https://www.npmjs.com/package/${dep.name}`;
+                } else if (dep.repository) {
+                  repoUrl = dep.repository.url || `https://www.npmjs.com/package/${dep.name}`;
                 } else {
                   repoUrl = `https://www.npmjs.com/package/${dep.name}`;
                 }

@@ -1,65 +1,30 @@
 import React from 'react';
+import { Sun, Factory, Home, ShieldCheck } from 'lucide-react';
 import type { NodeViewModel } from './model';
 
+const ICON_SIZE = 24;
+
+const NODE_ICONS = {
+  sun: Sun,
+  factory: Factory,
+  house: Home,
+  shield: ShieldCheck,
+} as const;
+
 /**
- * SVG Icon component that renders an icon at (0,0)
- * All icons are outline-only for consistent appearance in both light and dark modes
- * For use within SVG contexts only
+ * Renders a lucide-react node icon centered on (0, 0) within an SVG context.
+ * `color` is passed straight through as lucide's `color` prop, which the icon uses
+ * for its `stroke` (these are outline-only icons), so it must already resolve to a
+ * concrete color (a `var(--color-*)` token, not a class), matching how the circle
+ * border/text around it are colored.
  */
-export function SvgIcon({ name, color }: { name: 'sun' | 'factory' | 'house' | 'shield' | 'battery' | 'inverter'; color: string }): React.ReactElement {
-  switch (name) {
-    case 'sun':
-      // Sun icon - outline only, no fill
-      return (
-        <g transform="translate(-15, -15)">
-          <circle cx={12} cy={12} r={5} fill="none" stroke={color} strokeWidth={2.5} />
-          <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41M6.34 17.66L7.75 16.25M16.25 7.75l-1.41 1.41" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    case 'factory':
-      // Factory/grid icon - outline only
-      return (
-        <g transform="translate(-15, -15)">
-          <rect x={8} y={4} width={8} height={16} rx={1} fill="none" stroke={color} strokeWidth={2.5} />
-          <path d="M6 12h2M16 12h2M6 8h2M16 8h2M6 16h2M16 16h2" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    case 'house':
-      // House icon - outline only, NO fill
-      return (
-        <g transform="translate(-15, -15)">
-          <path d="M12 2L2 12h5v8h10v-8h5L12 2z" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          <path d="M8 12v8M12 12v8M16 12v8" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    case 'shield':
-      // Shield icon for backup - outline only, NO fill
-      return (
-        <g transform="translate(-15, -15)">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          <path d="M12 16v-4" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    case 'battery':
-      // Battery icon
-      return (
-        <g transform="translate(-15, -15)">
-          <rect x={6} y={8} width={12} height={8} rx={1} fill="none" stroke={color} strokeWidth={2.5} />
-          <path d="M12 6v-2" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    case 'inverter':
-      // Inverter icon - a box with AC/DC symbols
-      return (
-        <g transform="translate(-15, -15)">
-          <rect x={8} y={6} width={8} height={12} rx={1} fill="none" stroke={color} strokeWidth={2.5} />
-          <path d="M12 4v4M12 16v4" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-          <path d="M8 10h2M14 10h2" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-        </g>
-      );
-    default:
-      return <></>;
-  }
+function NodeIcon({ name, color }: { name: keyof typeof NODE_ICONS; color: string }): React.ReactElement {
+  const Icon = NODE_ICONS[name];
+  return (
+    <g transform={`translate(${-ICON_SIZE / 2}, ${-ICON_SIZE / 2})`}>
+      <Icon size={ICON_SIZE} color={color} strokeWidth={2.5} />
+    </g>
+  );
 }
 
 /**
@@ -70,7 +35,7 @@ interface CircleNodeProps {
   cx: number;
   cy: number;
   r: number;
-  icon: 'sun' | 'factory' | 'house' | 'shield' | 'battery';
+  icon: keyof typeof NODE_ICONS;
   labelPos?: 'above' | 'below';
 }
 
@@ -84,13 +49,16 @@ export function CircleNode({
 }: CircleNodeProps): React.ReactElement {
   const opacity = node.stale ? 0.35 : 1;
   const iconColor = node.stale ? 'var(--color-muted-foreground)' : `var(--color-${node.color.substring(2)})`;
-  
+  const ariaLabel = `${node.label}: ${node.stale ? 'no data' : node.displayValue}`;
+
   return (
-    <g 
+    <g
       style={{
         opacity,
         transition: 'opacity 0.5s ease'
       }}
+      role="img"
+      aria-label={ariaLabel}
     >
       {/* Node circle with colored border */}
       <circle 
@@ -119,7 +87,7 @@ export function CircleNode({
       
       {/* Icon in the center */}
       <g transform={`translate(${cx}, ${cy})`}>
-        <SvgIcon name={icon} color={iconColor} />
+        <NodeIcon name={icon} color={iconColor} />
       </g>
       
       {/* Value below (or above) the circle */}
@@ -160,13 +128,18 @@ export function CircleBatteryNode({
 }: CircleBatteryNodeProps): React.ReactElement {
   const opacity = node.stale ? 0.35 : 1;
   const soc = node.soc ?? 0;
-  
+  const ariaLabel = node.stale
+    ? 'Battery: no data'
+    : `Battery: ${soc.toFixed(0)}% charge, ${node.displayValue}`;
+
   return (
-    <g 
+    <g
       style={{
         opacity,
         transition: 'opacity 0.5s ease'
       }}
+      role="img"
+      aria-label={ariaLabel}
     >
       {/* Node circle with battery color border */}
       <circle 
