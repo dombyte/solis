@@ -51,8 +51,8 @@ export function ValueDisplay({
   let displayValue: string = '-';
   let displayUnit = '';
   const statusDecoded = value?.statusDecoded;
-  const rawValue = value?.rawValue;
-  
+  const hasValue = value?.value !== undefined && value?.value !== null;
+
   // Use resolved display value if available from template resolution
   if (resolvedRegister?.displayValue !== undefined) {
     const resolvedValue = resolvedRegister.displayValue;
@@ -160,15 +160,15 @@ export function ValueDisplay({
       )}
       <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
         <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
-        {(showStatusIndicator && hasIssues && rawValue !== undefined) || 
-         (showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined) ? (
+        {(showStatusIndicator && hasIssues && hasValue) ||
+         (showStatusIndicator && !hasIssues && hasValue && statusDecoded !== undefined) ? (
           <div className="flex-shrink-0">
-            {showStatusIndicator && hasIssues && rawValue !== undefined && (
+            {showStatusIndicator && hasIssues && hasValue && (
               <Badge variant="destructive" className="text-xs px-1.5 py-0.5 truncate max-w-[80px] sm:max-w-[100px] md:max-w-[120px] lg:max-w-[140px]">
                 {Array.isArray(statusDecoded) ? statusDecoded.length : '!'}
               </Badge>
             )}
-            {showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined && (
+            {showStatusIndicator && !hasIssues && hasValue && statusDecoded !== undefined && (
               <Badge variant="outline" className="text-xs px-1.5 py-0.5">
                 OK
               </Badge>

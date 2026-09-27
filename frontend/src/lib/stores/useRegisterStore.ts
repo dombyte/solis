@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { RegisterMetadata, RegisterValue, SolisStatusDecoded, FaultStatusDecoded, ApiDataObject } from '../../types';
+import type { RegisterMetadata, RegisterValue, SolisStatusDecoded, ApiDataObject, WsValueDTO } from '../../types';
 import { apiDataObjects } from '../config/data';
 import { resolveTemplate, isTemplate, type TemplateContext } from '../utils/template';
 
@@ -19,8 +19,7 @@ interface RegisterStoreState {
   
   // Actions
   initialize: () => Promise<void>;
-  updateValue: (key: string, value: unknown, timestamp?: string) => void;
-  updateValues: (data: Record<string, unknown>, timestamp?: string) => void;
+  applyWsValues: (values: Record<string, WsValueDTO>, ts?: string) => void;
   setConnected: (connected: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -72,7 +71,7 @@ function resolveRegisterMetadata(
     return { ...metadata, displayValue };
   }
   
-  const val = regValue || { value: null, rawValue: undefined, timestamp: undefined, statusDecoded: undefined } as RegisterValue;
+  const val = regValue || { value: null, timestamp: undefined, statusDecoded: undefined } as RegisterValue;
   
   const context: TemplateContext = {
     // From metadata
@@ -97,14 +96,14 @@ function resolveRegisterMetadata(
     
     // From RegisterValue
     value: val.value,
-    rawValue: val.rawValue,
     timestamp: val.timestamp,
     statusDecoded: val.statusDecoded,
-    
-    // Direct API data properties (for template resolution)
-    DecodedValue: val.rawValue !== undefined ? val.rawValue : (typeof val.value === 'number' ? val.value : undefined),
-    RawValue: val.rawValue,
-    StringValue: val.value !== null && val.value !== undefined 
+
+    // Direct API data properties (for template resolution); the backend already sends a
+    // single scaled/rounded value, so DecodedValue and RawValue alias the same number.
+    DecodedValue: typeof val.value === 'number' ? val.value : undefined,
+    RawValue: typeof val.value === 'number' ? val.value : undefined,
+    StringValue: val.value !== null && val.value !== undefined
       ? String(val.value) : '',
   };
   
@@ -122,7 +121,7 @@ function resolveRegisterMetadata(
   } else if (metadata.value) {
     displayValue = metadata.value;
   } else {
-    displayValue = val.value ?? val.rawValue;
+    displayValue = val.value;
   }
   
   return {
@@ -181,121 +180,43 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
     });
   },
 
-  updateValue: (key, value, timestamp) => {
-    const regByKey = get().registerMetadataByKey.get(key);
-    if (regByKey) {
-      const newValues = new Map(get().registerValues);
-      
-      // Handle status_decoded if present in the value object
-      let statusDecoded: SolisStatusDecoded | FaultStatusDecoded | undefined;
-      let displayValue: number | string | null = typeof value === 'number' ? value : typeof value === 'string' ? value : null;
-      let rawValue: number | undefined;
-      
-      if (typeof value === 'object' && value !== null) {
-        const val = value as Record<string, unknown>;
-        // Extract status_decoded first as it takes priority for display
-        if (val.status_decoded !== undefined && val.status_decoded !== null) {
-          statusDecoded = val.status_decoded as SolisStatusDecoded | FaultStatusDecoded;
-          // For status registers, use the decoded status as the display value
-          if (Array.isArray(statusDecoded)) {
-            displayValue = statusDecoded.join(', ');
-          } else if (typeof statusDecoded === 'object') {
-            const statusObj = statusDecoded as { name?: string; description?: string };
-            displayValue = statusObj.name || JSON.stringify(statusDecoded);
-          } else {
-            displayValue = String(statusDecoded);
-          }
-          // For rawValue, try to extract the numeric raw value
-          rawValue = (val.RawValue as number | undefined) ?? (val.DecodedValue as number | undefined);
-        } else {
-          // For numeric registers without status_decoded, prefer DecodedValue then RawValue
-          // This avoids using StringValue which might contain debug info like "Raw: 498"
-          const decodedValue = val.DecodedValue as number | string | undefined;
-          const rawValueTemp = val.RawValue as number | string | undefined;
-          const stringValue = val.StringValue as string | undefined;
-          displayValue = decodedValue ?? rawValueTemp ?? stringValue ?? (value !== null && value !== undefined ? String(value) : null);
-          rawValue = (val.RawValue as number | undefined) ?? (val.DecodedValue as number | undefined);
-        }
-      } else if (typeof value === 'number') {
-        // Simple numeric value
-        rawValue = value;
-        displayValue = value;
+  applyWsValues: (values, ts) => {
+    const metadataByKey = get().registerMetadataByKey;
+    const updates = new Map(get().registerValues);
+    let changed = false;
+
+    Object.entries(values).forEach(([key, dto]) => {
+      const reg = metadataByKey.get(key);
+      if (!reg) return;
+      changed = true;
+
+      const statusDecoded = dto.status_decoded;
+      let displayValue: number | string | null;
+      if (statusDecoded !== undefined && statusDecoded !== null) {
+        displayValue = Array.isArray(statusDecoded)
+          ? statusDecoded.join(', ')
+          : (statusDecoded as SolisStatusDecoded).name ?? JSON.stringify(statusDecoded);
+      } else {
+        displayValue = dto.value;
       }
-      
-      newValues.set(regByKey.id, {
+
+      const timestamp = dto.timestamp ?? ts;
+
+      updates.set(reg.id, {
         key,
-        id: regByKey.id,
+        id: reg.id,
         value: displayValue,
-        rawValue: typeof rawValue === 'number' ? rawValue : undefined,
         timestamp,
-        unit: regByKey.unit,
+        unit: dto.unit ?? reg.unit,
         statusDecoded,
       });
-      set({
-        registerValues: newValues,
-        lastUpdated: timestamp ? new Date(timestamp) : new Date(),
-      });
-    }
-  },
-
-  updateValues: (data, timestamp) => {
-    const updates = new Map(get().registerValues);
-    const metadataByKey = get().registerMetadataByKey;
-    
-    Object.entries(data).forEach(([key, value]) => {
-      const regByKey = metadataByKey.get(key);
-      if (regByKey) {
-        // Handle case where value is an object with DecodedValue (from WebSocket)
-        let actualValue: number | string | null = typeof value === 'number' ? value : typeof value === 'string' ? value : null;
-        let rawValue: number | string | undefined = undefined;
-        let statusDecoded: SolisStatusDecoded | FaultStatusDecoded | undefined;
-        
-        if (typeof value === 'object' && value !== null) {
-          const val = value as Record<string, unknown>;
-          // Extract status_decoded first as it takes priority for display
-          if (val.status_decoded !== undefined && val.status_decoded !== null) {
-            statusDecoded = val.status_decoded as SolisStatusDecoded | FaultStatusDecoded;
-            // For status registers, use the decoded status as the display value
-            if (Array.isArray(statusDecoded)) {
-              actualValue = statusDecoded.join(', ');
-            } else if (typeof statusDecoded === 'object') {
-              const statusObj = statusDecoded as { name?: string; description?: string };
-              actualValue = statusObj.name || JSON.stringify(statusDecoded);
-            } else {
-              actualValue = String(statusDecoded);
-            }
-            // For rawValue, try to extract the numeric raw value
-            rawValue = (val.RawValue as number | string | undefined) ?? (val.DecodedValue as number | string | undefined);
-          } else {
-            // For numeric registers without status_decoded, prefer DecodedValue then RawValue
-            // This avoids using StringValue which might contain debug info like "Raw: 498"
-            const decodedValue = val.DecodedValue as number | string | undefined;
-            const rawValueTemp = val.RawValue as number | string | undefined;
-            const stringValue = val.StringValue as string | undefined;
-            actualValue = decodedValue ?? rawValueTemp ?? stringValue ?? (value !== null && value !== undefined ? String(value) : null);
-            rawValue = (val.RawValue as number | string | undefined) ?? (val.DecodedValue as number | string | undefined);
-          }
-        } else if (typeof value === 'number') {
-          // Simple numeric value
-          actualValue = value;
-          rawValue = value;
-        }
-        
-        updates.set(regByKey.id, {
-          key,
-          id: regByKey.id,
-          value: actualValue,
-          rawValue: typeof rawValue === 'number' ? rawValue : undefined,
-          timestamp,
-          unit: regByKey.unit,
-          statusDecoded,
-        });
-      }
     });
-    
+
+    if (!changed) return;
+
     set({
       registerValues: updates,
-      lastUpdated: timestamp ? new Date(timestamp) : new Date(),
+      lastUpdated: ts ? new Date(ts) : new Date(),
     });
   },
 

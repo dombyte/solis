@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
-import { useWebSocket } from '../lib/hooks/useWebSocket';
+import { useSubscription } from '../lib/hooks/useSubscription';
 import { useMobile } from '../hooks/useMobile';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -14,19 +14,25 @@ import type { RegisterValue, SolisStatusDecoded, FaultStatusDecoded } from '../t
 export function Status(): React.ReactElement {
   const isMobile = useMobile();
 
-  // Use WebSocket connection (initialized at app level)
-  // requestInitialData: true to fetch fresh data when page mounts
-  useWebSocket({ autoConnect: false, requestInitialData: true });
   const isLoading = useRegisterStore(state => state.isLoading);
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
   const registerValues = useRegisterStore(state => state.registerValues);
-  
+
   // Get status register IDs from the system_status group, excluding inverter_temp
   const systemStatusGroup = dashboardGroups.find(g => g.id === 'system_status');
   // Fallback list in case dashboardGroups is not available
   const fallbackStatusIds = ['solis_status', 'operating_status', 'grid_fault_1', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'];
   const statusRegisterIds = systemStatusGroup?.dataIds.filter(id => id !== 'inverter_temp') || fallbackStatusIds;
-  
+
+  // Status page subscribes to all status keys (Plan.md §4.1).
+  const statusKeys = useMemo(
+    () => statusRegisterIds
+      .map(id => registerMetadata.get(id)?.key)
+      .filter((key): key is string => key !== undefined),
+    [statusRegisterIds, registerMetadata]
+  );
+  useSubscription(statusKeys);
+
   // Get register metadata for these IDs and add order from apiDataObjects
   const statusRegisters = statusRegisterIds
     .map(id => {
@@ -127,11 +133,6 @@ export function Status(): React.ReactElement {
     // Use display value
     if (value.value !== null && value.value !== undefined) {
       return String(value.value);
-    }
-
-    // Use raw value
-    if (value.rawValue !== undefined) {
-      return String(value.rawValue);
     }
 
     return '-';

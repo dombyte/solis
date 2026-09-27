@@ -1,5 +1,4 @@
 import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
-import { useWebSocket } from '../lib/hooks/useWebSocket';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useVersionCheck } from '../lib/hooks/useVersionCheck';
 import { useMobile } from '../hooks/useMobile';
@@ -11,8 +10,8 @@ export function Info() {
   // Get version from import.meta.env if available
   const version = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
 
-  // Get WebSocket connection status (initialized at app level)
-  const { isConnected } = useWebSocket({ autoConnect: false, requestInitialData: false });
+  // WebSocket connection is initialized at app level; Info needs no key subscriptions.
+  const isConnected = useRegisterStore(state => state.isConnected);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
 
   // Version check

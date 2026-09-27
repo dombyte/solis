@@ -1,15 +1,17 @@
 import React from 'react';
 import { DataCard } from '../components/dashboard/DataCard';
 import { dashboardGroups } from '../lib/config/groups';
-import { useWebSocket } from '../lib/hooks/useWebSocket';
+import { useSubscription } from '../lib/hooks/useSubscription';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
+import { apiDataObjects } from '../lib/config/data';
 import { useMobile } from '../hooks/useMobile';
 import { SkeletonCard } from '../components/ui/skeleton';
 
+// Dashboard shows every register, so it subscribes to the full key set.
+const ALL_KEYS = apiDataObjects.map(obj => obj.key);
+
 export function Dashboard(): React.ReactElement {
-  // Use WebSocket connection (initialized at app level)
-  // requestInitialData: true to fetch fresh data when page mounts
-  useWebSocket({ autoConnect: false, requestInitialData: true });
+  useSubscription(ALL_KEYS);
   const isLoading = useRegisterStore(state => state.isLoading);
   const isMobile = useMobile();
 

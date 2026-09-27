@@ -49,35 +49,34 @@ export type SolisStatusDecoded = {
 
 export type FaultStatusDecoded = string[];
 
-// WebSocket message types
-interface WebSocketCacheUpdate {
-  type: 'cache_update' | 'connected' | 'request_initial_data';
-  data?: Record<string, {
-    Key: string;
-    Name: string;
-    RawValue: number;
-    DecodedValue: number;
-    StringValue: string;
-    Unit: string;
-    Timestamp: string;
-    status_decoded?: SolisStatusDecoded | FaultStatusDecoded;
-  }>;
+// WebSocket subscription protocol (v3): subscribe/unsubscribe/ping -> snapshot/update/error.
+// One key's value on the wire, rounded to 2 decimals server-side.
+export interface WsValueDTO {
+  value: number;
   timestamp?: string;
-}
-
-export type WebSocketMessage = WebSocketCacheUpdate;
-
-// Raw data object from API or WebSocket
-export interface RawRegisterData {
-  Key: string;
-  Name: string;
-  RawValue: number;
-  DecodedValue: number;
-  StringValue: string;
-  Unit: string;
-  Timestamp: string;
+  unit?: string;
   status_decoded?: SolisStatusDecoded | FaultStatusDecoded;
 }
+
+interface WsSnapshotMessage {
+  type: 'snapshot';
+  values: Record<string, WsValueDTO>;
+}
+
+interface WsUpdateMessage {
+  type: 'update';
+  ts: string;
+  values: Record<string, WsValueDTO>;
+}
+
+interface WsErrorMessage {
+  type: 'error';
+  code: string;
+  message: string;
+  keys?: string[];
+}
+
+export type WebSocketMessage = WsSnapshotMessage | WsUpdateMessage | WsErrorMessage;
 
 // Register metadata and values for store
 export interface RegisterMetadata {
@@ -99,7 +98,6 @@ export interface RegisterValue {
   key: string;
   id: string;
   value: number | string | null;
-  rawValue?: number;
   timestamp?: string;
   unit?: string;
   statusDecoded?: SolisStatusDecoded | FaultStatusDecoded;

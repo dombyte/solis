@@ -18,8 +18,10 @@ interface StatusDisplayProps {
 function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterValue | undefined): boolean {
   if (!register || !value) return false;
 
+  const numericValue = typeof value.value === 'number' ? value.value : undefined;
+
   // Numeric values in status groups - never alert
-  if (value.rawValue !== undefined && register.format) {
+  if (numericValue !== undefined && register.format) {
     return false;
   }
 
@@ -64,14 +66,14 @@ function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterVa
     }
   }
   
-  // For raw values without decoded status (like fault registers showing 0)
-  if (value.rawValue !== undefined && !value.statusDecoded) {
-    // If raw value is 0, it means no fault - don't alert
-    if (value.rawValue === 0) {
+  // For numeric values without decoded status (like fault registers showing 0)
+  if (numericValue !== undefined && !value.statusDecoded) {
+    // If the value is 0, it means no fault - don't alert
+    if (numericValue === 0) {
       return false;
     }
-    // If it's a fault register and raw value is non-zero, alert
-    if (register.category === 'status' && value.rawValue !== 0) {
+    // If it's a fault register and the value is non-zero, alert
+    if (register.category === 'status' && numericValue !== 0) {
       return true;
     }
   }
@@ -97,10 +99,10 @@ export function StatusDisplay({
   }
 
   const statusDecoded = value?.statusDecoded;
-  const rawValue = value?.rawValue;
   const displayValue = value?.value;
+  const numericValue = typeof displayValue === 'number' ? displayValue : undefined;
 
-  if (!statusDecoded && rawValue === undefined && displayValue === null) {
+  if (!statusDecoded && numericValue === undefined && (displayValue === null || displayValue === undefined)) {
     return <span className={className}>-</span>;
   }
 
@@ -123,39 +125,35 @@ export function StatusDisplay({
     } else {
       statusText = String(statusDecoded);
     }
-  } else if (rawValue !== undefined) {
-    // For numeric values in status groups, use the formatter if available
+  } else if (numericValue !== undefined) {
+    // For numeric values in status groups, use the formatter if available. The backend
+    // already sends a scaled, rounded value, so no client-side scale multiplication.
     if (register.format) {
-      // Apply scale factor if present
-      const scale = register.scale ?? 1;
-      const scaledValue = rawValue * scale;
-      // Use the displayValue if it's a number, otherwise use scaled rawValue
-      const numericValue = typeof displayValue === 'number' ? displayValue : scaledValue;
       const precision = register.precision ?? (register.unit === '%' ? 1 : 2);
-      
+
       // Apply the appropriate formatter based on format type
       switch (register.format) {
         case 'percentage':
-          statusText = formatPercentage(numericValue ?? null, precision);
+          statusText = formatPercentage(numericValue, precision);
           break;
         case 'power':
-          statusText = formatPower(numericValue ?? null, precision);
+          statusText = formatPower(numericValue, precision);
           break;
         case 'energy':
-          statusText = formatEnergy(numericValue ?? null, precision);
+          statusText = formatEnergy(numericValue, precision);
           break;
         case 'voltage':
-          statusText = formatVoltage(numericValue ?? null, precision);
+          statusText = formatVoltage(numericValue, precision);
           break;
         case 'current':
-          statusText = formatCurrent(numericValue ?? null, precision);
+          statusText = formatCurrent(numericValue, precision);
           break;
         default:
-          statusText = formatValue(numericValue ?? null, register.unit || '', precision);
+          statusText = formatValue(numericValue, register.unit || '', precision);
       }
     } else {
-      // For fault registers without format, just show the raw value (don't show "Raw: 0")
-      statusText = String(rawValue);
+      // For fault registers without format, just show the value (don't show "Raw: 0")
+      statusText = String(numericValue);
     }
   } else if (displayValue !== null && displayValue !== undefined) {
     statusText = String(displayValue);
