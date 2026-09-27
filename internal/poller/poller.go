@@ -175,6 +175,7 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 			p.Set(health.Recovering, "seeding failed: "+err.Error())
 			return
 		}
+		p.d.Log.Debug().Msg("seeding complete")
 	}
 	reader, ok := p.d.Source.Load()
 	if !ok || !reader.IsConnected() {
@@ -187,12 +188,14 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 		p.Set(health.Recovering, "poll failed: "+err.Error())
 		return
 	}
+	p.d.Log.Debug().Int("values", len(values)).Msg("poll cycle read complete")
 	p.d.Decoder.Derive(values, start)
 	if err := p.persist(ctx, values, start); err != nil {
 		p.d.Log.Error().Err(err).Str("tag", "storage_failure").Msg("storing poll failed")
 		p.Set(health.Recovering, "storage: "+err.Error())
 		return
 	}
+	p.d.Log.Debug().Dur("duration", p.d.Clock.Now().Sub(start)).Msg("poll cycle complete")
 	p.Set(health.Healthy, "")
 }
 

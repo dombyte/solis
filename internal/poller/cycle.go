@@ -18,11 +18,13 @@ func (p *Poller) readAll(ctx context.Context, r Reader, at time.Time) (
 	defer cancel()
 	values := make(map[string]*solis.Value)
 	blocks := p.d.Registry.Blocks()
+	p.d.Log.Debug().Int("blocks", len(blocks)).Dur("timeout", p.d.Settings.PollTimeout).Msg("read all blocks starting")
 	for i, b := range blocks {
 		raw, err := p.readBlock(pctx, r, b)
 		if err != nil {
 			return nil, fmt.Errorf("block %d@%d: %w", i+1, b.Start, err)
 		}
+		p.d.Log.Debug().Int("block", i+1).Uint16("addr", b.Start).Uint16("count", b.Count).Msg("block read")
 		for k, v := range p.d.Decoder.DecodeBlock(b, raw, at) {
 			values[k] = v
 		}
