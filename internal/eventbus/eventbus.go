@@ -23,6 +23,17 @@ const (
 	PeriodClosed
 )
 
+// String returns the kind name for logs.
+func (k Kind) String() string {
+	switch k {
+	case ValuesUpdated:
+		return "ValuesUpdated"
+	case PeriodClosed:
+		return "PeriodClosed"
+	}
+	return "unknown"
+}
+
 // Cache write domains carried in ValuesUpdated events.
 const (
 	// DomainPoller is the poller's key domain (addressed + derived registers).

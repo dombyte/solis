@@ -133,3 +133,9 @@ func TestClose(t *testing.T) {
 	_, _, err = b.Subscribe("y", 1, Coalesce)
 	assert.ErrorIs(t, err, ErrClosed)
 }
+
+func TestKindString(t *testing.T) {
+	assert.Equal(t, "ValuesUpdated", ValuesUpdated.String())
+	assert.Equal(t, "PeriodClosed", PeriodClosed.String())
+	assert.Equal(t, "unknown", Kind(99).String())
+}

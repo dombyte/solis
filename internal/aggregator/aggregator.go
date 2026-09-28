@@ -147,14 +147,8 @@ func (a *Aggregator) loop(ctx context.Context, events <-chan eventbus.Event) {
 		case <-ctx.Done():
 			return
 		case e := <-events:
-			kind := "unknown"
-			switch e.Kind {
-			case eventbus.ValuesUpdated:
-				kind = "ValuesUpdated"
-			case eventbus.PeriodClosed:
-				kind = "PeriodClosed"
-			}
-			a.d.Log.Debug().Str("kind", kind).Str("domain", e.Domain).Int("keys", len(e.Keys)).Msg("event received")
+			a.d.Log.Debug().Stringer("kind", e.Kind).Str("domain", e.Domain).
+				Int("keys", len(e.Keys)).Msg("event received")
 			armed = a.onEvent(ctx, e, debounce, armed)
 		case <-debounce.C():
 			armed = false

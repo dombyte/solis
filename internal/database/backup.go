@@ -238,14 +238,8 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 		return "", fmt.Errorf("database file does not exist: %s", dbPath)
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Ensure backups subdirectory exists
-	backupsDir := filepath.Join(dir, "backups")
+	// Ensure the backups subdirectory (and its parent) exists
+	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
 	if err := os.MkdirAll(backupsDir, 0750); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
@@ -266,7 +260,8 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).Msg("backup created successfully")
+	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).
+		Msg("backup created successfully")
 
 	return backupPath, nil
 }

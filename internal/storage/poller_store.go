@@ -15,7 +15,8 @@ const writerPoller = "poller"
 // day closes. Rows violating the write domain or a closed day are skipped and reported
 // in the returned (joined) error; the rest of the poll is still committed.
 func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
-	s.log.Debug().Int("daily", len(w.Daily)).Int("status", len(w.Status)).Int("closes", len(w.Close)).Msg("write poll starting")
+	s.log.Debug().Int("daily", len(w.Daily)).Int("status", len(w.Status)).
+		Int("closes", len(w.Close)).Msg("write poll starting")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.meta.clone()

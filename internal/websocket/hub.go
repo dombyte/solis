@@ -192,14 +192,8 @@ func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 		case op := <-h.ops:
 			op(ls)
 		case e := <-events:
-			kind := "unknown"
-			switch e.Kind {
-			case eventbus.ValuesUpdated:
-				kind = "ValuesUpdated"
-			case eventbus.PeriodClosed:
-				kind = "PeriodClosed"
-			}
-			h.d.Log.Debug().Str("kind", kind).Str("domain", e.Domain).Int("keys", len(e.Keys)).Msg("websocket event received")
+			h.d.Log.Debug().Stringer("kind", e.Kind).Str("domain", e.Domain).
+				Int("keys", len(e.Keys)).Msg("websocket event received")
 			ls.onEvent(e)
 			h.events.Add(1)
 		case <-ls.flush.C():

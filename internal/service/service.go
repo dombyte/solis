@@ -141,34 +141,38 @@ func (s *ReadService) requireStore(key string, want solis.Store) error {
 	return nil
 }
 
+// historyFunc reads the rows of key between start and end from one history table.
+type historyFunc[T any] func(ctx context.Context, key string, start, end time.Time) (T, error)
+
+// history wraps get with the register-kind check for want and debug logging.
+func history[T any](s *ReadService, want solis.Store, get historyFunc[T]) historyFunc[T] {
+	return func(ctx context.Context, key string, start, end time.Time) (T, error) {
+		if err := s.requireStore(key, want); err != nil {
+			var zero T
+			return zero, err
+		}
+		s.d.Log.Debug().Str("key", key).Stringer("store", want).Time("start", start).
+			Time("end", end).Msg("getting history")
+		return get(ctx, key, start, end)
+	}
+}
+
 // DailyHistory returns daily rows of a daily key.
 func (s *ReadService) DailyHistory(ctx context.Context, key string, start, end time.Time) (
 	[]*storage.DailyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreDaily); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting daily history")
-	return s.d.Store.GetDailyHistory(ctx, key, start, end)
+	return history(s, solis.StoreDaily, s.d.Store.GetDailyHistory)(ctx, key, start, end)
 }
 
 // MonthlyHistory returns monthly rows of a monthly key.
 func (s *ReadService) MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
 	[]*storage.MonthlyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreMonthly); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting monthly history")
-	return s.d.Store.GetMonthlyHistory(ctx, key, start, end)
+	return history(s, solis.StoreMonthly, s.d.Store.GetMonthlyHistory)(ctx, key, start, end)
 }
 
 // YearlyHistory returns yearly rows of a yearly key.
 func (s *ReadService) YearlyHistory(ctx context.Context, key string, start, end time.Time) (
 	[]*storage.YearlyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreYearly); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting yearly history")
-	return s.d.Store.GetYearlyHistory(ctx, key, start, end)
+	return history(s, solis.StoreYearly, s.d.Store.GetYearlyHistory)(ctx, key, start, end)
 }
 
 // Total returns the stored lifetime value of a total key.

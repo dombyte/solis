@@ -47,40 +47,46 @@ func sumDaily(ctx context.Context, q queryer, key, from, to string) (float64, er
 // open periods, then freezes, then the baseline fold. Rows targeting closed periods or
 // keys outside the aggregator domain are skipped and reported in the joined error.
 func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
-	s.log.Debug().Int("rows", len(w.Rows)).Int("freezes", len(w.Freezes)).Int("folds", len(w.Folds)).Msg("write computed starting")
+	s.log.Debug().Int("rows", len(w.Rows)).Int("freezes", len(w.Freezes)).
+		Int("folds", len(w.Folds)).Msg("write computed starting")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.meta.clone()
 	var rejected []error
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		for _, r := range w.Rows {
-			if err := s.writeComputedRow(tx, next, r, w.At); err != nil {
-				if !IsRejection(err) {
-					return err
-				}
-				rejected = append(rejected, err)
-			}
-		}
-		if err := applyFreezes(tx, &next, w.Freezes); err != nil {
-			return err
-		}
-		for _, f := range w.Folds {
-			if err := applyFold(tx, &next, f); err != nil {
-				return err
-			}
-		}
-		return nil
+		var err error
+		rejected, err = s.applyComputed(tx, &next, w)
+		return err
 	})
 	if err != nil {
 		return err
 	}
 	s.meta = next
-	if len(rejected) > 0 {
-		s.log.Debug().Int("rejected", len(rejected)).Msg("write computed completed with rejections")
-	} else {
-		s.log.Debug().Msg("write computed completed")
-	}
+	s.log.Debug().Int("rejected", len(rejected)).Msg("write computed completed")
 	return errors.Join(rejected...)
+}
+
+// applyComputed writes rows, freezes and folds inside tx and returns the rejected rows.
+func (s *Storage) applyComputed(tx *sql.Tx, next *metaState, w ComputedWrite) (
+	[]error, error) {
+	var rejected []error
+	for _, r := range w.Rows {
+		if err := s.writeComputedRow(tx, *next, r, w.At); err != nil {
+			if !IsRejection(err) {
+				return nil, err
+			}
+			rejected = append(rejected, err)
+		}
+	}
+	if err := applyFreezes(tx, next, w.Freezes); err != nil {
+		return nil, err
+	}
+	for _, f := range w.Folds {
+		if err := applyFold(tx, next, f); err != nil {
+			return nil, err
+		}
+	}
+	return rejected, nil
 }
 
 func (s *Storage) writeComputedRow(tx *sql.Tx, m metaState, r PeriodRow, at time.Time) error {
