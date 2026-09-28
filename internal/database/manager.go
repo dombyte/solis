@@ -39,7 +39,6 @@ func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.C
 	registry.Register(migrations.GetV1Migration())
 	registry.Register(migrations.GetV2Migration())
 	registry.Register(migrations.GetV3Migration())
-	registry.Register(migrations.GetV4Migration())
 	return &Manager{
 		cfg: cfg, backup: backup, registry: registry,
 		executor: NewMigrationExecutor(registry, log), clock: clock, log: log,

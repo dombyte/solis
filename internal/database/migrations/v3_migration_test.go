@@ -33,15 +33,15 @@ func TestNormalizeStatusTimestamp(t *testing.T) {
 	}
 }
 
-func TestV4Migration_Up(t *testing.T) {
+func TestV3Migration_Up(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
-	m := GetV4Migration()
+	m := GetV3Migration()
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	require.NoError(t, m.Up(tx), "no error_data table is a no-op")
+	require.NoError(t, m.Up(tx), "no error_data table only creates meta")
 	require.NoError(t, tx.Commit())
 
 	_, err = db.Exec(`CREATE TABLE error_data (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,5 +69,4 @@ func TestV4Migration_Up(t *testing.T) {
 	}
 	require.NoError(t, rows.Err())
 	assert.Equal(t, []string{"2026-09-27T18:58:18.612Z", "garbage"}, got)
-	assert.ErrorIs(t, m.Down(nil), ErrNotImplemented)
 }
