@@ -4,8 +4,6 @@ import React from 'react';
  * Animated flow edge component
  * Uses CSS keyframes instead of requestAnimationFrame for better performance
  * and to respect prefers-reduced-motion
- * 
- * Based on prototype FlowEdge component
  */
 interface FlowEdgeProps {
   d: string;          // SVG path definition
@@ -15,7 +13,7 @@ interface FlowEdgeProps {
   className?: string;
 }
 
-// Animation duration in seconds (matches prototype: ~42px/s)
+// Animation duration in seconds (~42px/s)
 // 17px dash pattern / 42px/s = ~0.4s for one cycle
 const ANIMATION_DURATION = '0.4s';
 

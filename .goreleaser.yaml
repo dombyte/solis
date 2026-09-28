@@ -4,7 +4,6 @@ project_name: solis
 before:
   hooks:
     - go mod tidy
-    - go fmt ./...
 
 builds:
   - id: solis-multi-arch

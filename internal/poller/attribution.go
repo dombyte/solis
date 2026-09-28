@@ -8,7 +8,7 @@ import (
 )
 
 // ResetThreshold separates a counter reset from a glitch dip: inside the rollover window a
-// value below 10 % of the previous one confirms the reset (spec §7.1, initial constant).
+// value below 10 % of the previous one confirms the reset (initial constant).
 const ResetThreshold = 0.10
 
 // Decision is the outcome of attributing one daily value.
@@ -83,7 +83,7 @@ func (d *DayAttributor) SeedDays(now time.Time) []string {
 }
 
 // Seed initialises every key from stored rows (day -> key -> value) and the persisted
-// closed-day watermarks, so a restart inside the window compares correctly (spec §7.2).
+// closed-day watermarks, so a restart inside the window compares correctly.
 // It returns the closes missed while the app was down: per key, the day before the
 // expected open day when the key's watermark is older.
 func (d *DayAttributor) Seed(now time.Time, rows map[string]map[string]float64,

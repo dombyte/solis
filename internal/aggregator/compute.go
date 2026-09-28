@@ -19,6 +19,7 @@ type runState struct {
 	current aggregation.Values
 	base    aggregation.Values
 	baseYr  string
+	offsets map[string]float64 // cutover offsets, storage.OffsetKey -> value
 }
 
 // execute performs one run at the captured instant now.
@@ -37,7 +38,7 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	}
 	rs := &runState{
 		write: storage.ComputedWrite{At: now}, current: aggregation.Values{},
-		base: st.Baseline, baseYr: st.BaselineYear,
+		base: st.Baseline, baseYr: st.BaselineYear, offsets: st.Offsets,
 	}
 	steps := []func(context.Context, period.Period, aggregation.Plan, *runState) error{
 		a.netDays, a.months, a.years, a.totals,
@@ -121,7 +122,7 @@ func (a *Aggregator) months(ctx context.Context, p period.Period, plan aggregati
 	rs *runState,
 ) error {
 	for _, j := range plan.Months {
-		vals, _, err := a.levelValues(ctx, period.Monthly, j)
+		vals, _, err := a.levelValues(ctx, period.Monthly, j, rs.offsets)
 		if err != nil {
 			return err
 		}
@@ -135,7 +136,7 @@ func (a *Aggregator) years(ctx context.Context, p period.Period, plan aggregatio
 	rs *runState,
 ) error {
 	for _, j := range plan.Years {
-		vals, sums, err := a.levelValues(ctx, period.Yearly, j)
+		vals, sums, err := a.levelValues(ctx, period.Yearly, j, rs.offsets)
 		if err != nil {
 			return err
 		}
@@ -149,16 +150,25 @@ func (a *Aggregator) years(ctx context.Context, p period.Period, plan aggregatio
 	return nil
 }
 
-// levelValues computes a month or year: edge sums plus net values from the same sums.
-func (a *Aggregator) levelValues(ctx context.Context, l period.Level, j aggregation.Job) (
-	aggregation.Values, aggregation.Values, error,
-) {
+// levelValues computes a month or year: edge sums (plus the cutover offsets of this
+// period, if any) and net values from them. The raw sums are returned for the baseline
+// fold, which never includes offsets (totals are app-lifetime).
+func (a *Aggregator) levelValues(ctx context.Context, l period.Level, j aggregation.Job,
+	offsets map[string]float64,
+) (aggregation.Values, aggregation.Values, error) {
 	edges := a.d.Registry.Edges(l)
 	sums, err := a.sums(ctx, aggregation.SourceKeys(edges), j.From, j.To)
 	if err != nil {
 		return nil, nil, err
 	}
 	vals := aggregation.ApplyEdges(edges, sums)
+	periodOffsets := aggregation.Values{}
+	for k := range vals {
+		if off, ok := offsets[storage.OffsetKey(l, j.Key, k)]; ok {
+			periodOffsets[k] = off
+		}
+	}
+	vals = aggregation.AddOffsets(vals, periodOffsets)
 	return aggregation.Merge(vals, aggregation.ApplyNet(a.d.Registry.NetPairs(l), vals)), sums,
 		nil
 }

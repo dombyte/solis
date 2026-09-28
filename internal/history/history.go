@@ -9,7 +9,7 @@ import (
 )
 
 // Values are stored at full precision; these JSON encoders round to two decimals for
-// clients (spec §5).
+// clients.
 
 // ErrorDataPoint represents a single error/fault data point.
 type ErrorDataPoint struct {

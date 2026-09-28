@@ -193,6 +193,45 @@ func TestEnsureCutover_FreezesPreCutoverHistory(t *testing.T) {
 	assert.Equal(t, st, st2)
 }
 
+// The cutover month and year keep their inverter-reported value (review AGG-M2): the
+// difference to the daily sum up to the cutover day is recorded as an offset; keys at or
+// below their daily sum get none. A backfill of the period clears the offset.
+func TestEnsureCutover_RecordsOffsetsForCutoverMonthAndYear(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-09-27"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-09-01", Value: 100},
+		{Key: "pv_energy_daily", Day: "2026-09-27", Value: 20},
+		{Key: "grid_export_daily", Day: "2026-09-02", Value: 50},
+	}}))
+	insertRows(t, s,
+		`INSERT INTO monthly_values (month, register_key, value, raw_value) VALUES
+			('2026-09', 'pv_energy_monthly', 400, 4000),
+			('2026-09', 'grid_export_monthly', 30, 300)`,
+		`INSERT INTO yearly_values (year, register_key, value, raw_value) VALUES
+			('2026', 'pv_energy_yearly', 5000, 50000)`)
+	_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-09-27")))
+	require.NoError(t, err)
+	st, err := s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{
+		OffsetKey(period.Monthly, "2026-09", "pv_energy_monthly"): 280,  // 400 - 120
+		OffsetKey(period.Yearly, "2026", "pv_energy_yearly"):      4880, // 5000 - 120
+	}, st.Offsets, "grid_export is below its daily sum: no offset")
+
+	require.NoError(t, s.Backfill(ctx, func(tx BackfillTx) error {
+		return tx.PutPeriod(period.Monthly, "pv_energy_monthly", "2026-09", 120)
+	}))
+	st, err = s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{
+		OffsetKey(period.Yearly, "2026", "pv_energy_yearly"): 4880,
+	}, st.Offsets, "backfill override clears the month's offset")
+	require.NoError(t, s.loadMeta(ctx))
+	st2, err := s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, st.Offsets, st2.Offsets, "persisted")
+}
+
 func TestSumDaily_ExplicitBounds(t *testing.T) {
 	s, _, _ := newStore(t, day("2026-08-05"))
 	var rows []DailyRow

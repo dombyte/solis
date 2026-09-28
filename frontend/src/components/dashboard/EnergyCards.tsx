@@ -13,7 +13,7 @@ interface EnergyCardProps {
   className?: string;
 }
 
-// Mobile-collapsible energy card (spec §14.3): mobile shows the first dataId
+// Mobile-collapsible energy card: mobile shows the first dataId
 // (always PV Energy, per groups.ts ordering) by default, the rest expand on tap.
 // Desktop is unaffected and always shows every dataId, same as DataCard.
 export function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement | null {

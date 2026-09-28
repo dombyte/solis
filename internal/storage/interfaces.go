@@ -13,6 +13,8 @@ import (
 type KeyLookup interface {
 	ByKey(key string) (solis.Register, bool)
 	DailyKeys() []string
+	// Edges lists the daily -> computed mappings of a level (cutover offsets).
+	Edges(l period.Level) []solis.Edge
 }
 
 // PollerStore is the poller's write domain: non-net daily rows (max of the open day),
@@ -157,4 +159,13 @@ type CloseState struct {
 	BaselineYear string
 	// Baseline maps total key -> baseline value.
 	Baseline map[string]float64
+	// Offsets are the cutover offsets, keyed by OffsetKey(level, period, key): how far the
+	// inverter-reported value of the cutover month/year was ahead of the daily rows at
+	// cutover. The aggregator adds them so those periods keep the inverter's value.
+	Offsets map[string]float64
+}
+
+// OffsetKey identifies the cutover offset of one computed key in one period.
+func OffsetKey(l period.Level, p, key string) string {
+	return l.String() + ":" + p + ":" + key
 }

@@ -23,7 +23,7 @@ type Line struct {
 	Unit   string
 }
 
-// String renders the spec §12.1 format, e.g.
+// String renders one report line, e.g.
 // "monthly  pv_energy_monthly        2026-08   412.30 kWh -> 409.87 kWh".
 func (l Line) String() string {
 	old := "     n/a"

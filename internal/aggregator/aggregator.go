@@ -20,7 +20,7 @@ import (
 	"github.com/dombyte/solis/internal/util"
 )
 
-// Cadence factors of the poll interval (spec §6; constants, not config).
+// Cadence factors of the poll interval (constants, not config).
 const (
 	DebounceFactor  = 4
 	HeartbeatFactor = 5
@@ -204,7 +204,7 @@ func (a *Aggregator) untilHeartbeat() time.Duration {
 
 // run performs one aggregation run; errors are reported as Recovering, never fatal.
 func (a *Aggregator) run(ctx context.Context) {
-	now := a.d.Clock.Now() // captured once per run (spec §6)
+	now := a.d.Clock.Now() // captured once per run
 	a.Beat()
 	rctx, cancel := a.runContext(ctx)
 	defer cancel()

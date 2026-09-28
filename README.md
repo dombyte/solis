@@ -277,27 +277,29 @@ refuses `--years N > 0` instead of overwriting history with partial sums.
 
 ### Docker
 
+Templates live in [`example/`](example/):
+
+| File | Use |
+|---|---|
+| `example/docker-compose.yaml` | Modbus TCP (data logger or RS485-to-TCP gateway) |
+| `example/docker-compose.rtu.yaml` | Serial RS485 adapter (Modbus RTU, `devices` + `group_add`) |
+| `example/config.yaml` | Commented configuration with all settings |
+
 ```bash
-docker-compose up -d
+cp example/docker-compose.yaml docker-compose.yaml
+cp example/config.yaml config.yaml          # set modbus.address
+mkdir -p data && sudo chown -R 65532:65532 data
+docker compose up -d
 
-# Development
-docker-compose -f docker-compose.dev.yaml up --build
+# Development build from source
+docker compose -f docker-compose.dev.yaml up --build
 ```
 
-```yaml
-services:
-  app:
-    image: ghcr.io/dombyte/solis:latest
-    environment:
-      - TZ=Europe/Berlin
-    volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml:ro
-    ports:
-      - "8080:8080"
-    restart: unless-stopped   # required: the app exits 1 when self-healing fails
-    stop_grace_period: 35s    # the app bounds its own shutdown to 30 s
-```
+- **Restart policy required:** when self-healing fails the app exits with code 1 and relies
+  on `restart: unless-stopped` (or systemd `Restart=on-failure`) to start again.
+- **Non-root:** the image runs as uid/gid `65532`. **Upgrading an existing install:** the
+  container can no longer write a root-owned `./data`; run
+  `sudo chown -R 65532:65532 data` once before starting the new image.
 
 ### Local
 

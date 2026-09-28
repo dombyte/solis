@@ -18,7 +18,7 @@ type energyKind struct {
 }
 
 // energyKinds lists the eight polled daily series; every one gets computed
-// monthly, yearly and total registers (spec §4).
+// monthly, yearly and total registers.
 func energyKinds() []energyKind {
 	const computed = " (Computed)"
 	return []energyKind{
@@ -134,7 +134,7 @@ const (
 	KeyBatteryPowerSigned = "battery_power_signed"
 )
 
-// liveRegisters are polled, cache-only values for the flow diagram (spec §4). grid_power
+// liveRegisters are polled, cache-only values for the flow diagram. grid_power
 // uses the alternate address 33130 which falls inside the fault/BMS block.
 func liveRegisters() []Register {
 	live := func(key, name string, addr uint16, dt DataType, unit string) Register {

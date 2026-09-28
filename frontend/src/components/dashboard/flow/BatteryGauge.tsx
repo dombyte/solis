@@ -2,7 +2,6 @@ import React from 'react';
 
 /**
  * Segmented battery icon with 5 x 20% segments
- * Based on prototype BatterySegments component
  */
 interface BatteryGaugeProps {
   soc: number;           // State of charge (0-100)

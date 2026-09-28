@@ -20,6 +20,7 @@ const (
 	metaBaseline       = "baseline:" // + total key
 	metaBaselineYear   = "baseline_year"
 	metaPurgedBefore   = "purged_before" // earliest day retention cleanup kept
+	metaOffset         = "offset:"       // + OffsetKey(level, period, key)
 	floatBits          = 64
 )
 
@@ -30,6 +31,7 @@ type metaState struct {
 	frozen       map[period.Level]string // Daily = net daily
 	baselineYear string
 	baseline     map[string]float64
+	offsets      map[string]float64 // OffsetKey -> cutover offset
 	purgedBefore string
 }
 
@@ -38,6 +40,7 @@ func newMetaState() metaState {
 		closedDaily: make(map[string]string),
 		frozen:      make(map[period.Level]string),
 		baseline:    make(map[string]float64),
+		offsets:     make(map[string]float64),
 	}
 }
 
@@ -46,6 +49,7 @@ func (m metaState) clone() metaState {
 	c.closedDaily = maps.Clone(m.closedDaily)
 	c.frozen = maps.Clone(m.frozen)
 	c.baseline = maps.Clone(m.baseline)
+	c.offsets = maps.Clone(m.offsets)
 	return c
 }
 
@@ -115,15 +119,19 @@ func (m *metaState) applyPrefixed(k, v string) error {
 		m.closedDaily[day] = v
 		return nil
 	}
+	target := m.baseline
 	key, ok := strings.CutPrefix(k, metaBaseline)
 	if !ok {
-		return nil
+		if key, ok = strings.CutPrefix(k, metaOffset); !ok {
+			return nil
+		}
+		target = m.offsets
 	}
 	f, err := strconv.ParseFloat(v, floatBits)
 	if err != nil {
 		return fmt.Errorf("storage: meta %s: %w", k, err)
 	}
-	m.baseline[key] = f
+	target[key] = f
 	return nil
 }
 
@@ -148,7 +156,7 @@ func advance(tx *txn, k, cur, v string) (string, error) {
 	return v, putMeta(tx, k, v)
 }
 
-// EnsureCutover records the v3 cutover on first start (spec §11) and initialises the
+// EnsureCutover records the v3 cutover on first start and initialises the
 // watermarks so pre-cutover monthly/yearly rows stay frozen as authoritative history.
 // It returns the cutover day and whether it was created now.
 func (s *Storage) EnsureCutover(ctx context.Context, p period.Period) (string, bool, error) {
@@ -201,7 +209,74 @@ func (s *Storage) writeCutover(tx *txn, m *metaState, p period.Period) error {
 			return err
 		}
 	}
+	return s.finishCutover(tx, m, p, closedDay, prevYear)
+}
+
+// finishCutover records the cutover offsets and the per-key day marks.
+func (s *Storage) finishCutover(tx *txn, m *metaState, p period.Period, closedDay,
+	prevYear string,
+) error {
+	if err := s.writeCutoverOffsets(tx, m, p); err != nil {
+		return err
+	}
 	return s.initDayMarks(tx, m, closedDay, prevYear)
+}
+
+// writeCutoverOffsets keeps the inverter-reported rows of the cutover month and year
+// (review AGG-M2): the months and years before are frozen, but these two stay open and
+// would otherwise be replaced by daily sums that miss whatever the daily rows lack. For
+// every computed key whose stored value is ahead of its daily sum up to today, the
+// difference is recorded; the aggregator adds it on top of the growing daily sum, so the
+// period continues from the inverter's value. `solis backfill` overrides it (clears the
+// offset and writes the pure daily sum).
+func (s *Storage) writeCutoverOffsets(tx *txn, m *metaState, p period.Period) error {
+	spans := []offsetSpan{
+		{level: period.Monthly, key: p.Month, from: p.Month + "-01", today: p.Day},
+		{level: period.Yearly, key: p.Year, from: p.Year + "-01-01", today: p.Day},
+	}
+	for _, sp := range spans {
+		if err := s.periodOffsets(tx, m, sp); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// offsetSpan is one cutover period and the daily rows summed for it (from..today).
+type offsetSpan struct {
+	level            period.Level
+	key, from, today string
+}
+
+// periodOffsets records the offset of every computed key of one cutover period.
+func (s *Storage) periodOffsets(tx *txn, m *metaState, sp offsetSpan) error {
+	l, key, from, today := sp.level, sp.key, sp.from, sp.today
+	for _, e := range s.keys.Edges(l) {
+		stored, ok, err := periodValue(tx.ctx, tx, l, e.Target, key)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		sum, err := sumDaily(tx.ctx, tx, e.Source, from, today)
+		if err != nil {
+			return err
+		}
+		if err := putOffset(tx, m, OffsetKey(l, key, e.Target), stored-sum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// putOffset records a positive offset (a value at or below the daily sum needs none).
+func putOffset(tx *txn, m *metaState, key string, off float64) error {
+	if off <= 0 {
+		return nil
+	}
+	m.offsets[key] = off
+	return putMeta(tx, metaOffset+key, formatFloat(off))
 }
 
 func (s *Storage) initDayMarks(tx *txn, m *metaState, closedDay, prevYear string) error {
@@ -231,6 +306,7 @@ func (s *Storage) CloseState(_ context.Context) (CloseState, error) {
 		ClosedThrough: s.closedThrough(),
 		BaselineYear:  s.meta.baselineYear,
 		Baseline:      maps.Clone(s.meta.baseline),
+		Offsets:       maps.Clone(s.meta.offsets),
 	}, nil
 }
 

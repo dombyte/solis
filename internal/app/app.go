@@ -111,11 +111,25 @@ func (a *App) build(ctx context.Context, root zerolog.Logger) error {
 	return nil
 }
 
+// acquireLock takes the server's shared lock next to the database, with a hint that
+// tells a running maintenance job apart from an unwritable data directory.
+func acquireLock(dbPath string) (*maintenance.Lock, error) {
+	lock, err := maintenance.AcquireShared(dbPath)
+	if errors.Is(err, maintenance.ErrLocked) {
+		return nil, fmt.Errorf("app: %w (is a maintenance job running?)", err)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("app: %w (is the data directory writable by this user? "+
+			"the image runs as uid 65532)", err)
+	}
+	return lock, nil
+}
+
 func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 	a.log.Debug().Str("path", a.cfg.Storage.Path).Msg("building storage")
-	lock, err := maintenance.AcquireShared(a.cfg.Storage.Path)
+	lock, err := acquireLock(a.cfg.Storage.Path)
 	if err != nil {
-		return fmt.Errorf("app: %w (is a maintenance job running?)", err)
+		return err
 	}
 	a.lock = lock
 	if a.reg, err = solis.NewRegistry(); err != nil {

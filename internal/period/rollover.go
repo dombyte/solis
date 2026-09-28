@@ -7,7 +7,7 @@ import (
 )
 
 // WindowHalfWidth is the tolerated drift between the configured rollover time and the
-// inverter's actual counter reset (spec §7.1: rollover time ± 1 h).
+// inverter's actual counter reset (rollover time ± 1 h).
 const WindowHalfWidth = time.Hour
 
 // noonHour splits rollover times into "closes today" (>= 12:00, e.g. 23:59) and

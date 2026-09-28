@@ -61,22 +61,29 @@ func (b *backfillTx) SumDaily(key, from, to string) (float64, error) {
 }
 
 func (b *backfillTx) PeriodValue(l period.Level, key, p string) (float64, bool, error) {
-	var q string
+	return periodValue(b.ctx, b.tx, l, key, p)
+}
+
+// periodValue reads a stored monthly/yearly row (false if there is none).
+func periodValue(ctx context.Context, q queryer, l period.Level, key, p string) (
+	float64, bool, error,
+) {
+	var stmt string
 	switch l {
 	case period.Monthly:
-		q = `SELECT value FROM monthly_values WHERE register_key = ? AND month = ?`
+		stmt = `SELECT value FROM monthly_values WHERE register_key = ? AND month = ?`
 	case period.Yearly:
-		q = `SELECT value FROM yearly_values WHERE register_key = ? AND year = ?`
+		stmt = `SELECT value FROM yearly_values WHERE register_key = ? AND year = ?`
 	default:
-		return 0, false, fmt.Errorf("storage: backfill level %s not supported", l)
+		return 0, false, fmt.Errorf("storage: period level %s not supported", l)
 	}
 	var v float64
-	err := b.tx.QueryRowContext(b.ctx, q, key, p).Scan(&v)
+	err := q.QueryRowContext(ctx, stmt, key, p).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("storage: backfill read %s %s: %w", key, p, err)
+		return 0, false, fmt.Errorf("storage: read %s %s: %w", key, p, err)
 	}
 	return v, true, nil
 }
@@ -92,8 +99,25 @@ func (b *backfillTx) PutPeriod(l period.Level, key, p string, v float64) error {
 	if err := checkAggregatorDomain(reg, l); err != nil {
 		return err
 	}
+	if err := b.clearOffset(OffsetKey(l, p, key)); err != nil {
+		return err
+	}
 	return upsertPeriod(b.tx, reg, PeriodRow{Level: l, Key: key, Period: p, Value: v},
 		b.s.clock.Now())
+}
+
+// clearOffset drops a cutover offset: a backfilled period is the pure daily sum, and the
+// aggregator must not add the inverter offset on top again.
+func (b *backfillTx) clearOffset(key string) error {
+	if _, ok := b.meta.offsets[key]; !ok {
+		return nil
+	}
+	if _, err := b.tx.ExecContext(b.ctx, `DELETE FROM meta WHERE key = ?`,
+		metaOffset+key); err != nil {
+		return fmt.Errorf("storage: clear offset %s: %w", key, err)
+	}
+	delete(b.meta.offsets, key)
+	return nil
 }
 
 func (b *backfillTx) Baseline() (string, map[string]float64) {

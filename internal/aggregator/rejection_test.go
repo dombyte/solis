@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/storage"
 )
 
@@ -57,4 +58,22 @@ func TestRun_RejectedRowsStillMergeAndStayHealthy(t *testing.T) {
 			assert.InDelta(t, 12.5, v.DecodedValue, 1e-9)
 		})
 	}
+}
+
+// The cutover month continues from the inverter-reported value instead of being replaced
+// by the (incomplete) daily sum (review AGG-M2); net values include the offset.
+func TestRun_CutoverMonthContinuesFromInverterValue(t *testing.T) {
+	e := newEnvWith(t, at("2026-09-27 12:00"), at("2026-09-27 12:00"), func(st *storage.Storage) {
+		require.NoError(t, st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
+			{Key: "pv_energy_daily", Day: "2026-09-26", Value: 10},
+		}}))
+		require.NoError(t, st.Backfill(bg, func(tx storage.BackfillTx) error {
+			return tx.PutPeriod(period.Monthly, "pv_energy_monthly", "2026-09", 400)
+		}))
+	})
+	e.daily("pv_energy_daily", "2026-09-27", 5) // after the cutover
+	e.agg.run(bg)
+	v := e.cache.Get("pv_energy_monthly")
+	require.NotNil(t, v)
+	assert.InDelta(t, 405.0, v.DecodedValue, 1e-9, "400 at cutover + 5 kWh since")
 }

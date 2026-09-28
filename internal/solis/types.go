@@ -63,7 +63,7 @@ func (d DataType) Count() uint16 {
 	}
 }
 
-// Store is the single destination enum of a register (spec §4.1).
+// Store is the single destination enum of a register.
 type Store int
 
 const (

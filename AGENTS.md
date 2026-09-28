@@ -7,16 +7,16 @@ Solis Monitor polls a Solis hybrid inverter over Modbus (TCP or RTU), stores dai
 status/fault changes in SQLite, computes monthly/yearly/total values itself, and serves a React
 dashboard (REST + WebSocket) from the same Go binary.
 
-- **v3 is implemented.** The original design is `ref/solis-monitor-v3-refactor-specification(3).md`;
-  where the code deviates from it on purpose, the reason is under "Design Decisions (v3)" below.
-- The dashboard power-flow reference is `ref/solis-v3-dashboard-power-flow-diagram-prototype.tsx`
-  (layout/geometry/colors/animation; emoji icons are placeholders for lucide-react).
-- This file is self-contained: every rule that applies to this repository is written here.
-  When code and this file disagree, fix one of them in the same change.
+- **v3 is implemented.** The deliberate design choices are under "Design Decisions (v3)".
+- This file is self-contained and the only design reference: every rule that applies to
+  this repository is written here. Do not rely on (or cite) anything under `ref/` — that
+  folder is local-only and gitignored. When code and this file disagree, fix one of them in
+  the same change.
 
 ## Tools
 ```bash
-./scripts/pre-commit.sh                    # runs everything below except mockery (make check)
+./scripts/pre-commit.sh                    # check-only (never rewrites/stages); everything below
+                                           # except mockery (make check); CI also checks mock drift
 golangci-lint fmt --config .golangci.yml   # gofumpt + goimports (local prefix github.com/dombyte/solis)
 golangci-lint run --config .golangci.yml   # incl. gocyclo (<8), revive function-length (40),
                                            # mnd, gosec, staticcheck, ineffassign, misspell,
@@ -71,7 +71,7 @@ internal/
   <pkg>/mocks/           mockery-generated mocks (never hand-edit)
 frontend/                React 19 + Vite + Tailwind 4 + zustand SPA
 docs/                    Swagger UI + openapi.yaml
-ref/                     v3 spec + dashboard prototype (reference only, not built)
+example/                 docker-compose (TCP, RTU) and config.yaml templates for users
 ```
 
 ---
@@ -224,7 +224,7 @@ rejection sentinels declared in `storage/interfaces.go`; consumers never import 
 Forbidden: poller ↔ aggregator, cache → websocket, httphandler → storage/modbus, anything → cmd/app.
 
 Interfaces are declared by the consumer (except the storage interfaces in
-`storage/interfaces.go`, as the spec asks) and every interface has a mockery mock.
+`storage/interfaces.go`) and every interface has a mockery mock.
 
 ### 3. No Circular Dependencies
 Avoid circular imports between packages. Use interfaces for decoupling.
@@ -309,12 +309,21 @@ at full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ## Design Decisions (v3)
 
-Deliberate choices where the implementation fills a gap in, or deviates from, the v3 spec.
+Deliberate choices, with the reason, for behaviour that is not obvious from the code.
 
 - **`meta` table:** the only schema addition. Holds the cutover date, closed-period watermarks
   (`closed:daily:<key>`, `closed:netdaily`, `closed:monthly`, `closed:yearly`), the total
   baselines (`baseline:<key>`), `baseline_year` and the retention watermark `purged_before`.
   At cutover: monthly = previous month, yearly = previous year, daily/net-daily = today − 2.
+- **Cutover month/year keep the inverter values:** the cutover month and year stay open, so at
+  cutover the difference between each stored (inverter-reported) monthly/yearly value and its
+  daily sum up to that day is stored as `offset:<level>:<period>:<key>`; the aggregator adds
+  it on top of the growing daily sum. `solis backfill` overrides: it writes the pure daily sum
+  and deletes the offset.
+- **Retention:** monthly and yearly rows follow `storage.daily_retention` (only frozen years
+  are ever deleted). This is intentional; keep a longer retention to keep more history.
+- **Process restarts:** the app never restarts itself in-process; a fatal health escalation
+  exits 1 and the container runtime (`restart: unless-stopped`) starts a fresh process.
 - **Cache domains:** the poller replaces only its own keys (`ReplaceDomain`); the aggregator
   merges its disjoint computed keys (`Merge`). Neither wipes the other.
 - **Net values:** net daily rows live in `daily_values` and are written only by the aggregator;
@@ -794,7 +803,7 @@ func TestService_ReadRegister(t *testing.T) {
 ## Register Development Guidelines
 
 ### Adding New Registers
-All registers live in one table in `internal/solis/registers.go` (v3 model, spec §4.1):
+All registers live in one table in `internal/solis/registers.go` (v3 model):
 
 ```go
 {
@@ -851,7 +860,10 @@ Decoded values are full precision; rounding to 2 decimals happens only in JSON s
 - The total baseline refresh sums the daily rows from the cutover year's 1 January through
   the baseline year, exactly what the live aggregator folds (pre-cutover years are never
   carried into totals); nothing is refreshed while the baseline year precedes the cutover.
-- Uses the same `aggregation` functions as the live aggregator. Output format: spec §12.1.
+- Uses the same `aggregation` functions as the live aggregator. Output: the backup path,
+  one line per recomputed row (`monthly  pv_energy_monthly        2026-08   412.30 kWh ->
+  409.87 kWh`, `n/a` when there was no row), one `skipped` line per period without complete
+  daily history, and a summary line (recomputed / unchanged / lower / skipped counts).
 - Dangerous behavior belongs in CLI jobs, never in config toggles.
 
 ---
@@ -865,7 +877,8 @@ Decoded values are full precision; rounding to 2 decimals happens only in JSON s
 - Register metadata lives in `src/lib/config/data.ts` (single source of truth for the UI).
 - Mobile vs desktop: `useMobile()` (coarse pointer). The power-flow diagram uses the mobile
   variant only for coarse pointer **and** width < 768 px; tablets get the desktop variant.
-- Power-flow diagram (`src/components/dashboard/flow/`): follow the prototype geometry; icons
+- Power-flow diagram (`src/components/dashboard/flow/`): the current layout/geometry in
+  `model.ts`, `FlowDesktop.tsx` and `FlowMobile.tsx` is the reference; icons
   from lucide-react; colors from CSS tokens in `src/index.css` (light + dark), never hardcoded hex;
   edge animation via CSS keyframes (binary on/off, fixed speed, `prefers-reduced-motion` respected),
   not `requestAnimationFrame` + state updates.

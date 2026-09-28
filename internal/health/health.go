@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Supervision constants (spec §8; constants, not config).
+// Supervision constants (constants, not config).
 const (
 	// RestartBudget is the number of consecutive restarts before a component latches failed.
 	RestartBudget = 3

@@ -72,6 +72,17 @@ func Fold(baseline, add Values) Values {
 	return out
 }
 
+// AddOffsets returns values with offsets[k] added to every key present in values (keys
+// without a value are not created). Used for the cutover month/year, which continue
+// from the inverter-reported value.
+func AddOffsets(values, offsets Values) Values {
+	out := make(Values, len(values))
+	for k, v := range values {
+		out[k] = v + offsets[k]
+	}
+	return out
+}
+
 // Merge combines value maps; later maps win on duplicate keys.
 func Merge(maps ...Values) Values {
 	out := make(Values)

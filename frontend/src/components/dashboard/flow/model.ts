@@ -21,7 +21,7 @@ const STATUS_KEYS = [
 export const POWER_FLOW_KEYS = [...FLOW_KEYS, ...STATUS_KEYS] as const;
 
 /**
- * Direction rules (from spec §14.2):
+ * Direction rules:
  * - PV → inverter (always positive from PV)
  * - inverter → household/backup (power flowing out)
  * - grid: export = out (positive), import = in (negative)
@@ -94,7 +94,7 @@ export interface FlowViewModel {
 }
 
 /**
- * Format power value according to spec §14.2:
+ * Format power value:
  * 2 decimals, W < 1000 ≤ kW; grid/battery show magnitude, sign conveyed by animation
  */
 function formatPowerW(value: number | null): string {
@@ -249,7 +249,7 @@ export function buildFlowViewModel(
     values.grid_power !== null;
 
   // Per-node presence: a node grays out on its own when only its data is
-  // missing, independent of the diagram-wide `stale` flag (spec §14.2).
+  // missing, independent of the diagram-wide `stale` flag.
   const pvPresent = values.pv_total_power !== null;
   const gridPresent = values.grid_power !== null;
   const batteryPresent = values.battery_soc !== null && values.battery_power_signed !== null;

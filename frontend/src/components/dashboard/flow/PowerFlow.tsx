@@ -12,8 +12,6 @@ import { FlowMobile } from './FlowMobile';
  * Main PowerFlow component
  * Chooses between desktop and mobile variants based on screen size
  * Subscribes to power flow keys and status keys
- * 
- * Based on prototype App component flow diagram section
  */
 export function PowerFlow(): React.ReactElement {
   const isMobile = useMobile();
@@ -35,7 +33,7 @@ export function PowerFlow(): React.ReactElement {
   // Build the view model
   const viewModel = buildFlowViewModel(registerValues, registerMetadataByKey, stale);
   
-  // Variant selection per spec §14.2:
+  // Variant selection:
   // "same determination… tablet shows desktop"
   // mobile = coarse pointer AND width < 768px
   const mobileVariant = isMobile && isTablet;

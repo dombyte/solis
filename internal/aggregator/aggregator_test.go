@@ -78,6 +78,12 @@ type env struct {
 
 func newEnv(t *testing.T, start, cutover time.Time) *env {
 	t.Helper()
+	return newEnvWith(t, start, cutover, nil)
+}
+
+// newEnvWith is newEnv with pre-cutover history written by before (v2 rows).
+func newEnvWith(t *testing.T, start, cutover time.Time, before func(*storage.Storage)) *env {
+	t.Helper()
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
@@ -88,6 +94,9 @@ func newEnv(t *testing.T, start, cutover time.Time) *env {
 	st, err := storage.New(context.Background(), cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
+	if before != nil {
+		before(st)
+	}
 	_, _, err = st.EnsureCutover(bg, period.Of(cutover))
 	require.NoError(t, err)
 	bus := eventbus.New()

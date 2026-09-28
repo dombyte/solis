@@ -2,6 +2,8 @@ module github.com/dombyte/solis
 
 go 1.26.3
 
+toolchain go1.26.8
+
 // frontend dependencies ship stray Go packages (e.g. flatted); keep them out of ./...
 ignore ./frontend/node_modules
 

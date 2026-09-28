@@ -18,7 +18,7 @@ import (
 
 // Hub timing constants.
 const (
-	// FlushDelay coalesces poller and aggregator events into one frame (spec §9.2).
+	// FlushDelay coalesces poller and aggregator events into one frame.
 	FlushDelay = 75 * time.Millisecond
 	// StaleClientTimeout drops clients without any activity.
 	StaleClientTimeout = 5 * time.Minute
