@@ -37,7 +37,7 @@ frontend/coverage/
 
 # Cache
 frontend/.cache/
-config.yaml
+/config.yaml
 
 frontend/dev-dist/
 docs/dist/
@@ -45,4 +45,4 @@ docs/node_modules/
 ref/
 
 # Local deployment files (templates live in example/)
-docker-compose.yaml
+/docker-compose.yaml
