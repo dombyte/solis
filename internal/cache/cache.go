@@ -72,10 +72,17 @@ func (c *Cache) Merge(domain string, values map[string]*solis.Value, at time.Tim
 	c.log.Debug().Str("domain", domain).Int("keys", len(keys)).Msg("cache merge")
 }
 
-// put stores values; caller holds mu.
+// put stores values; caller holds mu. A key owned by another domain is not taken over:
+// the write is dropped and logged, so a poller/aggregator bug cannot steal a key that the
+// owner's next ReplaceDomain would then fail to remove (review RT-L7).
 func (c *Cache) put(domain string, values map[string]*solis.Value, at time.Time) []string {
 	keys := make([]string, 0, len(values))
 	for k, v := range values {
+		if owner, ok := c.owner[k]; ok && owner != domain {
+			c.log.Error().Str("key", k).Str("owner", owner).Str("writer", domain).
+				Str("tag", "write_domain").Msg("cache write outside the writer's domain dropped")
+			continue
+		}
 		c.data[k] = v
 		c.owner[k] = domain
 		keys = append(keys, k)

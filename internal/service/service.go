@@ -10,6 +10,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dombyte/solis/internal/util"
+
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/health"
@@ -90,9 +92,21 @@ type ReadService struct {
 	d Deps
 }
 
-// NewReadService creates the service.
-func NewReadService(d Deps) *ReadService {
-	return &ReadService{d: d}
+// ErrMissingDependency is returned by NewReadService for a nil dependency.
+var ErrMissingDependency = errors.New("service: missing dependency")
+
+// NewReadService creates the service; every dependency is required (review HTTP-L8).
+func NewReadService(d Deps) (*ReadService, error) {
+	if err := util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "Store", OK: d.Store != nil},
+		util.Requirement{Name: "Cache", OK: d.Cache != nil},
+		util.Requirement{Name: "Health", OK: d.Health != nil},
+		util.Requirement{Name: "Registry", OK: d.Registry != nil},
+		util.Requirement{Name: "Decoder", OK: d.Decoder != nil},
+	); err != nil {
+		return nil, err
+	}
+	return &ReadService{d: d}, nil
 }
 
 // Health returns the last published health snapshot (never blocks).

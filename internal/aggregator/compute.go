@@ -36,6 +36,7 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	a.warnNetGap(plan)
 	rs := &runState{
 		write: storage.ComputedWrite{At: now}, current: aggregation.Values{},
 		base: st.Baseline, baseYr: st.BaselineYear, offsets: st.Offsets,
@@ -58,6 +59,14 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	}
 	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(rs.current, now), now)
 	return nil
+}
+
+// warnNetGap logs net days that fell out of the catch-up window (review AGG-L1).
+func (a *Aggregator) warnNetGap(plan aggregation.Plan) {
+	if gap := plan.SkippedNetDays; gap[0] != "" {
+		a.d.Log.Warn().Str("from", gap[0]).Str("to", gap[1]).
+			Msg("net daily rows skipped: gap longer than the catch-up window")
+	}
 }
 
 // logRejections classifies each rejected row: a write into a period that was closed

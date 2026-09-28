@@ -97,3 +97,17 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, 1, c.Size())
 }
+
+// A write for a key another domain owns is dropped (and logged), so a component cannot
+// steal a key the owner would then fail to remove (review RT-L7).
+func TestPut_DoesNotStealKeysOfOtherDomains(t *testing.T) {
+	c := New(eventbus.New(), zerolog.Nop())
+	c.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{"a": val(1)}, t0)
+	c.Merge(eventbus.DomainAggregator, map[string]*solis.Value{"a": val(99), "m": val(9)}, t0)
+	assert.InDelta(t, 1.0, c.Get("a").DecodedValue, 0, "poller key unchanged")
+	assert.InDelta(t, 9.0, c.Get("m").DecodedValue, 0)
+
+	// The owner can still remove it.
+	c.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{}, t0)
+	assert.Nil(t, c.Get("a"))
+}

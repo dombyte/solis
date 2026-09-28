@@ -218,6 +218,9 @@ func (a *Aggregator) run(ctx context.Context) {
 	if err == nil {
 		err = a.execute(rctx, now)
 	}
+	if err != nil && ctx.Err() != nil {
+		return // stopped mid-run: not a failure (review AGG-L6)
+	}
 	if err != nil {
 		a.d.Log.Error().Err(err).Msg("aggregation run failed")
 		a.Set(health.Recovering, err.Error())

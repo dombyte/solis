@@ -20,6 +20,11 @@ func RoundTo2DecimalPlaces(value float64) float64 {
 type Float64With2Decimals float64
 
 // MarshalJSON implements json.Marshaler to format the float with exactly 2 decimal places.
+// NaN and ±Inf (e.g. a garbled Float32 register) become null: "NaN" is not valid JSON and
+// would fail the whole REST response or WebSocket frame.
 func (f Float64With2Decimals) MarshalJSON() ([]byte, error) {
+	if math.IsNaN(float64(f)) || math.IsInf(float64(f), 0) {
+		return []byte("null"), nil
+	}
 	return []byte(fmt.Sprintf("%.2f", f)), nil
 }

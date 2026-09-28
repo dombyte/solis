@@ -212,17 +212,24 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 		Clock: a.clock, PollInterval: a.cfg.Poller.Interval,
 		Log: logging.Component(root, nameHub),
 	}, hubs))
-	svc := service.NewReadService(service.Deps{
+	svc, err := service.NewReadService(service.Deps{
 		Store: a.store, Cache: a.cache, Health: a.sup,
 		Registry: a.reg, Decoder: a.decoder, Log: logging.Component(root, "service"),
 	})
+	if err != nil {
+		return err
+	}
 	httpLog := logging.Component(root, "http")
+	ws, err := websocket.NewHandler(hubs, httpLog)
+	if err != nil {
+		return err
+	}
 	mux := router.SetupRoutes(router.Deps{
 		Handlers: httphandler.HandlerDeps{
 			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
 			Clock: a.clock, Timeout: a.cfg.App.Timeout,
 		},
-		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,
+		WebSocket: ws, Log: httpLog,
 	})
 	a.http = server.New(serverSettings(a.cfg.App), mux, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
@@ -232,7 +239,9 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 }
 
 func (a *App) storageProbe() (health.State, string) {
-	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	// Bound to the root context: during shutdown the probe stops at once instead of
+	// holding the supervisor lock for the full timeout (review RT-L6).
+	ctx, cancel := context.WithTimeout(a.sup.Context(), probeTimeout)
 	defer cancel()
 	if err := a.store.Ping(ctx); err != nil {
 		return health.Failed, err.Error()

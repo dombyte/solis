@@ -232,6 +232,39 @@ func TestEnsureCutover_RecordsOffsetsForCutoverMonthAndYear(t *testing.T) {
 	assert.Equal(t, st.Offsets, st2.Offsets, "persisted")
 }
 
+// A cutover on the 1st still has the previous month's last day open (cutover − 2 days is
+// in that month), so that month and, on 1 January, that year must stay open too; their
+// inverter values are kept as offsets as well (review AGG-L3).
+func TestEnsureCutover_OnFirstOfMonthKeepsPreviousPeriodOpen(t *testing.T) {
+	for _, tt := range []struct{ day, frozenMonth, frozenYear string }{
+		{"2026-10-01", "2026-08", "2025"},
+		{"2027-01-01", "2026-11", "2025"},
+		{"2026-09-27", "2026-08", "2025"}, // mid-month: unchanged
+	} {
+		t.Run(tt.day, func(t *testing.T) {
+			s, _, _ := newStore(t, day(tt.day))
+			_, _, err := s.EnsureCutover(ctx, period.Of(day(tt.day)))
+			require.NoError(t, err)
+			st, err := s.CloseState(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, tt.frozenMonth, st.FrozenMonth)
+			assert.Equal(t, tt.frozenYear, st.FrozenYear)
+		})
+	}
+
+	s, _, _ := newStore(t, day("2026-10-01"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-09-30", Value: 10},
+	}}))
+	insertRows(t, s, `INSERT INTO monthly_values (month, register_key, value, raw_value)
+		VALUES ('2026-09', 'pv_energy_monthly', 300, 3000)`)
+	_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-10-01")))
+	require.NoError(t, err)
+	st, err := s.CloseState(ctx)
+	require.NoError(t, err)
+	assert.InDelta(t, 290, st.Offsets[OffsetKey(period.Monthly, "2026-09", "pv_energy_monthly")], 0)
+}
+
 func TestSumDaily_ExplicitBounds(t *testing.T) {
 	s, _, _ := newStore(t, day("2026-08-05"))
 	var rows []DailyRow

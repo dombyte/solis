@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,7 +54,9 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, hub.Start(context.Background()))
 	t.Cleanup(func() { _ = hub.Stop() })
 	e.slot.Store(hub)
-	e.srv = httptest.NewServer(NewHandler(e.slot, zerolog.Nop()))
+	h, err := NewHandler(e.slot, zerolog.Nop())
+	require.NoError(t, err)
+	e.srv = httptest.NewServer(h)
 	t.Cleanup(e.srv.Close)
 	require.True(t, clk.BlockUntil(1), "beat ticker")
 	return e
@@ -314,4 +317,36 @@ func TestDTOEncoding(t *testing.T) {
 		StatusDecoded: []string{"No grid"},
 	})))
 	assert.False(t, stateOf(v).equal(stateOf(&solis.Value{DecodedValue: 1.001})))
+}
+
+// One client cannot tie up the hub with huge frames, and the connection count is bounded:
+// a client beyond MaxClients is closed with 1013 "try again later" (review HTTP-L6).
+func TestLimits_KeysPerMessageAndClients(t *testing.T) {
+	e := newEnv(t)
+	c := e.dial(nil)
+	keys := make([]string, MaxKeysPerMessage+1)
+	for i := range keys {
+		keys[i] = fmt.Sprintf("k%d", i)
+	}
+	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: keys})
+	msg := read(t, c)
+	assert.Equal(t, TypeError, msg["type"])
+	assert.Equal(t, CodeBadRequest, msg["code"])
+	assert.Contains(t, msg["message"], "too many keys")
+
+	conns := []*websocket.Conn{c}
+	for len(conns) < MaxClients {
+		cc := e.dial(nil)
+		// A snapshot reply proves the hub registered this client before the next dial.
+		send(t, cc, ClientMessage{Type: TypeSubscribe, Keys: []string{"grid_power"}})
+		read(t, cc)
+		conns = append(conns, cc)
+	}
+	extra := e.dial(nil)
+	require.NoError(t, extra.SetReadDeadline(time.Now().Add(2*time.Second)))
+	_, _, err := extra.ReadMessage()
+	assert.True(t, websocket.IsCloseError(err, websocket.CloseTryAgainLater), "%v", err)
+	for _, cc := range conns {
+		_ = cc.Close()
+	}
 }

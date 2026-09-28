@@ -45,6 +45,9 @@ type Plan struct {
 	Months []Job
 	// Years are yearly jobs (oldest first).
 	Years []Job
+	// SkippedNetDays is the range (first, last) of net days older than MaxNetDays that
+	// will never get a net row because the gap was too long ("" = none).
+	SkippedNetDays [2]string
 }
 
 // BuildPlan derives the recompute plan for the run instant p.
@@ -61,7 +64,22 @@ func BuildPlan(p period.Period, w Watermarks) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	return Plan{Days: days, Months: months, Years: years}, nil
+	return Plan{Days: days, Months: months, Years: years, SkippedNetDays: skippedNetDays(p, w)},
+		nil
+}
+
+// skippedNetDays reports the net days between the frozen watermark and the MaxNetDays
+// floor; dayJobs starts after the floor, so they are never computed.
+func skippedNetDays(p period.Period, w Watermarks) [2]string {
+	floor, err := period.AddDays(p.Day, -MaxNetDays)
+	if err != nil || w.FrozenNetDay == "" || w.FrozenNetDay >= floor {
+		return [2]string{}
+	}
+	first, err := period.AddDays(w.FrozenNetDay, 1)
+	if err != nil {
+		return [2]string{}
+	}
+	return [2]string{first, floor}
 }
 
 func dayJobs(p period.Period, w Watermarks) ([]Job, error) {

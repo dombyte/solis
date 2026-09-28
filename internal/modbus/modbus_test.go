@@ -242,3 +242,22 @@ func TestSettingsValidate_Serial(t *testing.T) {
 		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings, s)
 	}
 }
+
+// On RTU an open port says nothing about the inverter: 5 line errors in a row mark the
+// connection lost; an exception reply (the device answered) resets the count (ACQ-M3).
+func TestTooManyLineFailures(t *testing.T) {
+	c := &Client{rtu: true}
+	for range maxLineFailures - 1 {
+		assert.False(t, c.tooManyLineFailures(sv.ErrRequestTimedOut))
+	}
+	assert.False(t, c.tooManyLineFailures(sv.ErrIllegalDataAddress), "a reply resets")
+	for range maxLineFailures - 1 {
+		assert.False(t, c.tooManyLineFailures(sv.ErrBadCRC))
+	}
+	assert.True(t, c.tooManyLineFailures(sv.ErrShortFrame))
+
+	tcp := &Client{}
+	for range 2 * maxLineFailures {
+		assert.False(t, tcp.tooManyLineFailures(sv.ErrRequestTimedOut), "tcp drops at once")
+	}
+}

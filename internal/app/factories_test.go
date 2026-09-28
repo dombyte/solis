@@ -49,7 +49,7 @@ func TestModbusComponent_StaleStopKeepsSuccessor(t *testing.T) {
 func TestModbusComponent_StartAfterStopIsNoop(t *testing.T) {
 	var slot util.Slot[poller.Reader]
 	c := newModbusComponent(t, &slot)
-	require.NoError(t, c.Stop())
+	require.NoError(t, c.Stop()) // before Start: closes the client (review RT-L9)
 	require.NoError(t, c.Start(context.Background()))
 	_, ok := slot.Load()
 	assert.False(t, ok, "a stopped instance never publishes its client")

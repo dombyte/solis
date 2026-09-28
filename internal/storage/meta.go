@@ -178,16 +178,20 @@ func (s *Storage) EnsureCutover(ctx context.Context, p period.Period) (string, b
 // window can still finish yesterday.
 const cutoverMargin = -2
 
+// writeCutover freezes everything before the last closed day's month and year. Freezing
+// relative to that day (not to today) keeps a month or year open while one of its days
+// is still writable: a cutover on the 1st inside the rollover window must not freeze the
+// month whose last day is still being finished (review AGG-L3).
 func (s *Storage) writeCutover(tx *txn, m *metaState, p period.Period) error {
-	prevMonth, err := period.AddMonths(p.Month, -1)
-	if err != nil {
-		return err
-	}
-	prevYear, err := period.AddYears(p.Year, -1)
-	if err != nil {
-		return err
-	}
 	closedDay, err := period.AddDays(p.Day, cutoverMargin)
+	if err != nil {
+		return err
+	}
+	frozenMonth, err := period.AddMonths(closedDay[:len("2006-01")], -1)
+	if err != nil {
+		return err
+	}
+	frozenYear, err := period.AddYears(closedDay[:len("2006")], -1)
 	if err != nil {
 		return err
 	}
@@ -200,8 +204,8 @@ func (s *Storage) writeCutover(tx *txn, m *metaState, p period.Period) error {
 		key   string
 		value string
 	}{
-		{period.Monthly, metaClosedMonthly, prevMonth},
-		{period.Yearly, metaClosedYearly, prevYear},
+		{period.Monthly, metaClosedMonthly, frozenMonth},
+		{period.Yearly, metaClosedYearly, frozenYear},
 		{period.Daily, metaClosedNetDaily, closedDay},
 	}
 	for _, mk := range marks {
@@ -209,30 +213,32 @@ func (s *Storage) writeCutover(tx *txn, m *metaState, p period.Period) error {
 			return err
 		}
 	}
-	return s.finishCutover(tx, m, p, closedDay, prevYear)
+	return s.finishCutover(tx, m, p, closedDay)
 }
 
 // finishCutover records the cutover offsets and the per-key day marks.
-func (s *Storage) finishCutover(tx *txn, m *metaState, p period.Period, closedDay,
-	prevYear string,
-) error {
+func (s *Storage) finishCutover(tx *txn, m *metaState, p period.Period, closedDay string) error {
 	if err := s.writeCutoverOffsets(tx, m, p); err != nil {
+		return err
+	}
+	prevYear, err := period.AddYears(p.Year, -1)
+	if err != nil {
 		return err
 	}
 	return s.initDayMarks(tx, m, closedDay, prevYear)
 }
 
-// writeCutoverOffsets keeps the inverter-reported rows of the cutover month and year
-// (review AGG-M2): the months and years before are frozen, but these two stay open and
-// would otherwise be replaced by daily sums that miss whatever the daily rows lack. For
-// every computed key whose stored value is ahead of its daily sum up to today, the
-// difference is recorded; the aggregator adds it on top of the growing daily sum, so the
-// period continues from the inverter's value. `solis backfill` overrides it (clears the
-// offset and writes the pure daily sum).
+// writeCutoverOffsets keeps the inverter-reported rows of the months and years that stay
+// open at cutover (review AGG-M2): the periods before are frozen, but these would
+// otherwise be replaced by daily sums that miss whatever the daily rows lack. For every
+// computed key whose stored value is ahead of its daily sum up to today, the difference is
+// recorded; the aggregator adds it on top of the growing daily sum, so the period
+// continues from the inverter's value. `solis backfill` overrides it (clears the offset
+// and writes the pure daily sum).
 func (s *Storage) writeCutoverOffsets(tx *txn, m *metaState, p period.Period) error {
-	spans := []offsetSpan{
-		{level: period.Monthly, key: p.Month, from: p.Month + "-01", today: p.Day},
-		{level: period.Yearly, key: p.Year, from: p.Year + "-01-01", today: p.Day},
+	spans, err := openSpans(m, p)
+	if err != nil {
+		return err
 	}
 	for _, sp := range spans {
 		if err := s.periodOffsets(tx, m, sp); err != nil {
@@ -240,6 +246,37 @@ func (s *Storage) writeCutoverOffsets(tx *txn, m *metaState, p period.Period) er
 		}
 	}
 	return nil
+}
+
+// openSpans lists every month and year after the frozen watermarks through today, each
+// with the daily rows summed for it (period start .. min(period end, today)).
+func openSpans(m *metaState, p period.Period) ([]offsetSpan, error) {
+	months, err := period.MonthsBetween(m.frozen[period.Monthly], p.Month)
+	if err != nil {
+		return nil, err
+	}
+	years, err := period.YearsBetween(m.frozen[period.Yearly], p.Year)
+	if err != nil {
+		return nil, err
+	}
+	var spans []offsetSpan
+	for _, l := range []struct {
+		level  period.Level
+		keys   []string
+		bounds func(string) (string, string, error)
+	}{{period.Monthly, months, period.MonthBounds}, {period.Yearly, years, period.YearBounds}} {
+		for _, k := range l.keys {
+			first, last, err := l.bounds(k)
+			if err != nil {
+				return nil, err
+			}
+			spans = append(spans, offsetSpan{
+				level: l.level, key: k, from: first,
+				today: min(last, p.Day),
+			})
+		}
+	}
+	return spans, nil
 }
 
 // offsetSpan is one cutover period and the daily rows summed for it (from..today).

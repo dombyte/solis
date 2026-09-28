@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,6 +32,8 @@ var (
 	ErrHubStopped = errors.New("websocket: hub stopped")
 	// ErrMissingDependency is returned by NewHub when a dependency is nil.
 	ErrMissingDependency = errors.New("websocket: missing dependency")
+	// ErrTooManyClients rejects a connection beyond MaxClients.
+	ErrTooManyClients = errors.New("websocket: too many clients")
 )
 
 // Snapshotter reads current values from the cache.
@@ -144,14 +147,38 @@ func (h *Hub) Stop() error {
 	return nil
 }
 
-// Register hands a new client to the hub loop.
+// Limits that keep one misbehaving client from degrading the single hub goroutine for
+// everyone (review HTTP-L6). A dashboard needs one connection and ~60 keys.
+const (
+	// MaxClients is the number of concurrent WebSocket clients.
+	MaxClients = 64
+	// MaxKeysPerMessage bounds the keys of one subscribe/unsubscribe frame.
+	MaxKeysPerMessage = 256
+)
+
+// Register hands a new client to the hub loop; ErrTooManyClients beyond MaxClients.
 func (h *Hub) Register(c *Client) error {
-	h.d.Log.Debug().Msg("websocket client registered")
+	accepted := make(chan bool, 1) // do only queues op; wait for the hub loop's answer
 	if !h.do(func(ls *loopState) {
-		ls.clients[c] = &clientState{subs: map[string]struct{}{}, last: map[string]pushed{}}
+		ok := len(ls.clients) < MaxClients
+		if ok {
+			ls.clients[c] = &clientState{subs: map[string]struct{}{}, last: map[string]pushed{}}
+		}
+		accepted <- ok
 	}) {
 		return ErrHubStopped
 	}
+	var ok bool
+	select {
+	case ok = <-accepted:
+	case <-h.done:
+		return ErrHubStopped
+	}
+	if !ok {
+		h.d.Log.Warn().Int("max", MaxClients).Msg("websocket client rejected: too many clients")
+		return ErrTooManyClients
+	}
+	h.d.Log.Debug().Msg("websocket client registered")
 	return nil
 }
 
@@ -229,6 +256,13 @@ func (l *loopState) closeAll() {
 func (h *Hub) handle(clients map[*Client]*clientState, c *Client, msg ClientMessage) {
 	st, ok := clients[c]
 	if !ok {
+		return
+	}
+	if len(msg.Keys) > MaxKeysPerMessage {
+		h.send(clients, c, ErrorMessage{
+			Type: TypeError, Code: CodeBadRequest,
+			Message: fmt.Sprintf("too many keys in one message (max %d)", MaxKeysPerMessage),
+		})
 		return
 	}
 	switch msg.Type {

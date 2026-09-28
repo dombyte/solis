@@ -171,3 +171,16 @@ func TestBuildPlan_InvalidWatermark(t *testing.T) {
 	_, err = periodJobs(at("2026-08-05"), Watermarks{}, period.Total, "")
 	assert.Error(t, err)
 }
+
+// Net days between the frozen watermark and the MaxNetDays floor are reported, so the
+// aggregator can log the gap instead of skipping it silently (review AGG-L1).
+func TestBuildPlan_ReportsSkippedNetDays(t *testing.T) {
+	plan, err := BuildPlan(at("2026-09-27"), Watermarks{FrozenNetDay: "2026-06-01"})
+	require.NoError(t, err)
+	assert.Equal(t, [2]string{"2026-06-02", "2026-07-27"}, plan.SkippedNetDays)
+	assert.Equal(t, "2026-07-28", plan.Days[0].Key)
+
+	plan, err = BuildPlan(at("2026-09-27"), Watermarks{FrozenNetDay: "2026-09-20"})
+	require.NoError(t, err)
+	assert.Empty(t, plan.SkippedNetDays[0])
+}

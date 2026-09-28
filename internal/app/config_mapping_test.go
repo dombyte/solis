@@ -71,7 +71,14 @@ func TestConfigRules(t *testing.T) {
 		}, "stop_bits 3"},
 		{
 			"poll timeout vs grace", func(c *config.AppConfig) { c.Poller.PollTimeout = 15 * time.Second },
-			"poll_timeout 15s must be below 3 x poller.interval",
+			"poll_timeout + modbus.timeout (16s) must be below 3 x poller.interval (15s)",
+		},
+		{
+			// 14s alone fits the 15s grace, but a read in flight can add modbus.timeout.
+			"modbus timeout counts", func(c *config.AppConfig) {
+				c.Poller.PollTimeout, c.Modbus.Timeout = 14*time.Second, 2*time.Second
+			},
+			"(16s) must be below",
 		},
 		{
 			"rollover 12h", func(c *config.AppConfig) { c.Rollover.Time = "11:59 PM" },

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -85,8 +87,10 @@ func normalizeStatusTimestamps(ctx context.Context, tx *sql.Tx) error {
 	if err != nil {
 		return err
 	}
-	for id, ts := range rows {
-		if err := rewriteStatusTimestamp(ctx, tx, id, ts); err != nil {
+	// In id order, so of two rows that normalize to the same instant the older one is
+	// kept and the newer duplicate dropped, every time (map order is random).
+	for _, id := range slices.Sorted(maps.Keys(rows)) {
+		if err := rewriteStatusTimestamp(ctx, tx, id, rows[id]); err != nil {
 			return err
 		}
 	}

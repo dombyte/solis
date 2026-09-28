@@ -40,11 +40,18 @@ func newFixture(t *testing.T) fixture {
 		cache: mocks.NewMockCacheReader(t),
 		hlth:  mocks.NewMockHealthSnapshotter(t),
 	}
-	f.svc = NewReadService(Deps{
+	f.svc, err = NewReadService(Deps{
 		Store: f.store, Cache: f.cache, Health: f.hlth, Registry: reg,
 		Decoder: solis.NewDecoder(reg, zerolog.Nop()), Log: zerolog.Nop(),
 	})
+	require.NoError(t, err)
 	return f
+}
+
+func TestNewReadService_RequiresDependencies(t *testing.T) {
+	_, err := NewReadService(Deps{})
+	require.ErrorIs(t, err, ErrMissingDependency)
+	assert.ErrorContains(t, err, "Store")
 }
 
 func TestKeysSortedAndRegister(t *testing.T) {

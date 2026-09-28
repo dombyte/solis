@@ -132,6 +132,10 @@ func (d Deps) validate() error {
 		util.Requirement{Name: "Clock", OK: d.Clock != nil},
 		util.Requirement{Name: "Reporter", OK: d.Reporter != nil},
 		util.Requirement{Name: "Settings.Interval", OK: d.Settings.Interval > 0},
+		// Config guards these too; the constructor contract must not rely on it: a
+		// negative BlockAttempts would read nothing and wipe every poller key (ACQ-L4).
+		util.Requirement{Name: "Settings.PollTimeout", OK: d.Settings.PollTimeout > 0},
+		util.Requirement{Name: "Settings.BlockAttempts", OK: d.Settings.BlockAttempts >= 0},
 	)
 }
 

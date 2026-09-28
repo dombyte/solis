@@ -2,9 +2,13 @@ package websocket
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/dombyte/solis/internal/util"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
@@ -29,8 +33,13 @@ type Handler struct {
 	log      zerolog.Logger
 }
 
-// NewHandler returns the /ws handler.
-func NewHandler(hubs HubSource, log zerolog.Logger) *Handler {
+// NewHandler returns the /ws handler; hubs is required (review HTTP-L8).
+func NewHandler(hubs HubSource, log zerolog.Logger) (*Handler, error) {
+	if err := util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "HubSource", OK: hubs != nil},
+	); err != nil {
+		return nil, err
+	}
 	return &Handler{
 		hubs: hubs,
 		log:  log,
@@ -39,7 +48,7 @@ func NewHandler(hubs HubSource, log zerolog.Logger) *Handler {
 			WriteBufferSize: writeBufferSize,
 			CheckOrigin:     SameOrigin,
 		},
-	}
+	}, nil
 }
 
 // SameOrigin accepts requests without an Origin header (non-browser clients) and browser
@@ -71,6 +80,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c := newClient(hub, conn)
 	if err := hub.Register(c); err != nil {
+		if errors.Is(err, ErrTooManyClients) {
+			_ = conn.WriteControl(websocket.CloseMessage, //nolint:errcheck // best effort
+				websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "too many clients"),
+				time.Now().Add(writeWait))
+		}
 		_ = conn.Close()
 		return
 	}

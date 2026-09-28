@@ -162,7 +162,15 @@ type Client struct {
 	mc        *sv.ModbusClient
 	connected atomic.Bool
 	lost      chan struct{} // wakes Run when a read marks the connection lost
+	// lineFailures counts consecutive RTU line errors (timeout, bad CRC, short frame):
+	// an opened serial port says nothing about whether the inverter answers.
+	lineFailures atomic.Int32
 }
+
+// maxLineFailures consecutive RTU line errors mark the connection lost, so a pulled
+// cable or a hung comms board reopens the port and shows as Recovering instead of the
+// Modbus component staying Healthy forever (review ACQ-M3).
+const maxLineFailures = 5
 
 // New creates a disconnected client; it never fails because the device is unreachable.
 func New(set Settings, clock util.Clock, log zerolog.Logger) (*Client, error) {
@@ -194,12 +202,29 @@ func (c *Client) ReadRegisters(ctx context.Context, addr, count uint16) ([]uint1
 	}
 	regs, err := mc.ReadRegisters(addr, count, sv.INPUT_REGISTER)
 	if err != nil {
-		if !c.keepsConnection(err) {
+		if !c.keepsConnection(err) || c.tooManyLineFailures(err) {
 			c.markLost(err)
 		}
 		return nil, &ReadError{Addr: addr, Count: count, Err: err}
 	}
+	c.lineFailures.Store(0)
 	return regs, nil
+}
+
+// tooManyLineFailures counts RTU line errors and reports when maxLineFailures happened in
+// a row; any other kept error is a complete reply from the device and resets the count.
+func (c *Client) tooManyLineFailures(err error) bool {
+	var me sv.Error
+	if !c.rtu || !errors.As(err, &me) {
+		return false
+	}
+	switch me {
+	case sv.ErrBadCRC, sv.ErrShortFrame, sv.ErrProtocolError, sv.ErrRequestTimedOut:
+		return c.lineFailures.Add(1) >= maxLineFailures
+	default:
+		c.lineFailures.Store(0)
+		return false
+	}
 }
 
 // keepsConnection reports whether err leaves the link usable. Exception replies are
@@ -226,6 +251,7 @@ func (c *Client) keepsConnection(err error) bool {
 
 func (c *Client) markLost(cause error) {
 	if c.connected.CompareAndSwap(true, false) {
+		c.lineFailures.Store(0)
 		c.log.Warn().Err(cause).Msg("modbus connection lost")
 		c.closeConn()
 		select {

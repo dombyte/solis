@@ -42,10 +42,12 @@ func validateRollover(c *config.AppConfig) error {
 // validatePollTimeout keeps one poll cycle inside the supervisor's healthy grace: the
 // poller beats at cycle start and end, so a longer cycle would restart a working poller.
 func validatePollTimeout(c *config.AppConfig) error {
+	// A read in flight is only bounded by modbus.timeout (the library takes no context),
+	// so a poll can overrun poll_timeout by that much (review ACQ-L3).
 	grace := health.HealthyGraceFactor * c.Poller.Interval
-	if c.Poller.PollTimeout >= grace {
-		return fmt.Errorf("poll_timeout %s must be below %d x poller.interval (%s)",
-			c.Poller.PollTimeout, health.HealthyGraceFactor, grace)
+	if worst := c.Poller.PollTimeout + c.Modbus.Timeout; worst >= grace {
+		return fmt.Errorf("poll_timeout + modbus.timeout (%s) must be below %d x "+
+			"poller.interval (%s)", worst, health.HealthyGraceFactor, grace)
 	}
 	return nil
 }

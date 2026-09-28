@@ -124,7 +124,18 @@ func TestNewRegistry_ValidationFailures(t *testing.T) {
 			[]Register{daily, monthly},
 			[]Edge{edge},
 			[]NetPair{{Level: period.Monthly, Export: "m", Import: "m", Target: "m"}},
-		},
+		}, // Near the top of the address space Address+Count must not wrap (review nit).
+		{"runs past 65535", []Register{{Key: "a", Address: 65535, DataType: Uint32, Scale: 1}}, nil, nil},
+		{"overlap across wrap", []Register{
+			{Key: "a", Address: 65534, DataType: Uint16, Scale: 1},
+			{Key: "b", Address: 65535, DataType: Uint16, Scale: 1},
+			{Key: "c", Address: 65533, DataType: Uint32, Scale: 1},
+		}, nil, nil},
+		// A total whose source has no yearly edge would fold 0 into the baseline (AGG-L2).
+		{"total without yearly source", []Register{daily, {
+			Key: "t", DataType: Uint32, Scale: 1,
+			Store: StoreTotal,
+		}}, []Edge{{Level: period.Total, Source: "d", Target: "t"}}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

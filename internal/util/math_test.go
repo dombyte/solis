@@ -2,7 +2,11 @@ package util
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFloat64With2Decimals_MarshalJSON(t *testing.T) {
@@ -33,5 +37,13 @@ func TestFloat64With2Decimals_MarshalJSON(t *testing.T) {
 				t.Errorf("expected %q, got %q", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestFloat64With2Decimals_NonFiniteIsNull(t *testing.T) {
+	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		b, err := json.Marshal(struct{ V Float64With2Decimals }{Float64With2Decimals(f)})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"V":null}`, string(b))
 	}
 }

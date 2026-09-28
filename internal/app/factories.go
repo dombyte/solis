@@ -80,8 +80,11 @@ func (m *modbusComponent) Stop() error {
 	cancel, done, wasStopped := m.cancel, m.done, m.stopped
 	m.stopped = true
 	m.mu.Unlock()
-	if cancel == nil || wasStopped {
+	if wasStopped {
 		return nil
+	}
+	if cancel == nil { // stopped before Start: nothing runs, but the client is ours to close
+		return m.client.Close()
 	}
 	cancel()
 	<-done

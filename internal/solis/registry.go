@@ -69,6 +69,9 @@ func newRegistry(regs []Register, edges []Edge, nets []NetPair) (*Registry, erro
 	if err := r.validateComputed(); err != nil {
 		return nil, err
 	}
+	if err := r.validateTotalSources(); err != nil {
+		return nil, err
+	}
 	r.blocks = PlanBlocks(r.Polled(), MaxBlockGap, MaxBlockLen)
 	return r, nil
 }
@@ -104,6 +107,9 @@ func validateRegister(reg Register) error {
 	if reg.Store < StoreNone || reg.Store > StoreStatus {
 		return invalid(reg.Key, "register %q has invalid store %d", reg.Key, reg.Store)
 	}
+	if int(reg.Address)+int(reg.Count()) > addressSpace {
+		return invalid(reg.Key, "register %q runs past address 65535", reg.Key)
+	}
 	return validateAddressing(reg)
 }
 
@@ -132,8 +138,28 @@ func (r *Registry) validateOverlaps() error {
 	polled := r.Polled()
 	for i := 1; i < len(polled); i++ {
 		prev := polled[i-1]
-		if prev.Address+prev.Count() > polled[i].Address {
+		if int(prev.Address)+int(prev.Count()) > int(polled[i].Address) { // no uint16 wrap
 			return invalid(prev.Key, "registers %q and %q overlap", prev.Key, polled[i].Key)
+		}
+	}
+	return nil
+}
+
+// addressSpace is the number of Modbus register addresses (0-65535).
+const addressSpace = 1 << 16
+
+// validateTotalSources requires every daily source of a total to also feed a yearly
+// value: the baseline fold at year close adds the year's sums per total edge, and a
+// source without a yearly edge would silently fold 0 (review AGG-L2).
+func (r *Registry) validateTotalSources() error {
+	yearly := make(map[string]bool)
+	for _, e := range r.Edges(period.Yearly) {
+		yearly[e.Source] = true
+	}
+	for _, e := range r.Edges(period.Total) {
+		if !yearly[e.Source] {
+			return invalid(e.Target, "total %q sums %q, which has no yearly edge", e.Target,
+				e.Source)
 		}
 	}
 	return nil

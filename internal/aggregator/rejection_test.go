@@ -77,3 +77,15 @@ func TestRun_CutoverMonthContinuesFromInverterValue(t *testing.T) {
 	require.NotNil(t, v)
 	assert.InDelta(t, 405.0, v.DecodedValue, 1e-9, "400 at cutover + 5 kWh since")
 }
+
+// A run cut short by Stop (cancelled context) is not a failure: no Recovering report
+// (review AGG-L6). The reporter mock only allows Healthy and the disk error.
+func TestRun_CancelledRunIsNotRecovering(t *testing.T) {
+	e := newEnv(t, at("2026-08-10 12:00"), at("2026-08-01 12:00"))
+	e.daily("pv_energy_daily", "2026-08-09", 1)
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	e.agg.run(ctx)
+	assert.Equal(t, health.Healthy, e.agg.State())
+	assert.Zero(t, e.cache.merges.Load())
+}

@@ -314,7 +314,9 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
 - **`meta` table:** the only schema addition. Holds the cutover date, closed-period watermarks
   (`closed:daily:<key>`, `closed:netdaily`, `closed:monthly`, `closed:yearly`), the total
   baselines (`baseline:<key>`), `baseline_year` and the retention watermark `purged_before`.
-  At cutover: monthly = previous month, yearly = previous year, daily/net-daily = today − 2.
+  At cutover: daily/net-daily = today − 2 (the "closed day"); monthly = the month before the
+  closed day's month, yearly = the year before the closed day's year (a cutover on the 1st
+  keeps the previous month open while its last day is still writable).
 - **Cutover month/year keep the inverter values:** the cutover month and year stay open, so at
   cutover the difference between each stored (inverter-reported) monthly/yearly value and its
   daily sum up to that day is stored as `offset:<level>:<period>:<key>`; the aggregator adds
