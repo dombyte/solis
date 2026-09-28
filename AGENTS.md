@@ -653,6 +653,11 @@ storage:
   `storage.yearly_retention` (follow `daily_retention`) and `storage.enable_migrations`
   (migrations always run).
 - Cross-field rule: `poller.poll_timeout` < 3 × `poller.interval` (health healthy grace).
+- Durations must be strings with a unit (`30s`, `1y`); a bare number is rejected (it would
+  otherwise decode as nanoseconds). `poller.interval` and `app.timeout` are at least 1 s,
+  `modbus.slave_id` is 1–247, block delays are ≥ 0.
+- Every config key has a default in `setDefaults` (zero values included) — viper only
+  applies `SOLIS_*` overrides to keys it knows; `TestSetDefaults_CoversEveryKey` enforces it.
 - Timezone comes from the `TZ` env var (`time.Local`), never from config. Pin `TZ` in
   docker-compose; the image ships zoneinfo.
 

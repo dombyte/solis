@@ -2,6 +2,7 @@ package util
 
 import (
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -31,8 +32,8 @@ func ParseDuration(s string) (time.Duration, error) {
 			return 0, &DurationError{Input: s}
 		}
 		d, err := durationToken(num, unit)
-		if err != nil {
-			return 0, &DurationError{Input: s}
+		if err != nil || total > math.MaxInt64-d {
+			return 0, &DurationError{Input: s} // malformed, or the sum overflows
 		}
 		total += d
 		rest = tail
@@ -63,7 +64,11 @@ func durationToken(num, unit string) (time.Duration, error) {
 		if err != nil {
 			return 0, err
 		}
-		return time.Duration(n * float64(base)), nil
+		f := n * float64(base)
+		if f >= math.MaxInt64 { // ~292 years; the conversion would wrap
+			return 0, ErrInvalidDuration
+		}
+		return time.Duration(f), nil
 	}
 	return time.ParseDuration(num + unit)
 }

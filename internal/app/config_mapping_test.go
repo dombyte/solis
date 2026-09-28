@@ -27,7 +27,7 @@ func ruleConfig(t *testing.T) *config.AppConfig {
 
 func TestConfigRules(t *testing.T) {
 	rtu := func(m config.ModbusSettings) config.ModbusSettings {
-		m.Address, m.Timeout = "rtu:///dev/ttyUSB0", time.Second
+		m.Address, m.Timeout, m.SlaveID = "rtu:///dev/ttyUSB0", time.Second, 1
 		return m
 	}
 	tests := []struct {

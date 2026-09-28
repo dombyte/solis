@@ -4,9 +4,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -15,7 +17,7 @@ func validConfig() AppConfig {
 	return AppConfig{
 		App:      AppSettings{Debug: "INFO", Port: 8080, Timeout: 30 * time.Second},
 		Poller:   PollerSettings{Interval: 5 * time.Second, BlockAttempts: 2, PollTimeout: 5 * time.Second},
-		Modbus:   ModbusSettings{Address: "tcp://h:502", Timeout: time.Second},
+		Modbus:   ModbusSettings{Address: "tcp://h:502", Timeout: time.Second, SlaveID: 1},
 		Rollover: RolloverSettings{Time: "23:59"},
 		Storage: StorageSettings{
 			Path: "x.db", DailyRetention: time.Hour, ErrorRetention: time.Hour,
@@ -35,8 +37,24 @@ func TestValidate(t *testing.T) {
 		{"app debug", func(c *AppConfig) { c.App.Debug = "DEBG" }, "invalid debug level"},
 		{"app debug lower", func(c *AppConfig) { c.App.Debug = "warn" }, ""},
 		{"app timeout", func(c *AppConfig) { c.App.Timeout = 0 }, "app timeout"},
+		{
+			"app timeout below 1s", func(c *AppConfig) { c.App.Timeout = 30 * time.Nanosecond },
+			"app timeout must be at least 1s",
+		},
 		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
-		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be positive"},
+		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be at least"},
+		{
+			"poll interval ms", func(c *AppConfig) { c.Poller.Interval = 5 * time.Millisecond },
+			"interval must be at least 1s",
+		},
+		{
+			"negative retry delay", func(c *AppConfig) { c.Poller.BlockRetryDelay = -1 },
+			"block_retry_delay",
+		},
+		{"negative block interval", func(c *AppConfig) { c.Poller.BlockInterval = -1 }, "block_interval"},
+		{"slave id 0", func(c *AppConfig) { c.Modbus.SlaveID = 0 }, "slave_id must be 1-247"},
+		{"slave id 300", func(c *AppConfig) { c.Modbus.SlaveID = 300 }, "got 300"},
+		{"slave id 247", func(c *AppConfig) { c.Modbus.SlaveID = 247 }, ""},
 		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
 		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poll_timeout"},
 		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
@@ -87,7 +105,7 @@ func TestValidate_NamesSection(t *testing.T) {
 	var ve *ValidationError
 	require.ErrorAs(t, cfg.Validate(), &ve)
 	assert.Equal(t, "poller", ve.Section)
-	assert.EqualError(t, ve, "invalid config: poller: poller interval must be positive")
+	assert.EqualError(t, ve, "invalid config: poller: poller interval must be at least 1s, got 0s")
 }
 
 func writeConfig(t *testing.T, content string) string {
@@ -167,6 +185,74 @@ func TestLoadConfig_EnvOverrides(t *testing.T) {
 	assert.Equal(t, 9090, cfg.App.Port)
 	assert.Equal(t, "tcp://10.0.0.1:502", cfg.Modbus.Address)
 	assert.Equal(t, "22:00", cfg.Rollover.Time)
+}
+
+// Every key must accept its SOLIS_* override, including keys whose default is a zero
+// value (review RT-M1: the rtu serial settings silently ignored their env variables).
+func TestLoadConfig_EnvOverridesKeysWithoutFileEntry(t *testing.T) {
+	t.Setenv("SOLIS_MODBUS_SPEED", "9600")
+	t.Setenv("SOLIS_MODBUS_DATA_BITS", "7")
+	t.Setenv("SOLIS_MODBUS_PARITY", "E")
+	t.Setenv("SOLIS_MODBUS_STOP_BITS", "1")
+	t.Setenv("SOLIS_MODBUS_SLAVE_ID", "3")
+	cfg, err := LoadConfig(writeConfig(t, "modbus:\n  address: \"rtu:///dev/ttyUSB0\"\n"))
+	require.NoError(t, err)
+	assert.Equal(t, uint(9600), cfg.Modbus.Speed)
+	assert.Equal(t, uint(7), cfg.Modbus.DataBits)
+	assert.Equal(t, "E", cfg.Modbus.Parity)
+	assert.Equal(t, uint(1), cfg.Modbus.StopBits)
+	assert.Equal(t, 3, cfg.Modbus.SlaveID)
+}
+
+// Guards RT-M1 for future keys: every mapstructure key of AppConfig has a default.
+func TestSetDefaults_CoversEveryKey(t *testing.T) {
+	v := viper.New()
+	setDefaults(v)
+	for _, key := range configKeys(reflect.TypeFor[AppConfig](), "") {
+		assert.True(t, v.IsSet(key), "no default for %s: its SOLIS_* override would be ignored", key)
+	}
+}
+
+// configKeys lists the dotted mapstructure keys of the leaf fields of t.
+func configKeys(t reflect.Type, prefix string) []string {
+	var keys []string
+	for i := range t.NumField() {
+		f := t.Field(i)
+		tag := f.Tag.Get("mapstructure")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		if f.Type.Kind() == reflect.Struct && f.Type != reflect.TypeFor[time.Duration]() {
+			keys = append(keys, configKeys(f.Type, prefix+tag+".")...)
+			continue
+		}
+		keys = append(keys, prefix+tag)
+	}
+	return keys
+}
+
+// A bare number is not a duration (review RT-M3: `timeout: 30` used to become 30ns).
+func TestLoadConfig_BareNumberDurationRejected(t *testing.T) {
+	_, err := LoadConfig(writeConfig(t, "app:\n  timeout: 30\n"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a duration string")
+	_, err = LoadConfig(writeConfig(t, "poller:\n  interval: 5\n"))
+	require.Error(t, err)
+}
+
+// An out-of-range slave_id is rejected instead of wrapping (review RT-M2: 300 -> 44).
+func TestLoadConfig_SlaveIDOutOfRange(t *testing.T) {
+	_, err := LoadConfig(writeConfig(t, "modbus:\n  slave_id: 300\n"))
+	require.ErrorIs(t, err, ErrInvalidConfig)
+	assert.Contains(t, err.Error(), "slave_id must be 1-247, got 300")
+}
+
+func TestLoadConfig_RemovedSettingViaEnvWarns(t *testing.T) {
+	t.Setenv("SOLIS_APP_SERVE_ONLY", "true")
+	cfg, err := LoadConfig(writeConfig(t, "app:\n  port: 8080\n"))
+	require.NoError(t, err)
+	require.Len(t, cfg.Warnings, 1)
+	assert.Contains(t, cfg.Warnings[0], "app.serve_only")
 }
 
 func TestLoadConfig_RemovedSettingsWarn(t *testing.T) {

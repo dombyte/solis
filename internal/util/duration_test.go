@@ -34,7 +34,8 @@ func TestParseDuration(t *testing.T) {
 }
 
 func TestParseDuration_Invalid(t *testing.T) {
-	for _, in := range []string{"", "d", "1", "-1d", "1x", "1..2d", "1d-2h"} {
+	// 300y and 200y+200y overflow int64 nanoseconds (~292y) and must not wrap (RT-L4).
+	for _, in := range []string{"", "d", "1", "-1d", "1x", "1..2d", "1d-2h", "300y", "200y200y"} {
 		t.Run(in, func(t *testing.T) {
 			_, err := ParseDuration(in)
 			assert.ErrorIs(t, err, ErrInvalidDuration)

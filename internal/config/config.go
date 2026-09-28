@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -100,8 +101,9 @@ type ModbusSettings struct {
 	Address string `mapstructure:"address"`
 	// Timeout is the connection/read timeout.
 	Timeout time.Duration `mapstructure:"timeout"`
-	// SlaveID is the Modbus unit/slave ID.
-	SlaveID byte `mapstructure:"slave_id"`
+	// SlaveID is the Modbus unit/slave ID (1-247). Decoded as int so an out-of-range
+	// value is rejected instead of silently wrapping into a byte.
+	SlaveID int `mapstructure:"slave_id"`
 	// Speed is the serial link speed in bps (rtu only, library default 19200).
 	Speed uint `mapstructure:"speed"`
 	// DataBits is the number of bits per serial character (rtu only, library default 8).
@@ -144,6 +146,9 @@ type StorageSettings struct {
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 }
 
+// envPrefix is the prefix of every environment override (SOLIS_MODBUS_ADDRESS, ...).
+const envPrefix = "SOLIS"
+
 // Numeric defaults (string and duration defaults are self-describing in setDefaults).
 const (
 	defaultPort          = 8080
@@ -151,7 +156,18 @@ const (
 	defaultMaxBackups    = 3
 )
 
-// setDefaults configures default values for Viper.
+// Bounds checked by Validate.
+const (
+	minSlaveID = 1
+	maxSlaveID = 247 // 0 is broadcast, 248-255 are reserved
+	// minInterval bounds poller.interval and app.timeout: a bare number or a typo like
+	// "5ms" must not make the app poll or time out requests in microseconds.
+	minInterval = time.Second
+)
+
+// setDefaults configures default values for Viper. Every key needs a default (zero
+// values included): viper's AutomaticEnv only applies SOLIS_* overrides to keys it
+// already knows, so a key without a default silently ignores its env variable.
 func setDefaults(v *viper.Viper) {
 	defaults := map[string]any{
 		"app.debug": "INFO", "app.port": defaultPort, "app.timeout": "30s",
@@ -160,6 +176,8 @@ func setDefaults(v *viper.Viper) {
 		"poller.poll_timeout": "30s",
 		"modbus.address":      "tcp://192.168.1.100:502",
 		"modbus.timeout":      "5s", "modbus.slave_id": 1,
+		// rtu serial settings: 0/"" = library default (19200 8N2)
+		"modbus.speed": 0, "modbus.data_bits": 0, "modbus.parity": "", "modbus.stop_bits": 0,
 		"rollover.time":           "23:59",
 		"storage.path":            "./data/solis.db",
 		"storage.daily_retention": "1y", "storage.error_retention": "1y",
@@ -182,7 +200,7 @@ func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	v.SetConfigType("yaml")
 	v.SetConfigFile(configPath)
 	v.AutomaticEnv()
-	v.SetEnvPrefix("SOLIS")
+	v.SetEnvPrefix(envPrefix)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	setDefaults(v)
 
@@ -217,15 +235,22 @@ func readConfigFile(v *viper.Viper) ([]string, error) {
 	return []string{"config file not found, using defaults"}, nil
 }
 
-// removedKeyWarnings lists removed settings that are still present in the file.
+// removedKeyWarnings lists removed settings that are still present in the file or set
+// through their SOLIS_* environment variable.
 func removedKeyWarnings(v *viper.Viper) []string {
 	var warnings []string
 	for key, why := range removedKeys() {
-		if v.InConfig(key) {
+		if v.InConfig(key) || envSet(key) {
 			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
 		}
 	}
 	return warnings
+}
+
+// envSet reports whether the SOLIS_* variable of key is set.
+func envSet(key string) bool {
+	_, ok := os.LookupEnv(envPrefix + "_" + strings.ToUpper(strings.ReplaceAll(key, ".", "_")))
+	return ok
 }
 
 // Validate validates every settings section, then applies rules.
@@ -233,7 +258,7 @@ func (c *AppConfig) Validate(rules ...Rule) error {
 	sections := []struct {
 		name string
 		v    interface{ Validate() error }
-	}{{"app", &c.App}, {"poller", &c.Poller}, {"storage", &c.Storage}}
+	}{{"app", &c.App}, {"poller", &c.Poller}, {"modbus", &c.Modbus}, {"storage", &c.Storage}}
 	for _, s := range sections {
 		if err := s.v.Validate(); err != nil {
 			return &ValidationError{Section: s.name, Err: err}
@@ -248,10 +273,15 @@ func (c *AppConfig) Validate(rules ...Rule) error {
 }
 
 // durationHook decodes duration strings with the extra units d, w and y ("1y", "2w").
+// A bare number is rejected: mapstructure would read `timeout: 30` as 30 nanoseconds.
 func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
-	s, ok := data.(string)
-	if !ok || to != reflect.TypeFor[time.Duration]() {
+	if to != reflect.TypeFor[time.Duration]() {
 		return data, nil
+	}
+	s, ok := data.(string)
+	if !ok {
+		return nil, fmt.Errorf("%w: %v is not a duration string (use a unit, e.g. \"30s\")",
+			util.ErrInvalidDuration, data)
 	}
 	return util.ParseDuration(s)
 }
@@ -262,8 +292,8 @@ func (a *AppSettings) Validate() error {
 		return fmt.Errorf("invalid debug level: %q (must be DEBUG, INFO, WARN, ERROR, or "+
 			"FATAL)", a.Debug)
 	}
-	if a.Timeout <= 0 {
-		return errors.New("app timeout must be positive")
+	if a.Timeout < minInterval {
+		return fmt.Errorf("app timeout must be at least %s, got %s", minInterval, a.Timeout)
 	}
 	return validatePort("server port", a.Port)
 }
@@ -278,14 +308,26 @@ func validatePort(name string, port int) error {
 
 // Validate validates Poller configuration.
 func (p *PollerSettings) Validate() error {
-	if p.Interval <= 0 {
-		return errors.New("poller interval must be positive")
+	if p.Interval < minInterval {
+		return fmt.Errorf("poller interval must be at least %s, got %s", minInterval, p.Interval)
 	}
 	if p.BlockAttempts <= 0 {
 		return errors.New("block_attempts must be at least 1")
 	}
 	if p.PollTimeout <= 0 {
 		return errors.New("poll_timeout must be positive")
+	}
+	if p.BlockRetryDelay < 0 || p.BlockInterval < 0 {
+		return errors.New("block_retry_delay and block_interval must be >= 0")
+	}
+	return nil
+}
+
+// Validate validates the structural Modbus settings (the address format and serial
+// parameters are checked by the modbus package through an injected rule).
+func (m *ModbusSettings) Validate() error {
+	if m.SlaveID < minSlaveID || m.SlaveID > maxSlaveID {
+		return fmt.Errorf("slave_id must be %d-%d, got %d", minSlaveID, maxSlaveID, m.SlaveID)
 	}
 	return nil
 }

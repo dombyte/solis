@@ -22,7 +22,8 @@ func ConfigRules() []config.Rule {
 // modbusSettings converts the config section into the Modbus client's settings.
 func modbusSettings(m config.ModbusSettings) modbus.Settings {
 	return modbus.Settings{
-		Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
+		// SlaveID is validated to 1-247 by config, so the conversion cannot wrap.
+		Address: m.Address, UnitID: byte(m.SlaveID), Timeout: m.Timeout,
 		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits,
 	}
 }
