@@ -93,16 +93,20 @@ func (d Deps) validate() error {
 	return nil
 }
 
-// Start subscribes to the bus and starts the loop.
+// Start subscribes to the bus and starts the loop. It is a no-op once started or
+// stopped, so a late Start never leaks a subscription.
 func (a *Aggregator) Start(ctx context.Context) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.stopped || a.cancel != nil {
+		return nil
+	}
 	events, unsub, err := a.d.Bus.Subscribe(subscriberName, eventBuffer, eventbus.Coalesce)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	a.mu.Lock()
 	a.cancel, a.unsub, a.done = cancel, unsub, make(chan struct{})
-	a.mu.Unlock()
 	a.Beat()
 	go a.loop(ctx, events)
 	return nil

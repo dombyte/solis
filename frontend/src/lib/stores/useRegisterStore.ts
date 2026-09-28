@@ -19,7 +19,7 @@ interface RegisterStoreState {
   
   // Actions
   initialize: () => Promise<void>;
-  applyWsValues: (values: Record<string, WsValueDTO>, ts?: string) => void;
+  applyWsValues: (values: Record<string, WsValueDTO>, ts?: string, removed?: string[]) => void;
   setConnected: (connected: boolean) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
@@ -180,10 +180,17 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
     });
   },
 
-  applyWsValues: (values, ts) => {
+  applyWsValues: (values, ts, removed) => {
     const metadataByKey = get().registerMetadataByKey;
     const updates = new Map(get().registerValues);
     let changed = false;
+
+    // Keys the server no longer has a value for: drop them so the UI shows "no data"
+    // instead of a stale value.
+    removed?.forEach((key) => {
+      const reg = metadataByKey.get(key);
+      if (reg && updates.delete(reg.id)) changed = true;
+    });
 
     Object.entries(values).forEach(([key, dto]) => {
       const reg = metadataByKey.get(key);

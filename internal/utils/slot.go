@@ -15,6 +15,20 @@ func (s *Slot[T]) Store(v T) { s.p.Store(&v) }
 // Clear removes the current value.
 func (s *Slot[T]) Clear() { s.p.Store(nil) }
 
+// ClearIf removes the current value only while match reports it as the caller's own,
+// so a late Clear of a replaced instance never withdraws its successor.
+func (s *Slot[T]) ClearIf(match func(T) bool) {
+	for {
+		p := s.p.Load()
+		if p == nil || !match(*p) {
+			return
+		}
+		if s.p.CompareAndSwap(p, nil) {
+			return
+		}
+	}
+}
+
 // Load returns the current value and whether one is set.
 func (s *Slot[T]) Load() (T, bool) {
 	p := s.p.Load()

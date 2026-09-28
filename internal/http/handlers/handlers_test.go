@@ -130,7 +130,7 @@ func TestData_HistoryByStore(t *testing.T) {
 	svc.EXPECT().Register("pv_energy_yearly").Return(reg("pv_energy_yearly", solis.StoreYearly),
 		nil)
 	svc.EXPECT().YearlyHistory(mock.Anything, "pv_energy_yearly", t0.Add(-defaultHistoryWindow),
-		time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)).Return(nil, nil).Once()
+		time.Date(2027, 12, 31, 0, 0, 0, 0, time.UTC)).Return(nil, nil).Once()
 	code, _ = do(t, r, "/api/data/pv_energy_yearly?end=2027")
 	assert.Equal(t, http.StatusOK, code)
 
@@ -145,9 +145,14 @@ func TestData_TotalAndStatus(t *testing.T) {
 	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
 	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&storage.TotalDataPoint{
 		Value: 5230.456, RawValue: 5230.456, Timestamp: "t"}, nil).Once()
-	code, body := do(t, r, "/api/data/pv_energy_total?start=2026-01-01")
+	code, body := do(t, r, "/api/data/pv_energy_total")
 	assert.Equal(t, http.StatusOK, code)
 	assert.InDelta(t, 5230.46, body["value"], 1e-9)
+
+	// A total has one lifetime value: range parameters are rejected, not ignored.
+	code, body = do(t, r, "/api/data/pv_energy_total?start=garbage")
+	assert.Equal(t, http.StatusBadRequest, code)
+	assert.Contains(t, body["message"], "historical queries not supported")
 
 	svc.EXPECT().Register("grid_fault_1").Return(reg("grid_fault_1", solis.StoreStatus), nil)
 	svc.EXPECT().StatusHistory(mock.Anything, "grid_fault_1").Return(service.StatusHistory{
@@ -210,4 +215,38 @@ func TestParseTimeRange(t *testing.T) {
 	assert.Equal(t, t0, tr.End)
 	_, err = ParseTimeRange("2026-08-01", "bad", t0)
 	assert.ErrorIs(t, err, service.ErrInvalidRange)
+
+	// Month/year ends are inclusive of the whole period.
+	tests := []struct{ start, end, wantStart, wantEnd string }{
+		{"2026", "2026", "2026-01-01", "2026-12-31"},
+		{"2026-02", "2026-02", "2026-02-01", "2026-02-28"},
+		{"2024-02", "2024-02", "2024-02-01", "2024-02-29"},
+		{"2026-08-01", "2026-08-03", "2026-08-01", "2026-08-03"},
+	}
+	for _, tt := range tests {
+		tr, err := ParseTimeRange(tt.start, tt.end, t0)
+		require.NoError(t, err)
+		assert.Equal(t, tt.wantStart, tr.Start.Format(time.DateOnly), tt.start)
+		assert.Equal(t, tt.wantEnd, tr.End.Format(time.DateOnly), tt.end)
+	}
+}
+
+func TestData_StorageTimeout(t *testing.T) {
+	svc := mocks.NewMockReadService(t)
+	deps := HandlerDeps{Service: svc, Errors: NewErrorMapper(zerolog.Nop()),
+		Clock: clocktest.New(t0), Timeout: time.Second}
+	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
+	svc.EXPECT().Total(mock.Anything, "pv_energy_total").RunAndReturn(
+		func(ctx context.Context, _ string) (*storage.TotalDataPoint, error) {
+			_, ok := ctx.Deadline()
+			assert.True(t, ok, "storage reads carry app.timeout")
+			return &storage.TotalDataPoint{}, nil
+		}).Once()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/data/pv_energy_total", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("key", "pv_energy_total")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	GetDataHandler(deps).ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

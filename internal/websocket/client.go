@@ -132,6 +132,7 @@ func (c *Client) write(kind int, b []byte) error {
 		c.log.Debug().Err(err).Msg("websocket write")
 		return err
 	}
-	c.touch()
+	// No touch here: activity means frames or pongs from the client, so a peer that
+	// only receives updates but never answers is still dropped as stale.
 	return nil
 }

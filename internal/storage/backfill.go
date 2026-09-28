@@ -24,6 +24,9 @@ type BackfillTx interface {
 	Baseline() (string, map[string]float64)
 	// PutBaseline replaces the baseline values (year unchanged).
 	PutBaseline(values map[string]float64) error
+	// PurgedBefore is the earliest day retention cleanup kept ("" = nothing deleted);
+	// daily rows before it are gone, so periods starting earlier cannot be recomputed.
+	PurgedBefore() string
 }
 
 // Backfill runs fn in one transaction and commits only when fn returns nil.
@@ -91,6 +94,8 @@ func (b *backfillTx) PutPeriod(l period.Level, key, p string, v float64) error {
 func (b *backfillTx) Baseline() (string, map[string]float64) {
 	return b.meta.baselineYear, maps.Clone(b.meta.baseline)
 }
+
+func (b *backfillTx) PurgedBefore() string { return b.meta.purgedBefore }
 
 func (b *backfillTx) PutBaseline(values map[string]float64) error {
 	for k, v := range values {

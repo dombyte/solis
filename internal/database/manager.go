@@ -39,6 +39,7 @@ func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.C
 	registry.Register(migrations.GetV1Migration())
 	registry.Register(migrations.GetV2Migration())
 	registry.Register(migrations.GetV3Migration())
+	registry.Register(migrations.GetV4Migration())
 	return &Manager{
 		cfg: cfg, backup: backup, registry: registry,
 		executor: NewMigrationExecutor(registry, log), clock: clock, log: log,
@@ -114,7 +115,7 @@ func (m *Manager) migrate(db *sql.DB, current int) error {
 }
 
 func (m *Manager) backupBeforeMigration() {
-	path, err := CreateBackup(m.cfg.Path, m.backup, m.log)
+	path, err := CreateBackup(m.cfg.Path, m.backup, m.clock.Now(), m.log)
 	if err != nil {
 		m.log.Error().Err(err).Msg("pre-migration backup failed, proceeding without backup")
 		return
@@ -138,7 +139,7 @@ func (m *Manager) RunPeriodicBackups(ctx context.Context) {
 		return
 	}
 	m.every(ctx, m.backup.BackupInterval, false, func() {
-		if path, err := CreateBackup(m.cfg.Path, m.backup, m.log); err != nil {
+		if path, err := CreateBackup(m.cfg.Path, m.backup, m.clock.Now(), m.log); err != nil {
 			m.log.Error().Err(err).Msg("online backup failed")
 		} else {
 			m.log.Info().Str("file", path).Msg("online backup created")

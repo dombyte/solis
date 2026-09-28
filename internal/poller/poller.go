@@ -122,10 +122,13 @@ func (d Deps) validate() error {
 
 // Start launches the poll loop; the first poll runs immediately.
 func (p *Poller) Start(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped || p.cancel != nil {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	p.cancel, p.done = cancel, make(chan struct{})
-	p.mu.Unlock()
 	p.Beat()
 	go p.loop(ctx)
 	return nil

@@ -21,9 +21,7 @@ import (
 func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
 	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
-		c, err := modbus.New(modbus.Settings{Address: cfg.Address, UnitID: cfg.SlaveID,
-			Timeout: cfg.Timeout, Speed: cfg.Speed, DataBits: cfg.DataBits, Parity: cfg.Parity,
-			StopBits: cfg.StopBits}, clock, log)
+		c, err := modbus.New(cfg.ModbusClientSettings(), clock, log)
 		if err != nil {
 			return nil, err
 		}
@@ -40,16 +38,22 @@ type modbusComponent struct {
 	slot     *utils.Slot[poller.Reader]
 	interval time.Duration
 
-	mu     sync.Mutex
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	done    chan struct{}
+	stopped bool
 }
 
+// Start publishes the client and runs the reconnect loop; a no-op once started or
+// stopped, so a late Start never publishes a closed client.
 func (m *modbusComponent) Start(ctx context.Context) error {
-	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.stopped || m.cancel != nil {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
 	m.cancel, m.done = cancel, make(chan struct{})
-	m.mu.Unlock()
 	m.slot.Store(m.client)
 	go func() {
 		defer close(m.done)
@@ -67,19 +71,23 @@ func (m *modbusComponent) beat() {
 	m.Set(health.Recovering, "modbus disconnected, reconnecting")
 }
 
+// Stop ends the loop, withdraws this instance's client (never a successor's) and closes
+// it (idempotent).
 func (m *modbusComponent) Stop() error {
 	m.mu.Lock()
-	cancel, done := m.cancel, m.done
-	m.cancel = nil
+	cancel, done, wasStopped := m.cancel, m.done, m.stopped
+	m.stopped = true
 	m.mu.Unlock()
-	if cancel == nil {
+	if cancel == nil || wasStopped {
 		return nil
 	}
 	cancel()
 	<-done
-	m.slot.Clear()
+	m.slot.ClearIf(m.owns)
 	return m.client.Close()
 }
+
+func (m *modbusComponent) owns(r poller.Reader) bool { return r == poller.Reader(m.client) }
 
 // CreatePoller returns the poller factory.
 func CreatePoller(deps poller.Deps) health.Factory {
@@ -113,17 +121,29 @@ func CreateHub(deps websocket.HubDeps, slot *utils.Slot[*websocket.Hub]) health.
 type hubComponent struct {
 	*websocket.Hub
 	slot *utils.Slot[*websocket.Hub]
+
+	mu      sync.Mutex
+	stopped bool
 }
 
+// Start runs the hub and publishes it unless it was already stopped.
 func (h *hubComponent) Start(ctx context.Context) error {
 	if err := h.Hub.Start(ctx); err != nil {
 		return err
 	}
-	h.slot.Store(h.Hub)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.stopped {
+		h.slot.Store(h.Hub)
+	}
 	return nil
 }
 
+// Stop withdraws this hub (never a successor) and stops it.
 func (h *hubComponent) Stop() error {
-	h.slot.Clear()
+	h.mu.Lock()
+	h.stopped = true
+	h.mu.Unlock()
+	h.slot.ClearIf(func(v *websocket.Hub) bool { return v == h.Hub })
 	return h.Hub.Stop()
 }

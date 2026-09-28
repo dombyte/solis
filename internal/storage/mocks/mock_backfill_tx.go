@@ -142,6 +142,51 @@ func (_c *MockBackfillTx_PeriodValue_Call) RunAndReturn(run func(period.Level, s
 	return _c
 }
 
+// PurgedBefore provides a mock function with no fields
+func (_m *MockBackfillTx) PurgedBefore() string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for PurgedBefore")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockBackfillTx_PurgedBefore_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PurgedBefore'
+type MockBackfillTx_PurgedBefore_Call struct {
+	*mock.Call
+}
+
+// PurgedBefore is a helper method to define mock.On call
+func (_e *MockBackfillTx_Expecter) PurgedBefore() *MockBackfillTx_PurgedBefore_Call {
+	return &MockBackfillTx_PurgedBefore_Call{Call: _e.mock.On("PurgedBefore")}
+}
+
+func (_c *MockBackfillTx_PurgedBefore_Call) Run(run func()) *MockBackfillTx_PurgedBefore_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBackfillTx_PurgedBefore_Call) Return(_a0 string) *MockBackfillTx_PurgedBefore_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBackfillTx_PurgedBefore_Call) RunAndReturn(run func() string) *MockBackfillTx_PurgedBefore_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PutBaseline provides a mock function with given fields: values
 func (_m *MockBackfillTx) PutBaseline(values map[string]float64) error {
 	ret := _m.Called(values)

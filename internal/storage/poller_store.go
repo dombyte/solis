@@ -85,8 +85,12 @@ func (s *Storage) writeStatus(tx *sql.Tx, rows []StatusRow) error {
 		if reg.Store != solis.StoreStatus {
 			return &WriteDomainError{Writer: writerPoller, Key: r.Key, Reason: "not a status register"}
 		}
+		// Two changes of one key within a millisecond keep the later value instead of
+		// failing the whole poll transaction on UNIQUE(register_key, timestamp).
 		if _, err := tx.Exec(`INSERT INTO error_data (timestamp, register_key, raw_value,
-			string_value) VALUES (?, ?, ?, '')`, r.At, r.Key, r.Raw); err != nil {
+			string_value) VALUES (?, ?, ?, '')
+			ON CONFLICT(register_key, timestamp) DO UPDATE SET raw_value = excluded.raw_value`,
+			statusTimestamp(r.At), r.Key, r.Raw); err != nil {
 			return fmt.Errorf("storage: write status %s: %w", r.Key, err)
 		}
 	}

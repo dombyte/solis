@@ -22,8 +22,7 @@ var ctx = context.Background()
 
 func testConfig(path string) *config.StorageSettings {
 	return &config.StorageSettings{
-		Path: path, DailyRetention: 365 * 24 * time.Hour, MonthlyRetention: 365 * 24 * time.Hour,
-		YearlyRetention: 365 * 24 * time.Hour, ErrorRetention: 30 * 24 * time.Hour,
+		Path: path, DailyRetention: 365 * 24 * time.Hour, ErrorRetention: 30 * 24 * time.Hour,
 		WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY",
 	}
 }
@@ -356,21 +355,119 @@ func TestHistoryAndJSONRounding(t *testing.T) {
 	assert.JSONEq(t, `{"timestamp":"t","raw_value":4}`, string(b))
 }
 
-func TestCleanupAll(t *testing.T) {
+// insertRows writes raw rows bypassing the write guards (history older than a cutover).
+func insertRows(t *testing.T, s *Storage, stmts ...string) {
+	t.Helper()
+	for _, q := range stmts {
+		_, err := s.db.Exec(q)
+		require.NoError(t, err)
+	}
+}
+
+func countRows(t *testing.T, s *Storage, table string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, s.db.QueryRow("SELECT COUNT(*) FROM "+table).Scan(&n))
+	return n
+}
+
+func TestCleanupAll_StatusRetention(t *testing.T) {
 	s, clk, _ := newStore(t, day("2026-08-05"))
-	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
-		{Key: "pv_energy_daily", Day: "2024-01-01", Value: 1},
-		{Key: "pv_energy_daily", Day: "2026-08-01", Value: 1},
-	}, Status: []StatusRow{{Key: "solis_status", Raw: 1, At: clk.Now().AddDate(0, -3, 0)}}}))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Status: []StatusRow{
+		{Key: "solis_status", Raw: 1, At: clk.Now().AddDate(0, -3, 0)},
+		{Key: "solis_status", Raw: 2, At: clk.Now().AddDate(0, 0, -1)},
+	}}))
 	require.NoError(t, s.CleanupAll(ctx))
-	sum, err := s.SumDaily(ctx, "pv_energy_daily", "", "2030-01-01")
-	require.NoError(t, err)
-	assert.InDelta(t, 1.0, sum, 0)
 	hist, err := s.GetErrorHistory(ctx, "solis_status", time.Time{}, clk.Now())
 	require.NoError(t, err)
-	assert.Empty(t, hist)
+	require.Len(t, hist, 1)
+	assert.InDelta(t, 2.0, hist[0].RawValue, 0)
 	require.NoError(t, s.CleanupAll(ctx)) // nothing deleted, no vacuum
 	require.NoError(t, s.Ping(ctx))
+}
+
+func TestCleanupAll_NothingFrozenKeepsPeriods(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	insertRows(t, s, `INSERT INTO daily_values (date, register_key, value, raw_value)
+		VALUES ('2020-01-01', 'pv_energy_daily', 1, 1)`)
+	require.NoError(t, s.CleanupAll(ctx))
+	assert.Equal(t, 1, countRows(t, s, "daily_values"))
+}
+
+func TestCleanupAll_FreezeAware(t *testing.T) {
+	tests := []struct {
+		name      string
+		retention time.Duration
+		purged    string
+		daily     int // rows left of 2024-01-01, 2025-07-15, 2025-09-01, 2026-08-01
+		monthly   int // rows left of 2025-07, 2025-08
+		yearly    int // rows left of 2024, 2025
+	}{
+		// wanted cutoff 2025-08-05 is before the first open day (2026-01-01).
+		{"retention wins", 365 * 24 * time.Hour, "2025-08-05", 2, 1, 1},
+		// wanted 2026-08-04 is clamped to 2026-01-01: open periods are never deleted.
+		{"freeze clamps", 24 * time.Hour, "2026-01-01", 1, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _, _ := newStore(t, day("2026-08-05"))
+			s.cfg.DailyRetention = tt.retention
+			_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-08-05")))
+			require.NoError(t, err)
+			insertRows(t, s,
+				`INSERT INTO daily_values (date, register_key, value, raw_value) VALUES
+				('2024-01-01', 'pv_energy_daily', 1, 1), ('2025-07-15', 'pv_energy_daily', 1, 1),
+				('2025-09-01', 'pv_energy_daily', 1, 1), ('2026-08-01', 'pv_energy_daily', 1, 1)`,
+				`INSERT INTO monthly_values (month, register_key, value, raw_value) VALUES
+				('2025-07', 'pv_energy_monthly', 1, 1), ('2025-08', 'pv_energy_monthly', 1, 1)`,
+				`INSERT INTO yearly_values (year, register_key, value, raw_value) VALUES
+				('2024', 'pv_energy_yearly', 1, 1), ('2025', 'pv_energy_yearly', 1, 1)`)
+			require.NoError(t, s.CleanupAll(ctx))
+			assert.Equal(t, tt.daily, countRows(t, s, "daily_values"))
+			assert.Equal(t, tt.monthly, countRows(t, s, "monthly_values"))
+			assert.Equal(t, tt.yearly, countRows(t, s, "yearly_values"))
+			require.NoError(t, s.Backfill(ctx, func(tx BackfillTx) error {
+				assert.Equal(t, tt.purged, tx.PurgedBefore())
+				return nil
+			}))
+			require.NoError(t, s.loadMeta(ctx)) // watermark persisted
+			assert.Equal(t, tt.purged, s.meta.purgedBefore)
+		})
+	}
+}
+
+func TestHistoryFormats(t *testing.T) {
+	s, clk, _ := newStore(t, day("2026-09-20"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{
+		Daily:  []DailyRow{{Key: "pv_energy_daily", Day: "2026-09-20", Value: 1}},
+		Status: []StatusRow{{Key: "solis_status", Raw: 3, At: clk.Now()}},
+	}))
+	d, err := s.GetDailyHistory(ctx, "pv_energy_daily", day("2026-09-01"), day("2026-09-30"))
+	require.NoError(t, err)
+	require.Len(t, d, 1)
+	assert.Equal(t, "2026-09-20", d[0].Date)
+
+	e, err := s.GetErrorHistory(ctx, "solis_status", day("2026-09-01"), day("2026-09-30"))
+	require.NoError(t, err)
+	require.Len(t, e, 1)
+	assert.Equal(t, clk.Now().UTC().Format("2006-01-02T15:04:05.000Z"), e[0].Timestamp)
+}
+
+func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
+	s, clk, _ := newStore(t, day("2026-09-20"))
+	base := clk.Now()
+	rows := make([]StatusRow, 0, maxErrorRows+2)
+	for i := range maxErrorRows + 2 {
+		rows = append(rows, StatusRow{Key: "solis_status", Raw: float64(i),
+			At: base.Add(time.Duration(i) * time.Second)})
+	}
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Status: rows}))
+	e, err := s.GetErrorHistory(ctx, "solis_status", base.Add(-time.Hour),
+		base.Add(time.Duration(maxErrorRows+10)*time.Second))
+	require.NoError(t, err)
+	require.Len(t, e, maxErrorRows)
+	assert.InDelta(t, 2.0, e[0].RawValue, 0, "oldest rows dropped")
+	assert.InDelta(t, float64(maxErrorRows+1), e[len(e)-1].RawValue, 0, "ascending order")
 }
 
 func TestNew_Errors(t *testing.T) {

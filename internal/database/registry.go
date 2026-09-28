@@ -68,7 +68,7 @@ func (r *MigrationRegistry) GetMigrationsFrom(fromVersion int) []Migration {
 const (
 	// CurrentSchemaVersion is the latest schema version that this application version supports.
 	// Increment this constant when adding new migrations.
-	CurrentSchemaVersion = 3
+	CurrentSchemaVersion = 4
 
 	// MinCompatibleVersion is the minimum schema version that this application version can work with.
 	// If a database has a version lower than this, migration will be required.

@@ -67,6 +67,8 @@ interface WsUpdateMessage {
   type: 'update';
   ts: string;
   values: Record<string, WsValueDTO>;
+  /** Subscribed keys that no longer have a current value. */
+  removed?: string[];
 }
 
 interface WsErrorMessage {

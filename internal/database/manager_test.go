@@ -53,7 +53,7 @@ func TestBackupFilenameForLegacyDatabase(t *testing.T) {
 	}
 
 	// Create backup (simplified - no version distinction)
-	backupPath, err := CreateBackup(dbPath, config, zerolog.Nop())
+	backupPath, err := CreateBackup(dbPath, config, time.Now(), zerolog.Nop())
 	if err != nil {
 		t.Fatalf("Failed to create backup: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestBackupFilenameForMigration(t *testing.T) {
 		BackupInterval: 24 * time.Hour,
 	}
 
-	backupPath, err := CreateBackup(dbPath, config, zerolog.Nop())
+	backupPath, err := CreateBackup(dbPath, config, time.Now(), zerolog.Nop())
 	if err != nil {
 		t.Fatalf("Failed to create backup: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestBackupFilenameConsistency(t *testing.T) {
 	}
 
 	// Create backup - should use consistent naming
-	backupPath, err := CreateBackup(dbPath, config, zerolog.Nop())
+	backupPath, err := CreateBackup(dbPath, config, time.Now(), zerolog.Nop())
 	if err != nil {
 		t.Fatalf("Failed to create backup: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestBackupBeforeMigration(t *testing.T) {
 	}
 
 	// Create backup - should work for any existing database
-	backupPath, err := CreateBackup(dbPath, configBackup, zerolog.Nop())
+	backupPath, err := CreateBackup(dbPath, configBackup, time.Now(), zerolog.Nop())
 	if err != nil {
 		t.Fatalf("Failed to create backup: %v", err)
 	}

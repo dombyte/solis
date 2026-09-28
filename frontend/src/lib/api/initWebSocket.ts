@@ -17,7 +17,7 @@ function handleMessage(message: WebSocketMessage): void {
       applyWsValues(message.values);
       break;
     case 'update':
-      applyWsValues(message.values, message.ts);
+      applyWsValues(message.values, message.ts, message.removed);
       break;
     case 'error':
       console.warn(`WebSocket error [${message.code}]: ${message.message}`, message.keys ?? []);

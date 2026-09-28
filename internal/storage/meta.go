@@ -20,6 +20,7 @@ const (
 	metaClosedYearly   = "closed:yearly"
 	metaBaseline       = "baseline:" // + total key
 	metaBaselineYear   = "baseline_year"
+	metaPurgedBefore   = "purged_before" // earliest day retention cleanup kept
 	floatBits          = 64
 )
 
@@ -30,6 +31,7 @@ type metaState struct {
 	frozen       map[period.Level]string // Daily = net daily
 	baselineYear string
 	baseline     map[string]float64
+	purgedBefore string
 }
 
 func newMetaState() metaState {
@@ -94,6 +96,8 @@ func (m *metaState) apply(k, v string) error {
 		m.cutover = v
 	case metaBaselineYear:
 		m.baselineYear = v
+	case metaPurgedBefore:
+		m.purgedBefore = v
 	case metaClosedNetDaily:
 		m.frozen[period.Daily] = v
 	case metaClosedMonthly:

@@ -168,8 +168,10 @@ func (s *Supervisor) start(m *managed) {
 	m.comp = comp
 	s.log.Debug().Str("component", m.name).Msg("component created")
 	ctx, cancel := context.WithCancel(s.ctx)
-	m.cancel = cancel
+	started := make(chan struct{})
+	m.cancel, m.started = cancel, started
 	go func() {
+		defer close(started)
 		if err := comp.Start(ctx); err != nil {
 			rep.Report(Failed, "start failed: "+err.Error())
 		}
@@ -186,7 +188,9 @@ func safeFactory(f Factory, r Reporter) (c Component, err error) {
 	return f(r)
 }
 
-// stop stops m's current instance, bounded by StopTimeout. Caller holds mu.
+// stop stops m's current instance, bounded by StopTimeout. Stop runs only after the
+// instance's Start returned, so a component is never stopped before it started. Caller
+// holds mu.
 func (s *Supervisor) stop(m *managed) {
 	if m.cancel != nil {
 		m.cancel()
@@ -196,8 +200,13 @@ func (s *Supervisor) stop(m *managed) {
 		return
 	}
 	done := make(chan error, 1)
-	comp := m.comp
-	go func() { done <- comp.Stop() }()
+	comp, started := m.comp, m.started
+	go func() {
+		if started != nil {
+			<-started
+		}
+		done <- comp.Stop()
+	}()
 	timer := s.clock.NewTimer(StopTimeout)
 	defer timer.Stop()
 	select {

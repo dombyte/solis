@@ -49,11 +49,14 @@ type SnapshotMessage struct {
 	Values map[string]ValueDTO `json:"values"`
 }
 
-// UpdateMessage pushes changed subscribed keys; ts is the frame time.
+// UpdateMessage pushes changed subscribed keys; ts is the frame time. Removed lists
+// subscribed keys that no longer have a current value (e.g. a derived value whose
+// inputs became unknown); clients drop them instead of showing a stale value.
 type UpdateMessage struct {
-	Type   string              `json:"type"`
-	TS     string              `json:"ts"`
-	Values map[string]ValueDTO `json:"values"`
+	Type    string              `json:"type"`
+	TS      string              `json:"ts"`
+	Values  map[string]ValueDTO `json:"values"`
+	Removed []string            `json:"removed,omitempty"`
 }
 
 // ErrorMessage reports a protocol problem; the connection stays open.

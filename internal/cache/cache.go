@@ -36,24 +36,31 @@ func New(pub eventbus.Publisher, log zerolog.Logger) *Cache {
 }
 
 // ReplaceDomain atomically replaces all keys owned by domain with values: keys of the
-// domain that are absent from values are removed; other domains are untouched.
-// Values must not be mutated after the call.
+// domain that are absent from values are removed; other domains are untouched. The
+// published event lists written and removed keys, so consumers also learn about values
+// that disappeared. Values must not be mutated after the call.
 func (c *Cache) ReplaceDomain(domain string, values map[string]*solis.Value, at time.Time) {
 	c.mu.Lock()
-	removed := 0
+	var removed []string
 	for k, d := range c.owner {
 		if d == domain {
 			if _, keep := values[k]; !keep {
 				delete(c.data, k)
 				delete(c.owner, k)
-				removed++
+				removed = append(removed, k)
 			}
 		}
 	}
 	keys := c.put(domain, values, at)
 	c.mu.Unlock()
+	written := len(keys)
+	if len(removed) > 0 {
+		keys = append(keys, removed...)
+		sort.Strings(keys)
+	}
 	c.publish(domain, keys, at)
-	c.log.Debug().Str("domain", domain).Int("added", len(keys)).Int("removed", removed).Msg("cache replace domain")
+	c.log.Debug().Str("domain", domain).Int("added", written).Int("removed", len(removed)).
+		Msg("cache replace domain")
 }
 
 // Merge upserts values into domain without removing other keys of the domain.

@@ -15,6 +15,7 @@ type managed struct {
 	// Owned by the supervisor loop (guarded by Supervisor.mu).
 	comp      Component
 	cancel    context.CancelFunc
+	started   chan struct{} // closed once the instance's Start returned
 	startedAt time.Time
 	failures  int
 	latched   bool

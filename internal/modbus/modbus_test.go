@@ -28,8 +28,15 @@ func (d *device) HandleDiscreteInputs(*sv.DiscreteInputsRequest) ([]bool, error)
 func (d *device) HandleHoldingRegisters(*sv.HoldingRegistersRequest) ([]uint16, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
+// illegalAddr answers every read with an ILLEGAL DATA ADDRESS exception.
+const illegalAddr = 9000
+
 func (d *device) HandleInputRegisters(req *sv.InputRegistersRequest) ([]uint16, error) {
 	d.reads.Add(1)
+	if req.Addr == illegalAddr {
+		return nil, sv.ErrIllegalDataAddress
+	}
 	out := make([]uint16, req.Quantity)
 	for i := range out {
 		out[i] = req.Addr + uint16(i)
@@ -170,4 +177,63 @@ func TestReadError(t *testing.T) {
 	e := &ReadError{Addr: 1, Count: 2, Err: errors.New("x")}
 	assert.Contains(t, e.Error(), "read 2 registers at 1")
 	assert.EqualError(t, errors.Unwrap(e), "x")
+}
+
+func TestKeepsConnection(t *testing.T) {
+	tests := []struct {
+		err      error
+		tcp, rtu bool
+	}{
+		{sv.ErrIllegalDataAddress, true, true},
+		{sv.ErrServerDeviceBusy, true, true},
+		{sv.ErrAcknowledge, true, true},
+		{sv.ErrGWTargetFailedToRespond, true, true},
+		{sv.ErrBadCRC, false, true},
+		{sv.ErrShortFrame, false, true},
+		{sv.ErrProtocolError, false, true},
+		{sv.ErrRequestTimedOut, false, true},
+		{sv.ErrBadTransactionId, false, false},
+		{errors.New("broken pipe"), false, false},
+	}
+	tcp := &Client{}
+	rtu := &Client{rtu: true}
+	for _, tt := range tests {
+		t.Run(tt.err.Error(), func(t *testing.T) {
+			assert.Equal(t, tt.tcp, tcp.keepsConnection(tt.err), "tcp")
+			assert.Equal(t, tt.rtu, rtu.keepsConnection(tt.err), "rtu")
+		})
+	}
+}
+
+func TestReadRegisters_ExceptionKeepsConnection(t *testing.T) {
+	port := freePort(t)
+	srv := startDevice(t, port)
+	defer func() { _ = srv.Stop() }()
+	c, err := New(settings(port), utils.NewRealClock(), zerolog.Nop())
+	require.NoError(t, err)
+	require.NoError(t, c.connect())
+	defer func() { _ = c.Close() }()
+
+	_, err = c.ReadRegisters(context.Background(), illegalAddr, 1)
+	require.ErrorIs(t, err, sv.ErrIllegalDataAddress)
+	assert.True(t, c.IsConnected(), "an exception reply is a valid frame")
+	regs, err := c.ReadRegisters(context.Background(), 5, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []uint16{5, 6}, regs)
+}
+
+func TestSettingsValidate_Serial(t *testing.T) {
+	base := Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}
+	ok := base
+	ok.DataBits, ok.StopBits = 7, 1
+	assert.NoError(t, ok.Validate())
+	for _, s := range []Settings{
+		{Address: base.Address, Timeout: 1, DataBits: 4},
+		{Address: base.Address, Timeout: 1, DataBits: 9},
+		{Address: base.Address, Timeout: 1, StopBits: 3},
+		{Address: "tcp://h:0", Timeout: 1},
+		{Address: "tcp://h:x", Timeout: 1},
+	} {
+		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings, s)
+	}
 }

@@ -98,16 +98,20 @@ func NewHub(d HubDeps) (*Hub, error) {
 	}, nil
 }
 
-// Start subscribes to the bus and runs the hub loop.
+// Start subscribes to the bus and runs the hub loop. It is a no-op once Stop ran, so a
+// late Start never reuses the already closed done channel.
 func (h *Hub) Start(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopped || h.cancel != nil {
+		return nil
+	}
 	events, unsub, err := h.d.Bus.Subscribe(subscriberName, eventBuffer, eventbus.Coalesce)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	h.mu.Lock()
 	h.cancel = cancel
-	h.mu.Unlock()
 	h.Beat()
 	go func() {
 		defer unsub()
@@ -275,23 +279,35 @@ func (h *Hub) flush(clients map[*Client]*clientState) {
 	current := h.d.Cache.GetMultiple(unionKeys(clients))
 	ts := h.d.Clock.Now().Format(time.RFC3339)
 	for c, st := range clients {
-		upd := UpdateMessage{Type: TypeUpdate, TS: ts, Values: map[string]ValueDTO{}}
-		for k := range st.subs {
-			v, ok := current[k]
-			if !ok {
-				continue
-			}
-			s := stateOf(v)
-			if prev, seen := st.last[k]; seen && prev.equal(s) {
-				continue
-			}
-			st.last[k] = s
-			upd.Values[k] = updateDTO(v)
-		}
-		if len(upd.Values) > 0 {
+		upd := st.diff(current)
+		if len(upd.Values) > 0 || len(upd.Removed) > 0 {
+			upd.Type, upd.TS = TypeUpdate, ts
 			h.send(clients, c, upd)
 		}
 	}
+}
+
+// diff returns the changed and removed subscribed keys and records them as pushed.
+func (st *clientState) diff(current map[string]*solis.Value) UpdateMessage {
+	upd := UpdateMessage{Values: map[string]ValueDTO{}}
+	for k := range st.subs {
+		v, ok := current[k]
+		if !ok {
+			if _, seen := st.last[k]; seen {
+				delete(st.last, k)
+				upd.Removed = append(upd.Removed, k)
+			}
+			continue
+		}
+		s := stateOf(v)
+		if prev, seen := st.last[k]; seen && prev.equal(s) {
+			continue
+		}
+		st.last[k] = s
+		upd.Values[k] = updateDTO(v)
+	}
+	sort.Strings(upd.Removed)
+	return upd
 }
 
 func unionKeys(clients map[*Client]*clientState) []string {

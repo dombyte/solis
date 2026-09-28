@@ -146,6 +146,26 @@ func TestSubscribeSnapshotUpdateUnsubscribe(t *testing.T) {
 	assert.Equal(t, map[string]any{"grid_power": map[string]any{"value": 7.0}}, values(read(t, c)))
 }
 
+func TestRemovedKeyIsPushed(t *testing.T) {
+	e := newEnv(t)
+	e.set(eventbus.DomainPoller, t0, map[string]float64{"battery_power_signed": 100,
+		"grid_power": 5})
+	c := e.dial(nil)
+	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"battery_power_signed",
+		"grid_power"}})
+	require.Len(t, values(read(t, c)), 2)
+
+	// The next poll no longer derives battery_power_signed: clients must drop it.
+	e.cache.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{
+		"grid_power": {Key: "grid_power", DecodedValue: 5, Timestamp: t0}}, t0.Add(time.Second))
+	e.sent++
+	e.flush()
+	upd := read(t, c)
+	assert.Equal(t, TypeUpdate, upd["type"])
+	assert.Equal(t, []any{"battery_power_signed"}, upd["removed"])
+	assert.Empty(t, values(upd), "unchanged grid_power is not repeated")
+}
+
 func TestCoalescesPollerAndAggregatorEvents(t *testing.T) {
 	e := newEnv(t)
 	c := e.dial(nil)
@@ -228,6 +248,10 @@ func TestNewHubValidationAndUnstartedStop(t *testing.T) {
 	e := newEnv(t)
 	h, err := NewHub(e.hub.d)
 	require.NoError(t, err)
+	require.NoError(t, h.Stop())
+	assert.ErrorIs(t, h.Register(&Client{}), ErrHubStopped)
+	// A late Start after Stop is a no-op (it used to close h.done twice and panic).
+	require.NoError(t, h.Start(context.Background()))
 	require.NoError(t, h.Stop())
 	assert.ErrorIs(t, h.Register(&Client{}), ErrHubStopped)
 }

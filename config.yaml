@@ -44,18 +44,16 @@ rollover:
 
 storage:
   path: ./data/solis.db
-  # Retention period for daily energy values
-  daily_retention: 87600h # 10 year
-  monthly_retention: 87600h # 10 year
-  yearly_retention: 87600h # 10 year
-  # Retention period for error/fault data
-  error_retention: 87600h # 10 year
+  # Retention of daily energy rows; monthly and yearly rows follow it. Only periods of
+  # already frozen years are deleted, so computed values never shrink. Units: s, m, h,
+  # d (day), w (week), y (365 days), combinable (e.g. "1y6w"). Default 1y.
+  daily_retention: 10y
+  # Retention of error/status change rows. Default 1y.
+  error_retention: 10y
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
-  # Database maintenance settings
-  # Enable automatic schema migrations on startup
-  enable_migrations: true
+  # Database maintenance settings (schema migrations always run on startup)
   # Enable database backup functionality
   enable_backup: true
   # Maximum number of backup files to keep (0 = unlimited)

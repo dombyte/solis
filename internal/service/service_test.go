@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/service/mocks"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
@@ -126,16 +127,27 @@ func TestStatusHistory(t *testing.T) {
 			{Timestamp: "2026-08-01T10:00:00Z", RawValue: 1},
 			{Timestamp: "2026-08-02T10:00:00Z", RawValue: 0},
 		}, nil).Once()
-	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{Timestamp: t0,
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{Timestamp: t0, RawValue: 2,
 		StatusDecoded: []string{"Grid overvoltage"}}).Once()
 
 	h, err := f.svc.StatusHistory(ctx, "grid_fault_1")
 	require.NoError(t, err)
 	assert.Equal(t, "Grid Fault 1 (Bitmask)", h.Name)
 	require.Len(t, h.History, 3, "cleared state (raw 0) is kept")
-	assert.Equal(t, t0.Format(time.RFC3339), h.History[0].Timestamp, "newest first")
+	assert.Equal(t, t0.UTC().Format(period.TimestampLayout), h.History[0].Timestamp,
+		"newest first")
 	assert.Equal(t, "2026-08-02T10:00:00Z", h.History[1].Timestamp)
 	assert.Equal(t, []string{"No grid"}, h.History[2].StatusDecoded)
+
+	// A cached state that equals the newest stored change is not listed twice.
+	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", mock.Anything, mock.Anything).
+		Return([]*storage.ErrorDataPoint{{Timestamp: "2026-08-02T10:00:00.000Z",
+			RawValue: 1}}, nil).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{Timestamp: t0, RawValue: 1,
+		StatusDecoded: []string{"No grid"}}).Once()
+	h, err = f.svc.StatusHistory(ctx, "grid_fault_1")
+	require.NoError(t, err)
+	assert.Len(t, h.History, 1)
 
 	// Store failure is best effort; the current value is still returned.
 	f.store.EXPECT().GetErrorHistory(ctx, "solis_status", mock.Anything, mock.Anything).

@@ -26,12 +26,26 @@ type fakeComp struct {
 	startErr error
 	rep      Reporter
 	stopped  atomic.Bool
-	order    *[]string
-	orderMu  *sync.Mutex
+	// startGate, when set, blocks Start until closed; stopEarly records a Stop that ran
+	// while Start had not returned yet.
+	startGate chan struct{}
+	started   atomic.Bool
+	stopEarly atomic.Bool
+	order     *[]string
+	orderMu   *sync.Mutex
 }
 
-func (f *fakeComp) Start(context.Context) error { return f.startErr }
+func (f *fakeComp) Start(context.Context) error {
+	if f.startGate != nil {
+		<-f.startGate
+	}
+	f.started.Store(true)
+	return f.startErr
+}
 func (f *fakeComp) Stop() error {
+	if !f.started.Load() {
+		f.stopEarly.Store(true)
+	}
 	f.stopped.Store(true)
 	if f.order != nil {
 		f.orderMu.Lock()
@@ -333,4 +347,19 @@ func TestStateStrings(t *testing.T) {
 	assert.Equal(t, "healthy", Healthy.String())
 	assert.Equal(t, "recovering", Recovering.String())
 	assert.Equal(t, "failed", Failed.String())
+}
+
+func TestStopWaitsForStart(t *testing.T) {
+	h := newHarness(t)
+	gate := make(chan struct{})
+	h.sup.Manage("hub", h.factory("hub", func() *fakeComp { return &fakeComp{startGate: gate} }))
+	h.run()
+	h.sup.Shutdown()
+	time.Sleep(10 * time.Millisecond) // give a premature Stop the chance to run
+	assert.False(t, h.latest("hub").stopped.Load(), "Stop must wait for Start")
+	close(gate)
+	<-h.done
+	c := h.latest("hub")
+	assert.True(t, c.stopped.Load())
+	assert.False(t, c.stopEarly.Load())
 }

@@ -161,7 +161,7 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 	httpLog := logging.Component(root, "http")
 	router := routes.SetupRoutes(routes.Deps{
 		Handlers: handlers.HandlerDeps{Service: svc, Errors: handlers.NewErrorMapper(httpLog),
-			Clock: a.clock},
+			Clock: a.clock, Timeout: a.cfg.App.Timeout},
 		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,
 	})
 	a.http = server.New(&a.cfg.App, router, httpLog)

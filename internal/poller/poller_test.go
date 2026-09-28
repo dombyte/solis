@@ -31,11 +31,12 @@ var bg = context.Background()
 
 // device is a fake inverter: register address -> value.
 type device struct {
-	mu        sync.Mutex
-	regs      map[uint16]uint16
-	connected atomic.Bool
-	failNext  atomic.Int32
-	reads     atomic.Int32
+	mu         sync.Mutex
+	regs       map[uint16]uint16
+	connected  atomic.Bool
+	failNext   atomic.Int32
+	dropOnFail atomic.Bool // failures are transport errors that drop the connection
+	reads      atomic.Int32
 }
 
 func newDevice() *device {
@@ -54,6 +55,9 @@ func (d *device) ReadRegisters(_ context.Context, addr, count uint16) ([]uint16,
 	d.reads.Add(1)
 	if d.failNext.Load() > 0 {
 		d.failNext.Add(-1)
+		if d.dropOnFail.Load() { // like modbus.Client.markLost on a transport error
+			d.connected.Store(false)
+		}
 		return nil, errors.New("timeout")
 	}
 	d.mu.Lock()
@@ -215,6 +219,17 @@ func TestPoll_BlockRetryThenSuccess(t *testing.T) {
 	e.clk.Advance(time.Second)
 	e.waitPolls(1)
 	assert.InDelta(t, 1.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
+}
+
+func TestPoll_TransportFailureSkipsRetry(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.dropOnFail.Store(true)
+	e.dev.failNext.Store(1)
+	e.start()
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
+	assert.Equal(t, int32(1), e.dev.reads.Load(), "a lost connection is not retried")
+	assert.Zero(t, e.polls.Load())
 }
 
 func TestPoll_ReadFailureDiscardsPartialPoll(t *testing.T) {

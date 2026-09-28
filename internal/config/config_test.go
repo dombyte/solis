@@ -19,9 +19,9 @@ func validConfig() AppConfig {
 		Modbus:   ModbusSettings{Address: "tcp://h:502", Timeout: time.Second},
 		Rollover: RolloverSettings{Time: "23:59"},
 		Storage: StorageSettings{
-			Path: "x.db", DailyRetention: time.Hour, MonthlyRetention: time.Hour,
-			YearlyRetention: time.Hour, ErrorRetention: time.Hour, CleanupInterval: time.Hour,
-			Synchronous: "NORMAL", TempStore: "MEMORY",
+			Path: "x.db", DailyRetention: time.Hour, ErrorRetention: time.Hour,
+			CleanupInterval: time.Hour,
+			Synchronous:     "NORMAL", TempStore: "MEMORY",
 		},
 	}
 }
@@ -37,19 +37,32 @@ func TestValidate(t *testing.T) {
 			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}
 		}, ""},
 		{"modbus scheme", func(c *AppConfig) { c.Modbus.Address = "udp://h:502" },
-			"scheme must be tcp or rtu"},
+			"must be tcp://host:port or rtu://<device>"},
 		{"modbus no scheme", func(c *AppConfig) { c.Modbus.Address = "h:502" },
-			"invalid modbus address"},
+			"must be tcp://host:port or rtu://<device>"},
 		{"modbus host", func(c *AppConfig) { c.Modbus.Address = "tcp://:502" },
 			"host:port required"},
 		{"modbus port", func(c *AppConfig) { c.Modbus.Address = "tcp://h:70000" },
-			"invalid modbus port"},
+			"tcp port \"70000\" must be 1-65535"},
 		{"modbus timeout", func(c *AppConfig) { c.Modbus.Timeout = 0 },
-			"modbus timeout must be positive"},
+			"timeout 0s must be positive"},
 		{"modbus parity", func(c *AppConfig) {
 			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
 				Parity: "X"}
-		}, "invalid modbus parity"},
+		}, "invalid parity"},
+		{"modbus data bits", func(c *AppConfig) {
+			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+				DataBits: 9}
+		}, "data_bits 9"},
+		{"modbus stop bits", func(c *AppConfig) {
+			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+				StopBits: 3}
+		}, "stop_bits 3"},
+		{"app debug", func(c *AppConfig) { c.App.Debug = "DEBG" }, "invalid debug level"},
+		{"app debug lower", func(c *AppConfig) { c.App.Debug = "warn" }, ""},
+		{"app timeout", func(c *AppConfig) { c.App.Timeout = 0 }, "app timeout"},
+		{"poll timeout vs grace", func(c *AppConfig) { c.Poller.PollTimeout = 15 * time.Second },
+			"poll_timeout 15s must be below 3 x poller.interval"},
 		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
 		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be positive"},
 		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
@@ -58,6 +71,8 @@ func TestValidate(t *testing.T) {
 		{"rollover 24:00", func(c *AppConfig) { c.Rollover.Time = "24:00" }, "invalid rollover"},
 		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
 		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "error_retention"},
+		{"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
+			"daily_retention"},
 		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "synchronous"},
 		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "temp_store"},
 		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "max_backups"},
@@ -125,6 +140,29 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "23:59", cfg.Rollover.Time)
 	assert.Equal(t, "./data/solis.db", cfg.Storage.Path)
 	assert.Equal(t, 30*time.Second, cfg.Poller.Interval)
+	assert.Equal(t, 365*24*time.Hour, cfg.Storage.DailyRetention)
+	assert.Equal(t, 365*24*time.Hour, cfg.Storage.ErrorRetention)
+}
+
+func TestLoadConfig_LongDurationUnits(t *testing.T) {
+	cfg, err := LoadConfig(writeConfig(t, `
+storage:
+  daily_retention: 2w
+  error_retention: 1y12h
+  cleanup_interval: 1d
+`))
+	require.NoError(t, err)
+	assert.Equal(t, 14*24*time.Hour, cfg.Storage.DailyRetention)
+	assert.Equal(t, 365*24*time.Hour+12*time.Hour, cfg.Storage.ErrorRetention)
+	assert.Equal(t, 24*time.Hour, cfg.Storage.CleanupInterval)
+
+	_, err = LoadConfig(writeConfig(t, "storage:\n  daily_retention: 1x\n"))
+	require.Error(t, err)
+
+	t.Setenv("SOLIS_STORAGE_DAILY_RETENTION", "3d")
+	cfg, err = LoadConfig(writeConfig(t, ""))
+	require.NoError(t, err)
+	assert.Equal(t, 3*24*time.Hour, cfg.Storage.DailyRetention)
 }
 
 func TestLoadConfig_MissingFileUsesDefaults(t *testing.T) {
@@ -152,9 +190,13 @@ app:
 aggregator:
   interval: 30s
   backfill_current_year_monthly: true
+storage:
+  monthly_retention: 87600h
+  yearly_retention: 87600h
+  enable_migrations: true
 `))
 	require.NoError(t, err)
-	assert.Len(t, cfg.Warnings, 2)
+	assert.Len(t, cfg.Warnings, 5)
 }
 
 func TestLoadConfig_Errors(t *testing.T) {

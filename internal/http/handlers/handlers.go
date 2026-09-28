@@ -40,6 +40,9 @@ type HandlerDeps struct {
 	Service ReadService
 	Errors  *ErrorMapper
 	Clock   utils.Clock
+	// Timeout bounds each storage read (app.timeout) so a slow history query cannot hold
+	// the single SQLite connection the poller writes through; 0 = request context only.
+	Timeout time.Duration
 }
 
 // GetHealthHandler serves the supervisor snapshot: 200 for ok/degraded, 503 when any
@@ -102,7 +105,9 @@ func GetDataHandler(deps HandlerDeps) http.Handler {
 				"historical queries not supported for %s - only periodic registers", key))
 			return
 		}
-		body, err := dispatch(r.Context(), deps, dataRequest{reg: reg, hasRange: hasRange,
+		ctx, cancel := deps.readContext(r.Context())
+		defer cancel()
+		body, err := dispatch(ctx, deps, dataRequest{reg: reg, hasRange: hasRange,
 			start: q.Get("start"), end: q.Get("end")})
 		if err != nil {
 			deps.Errors.Write(w, err)
@@ -112,9 +117,17 @@ func GetDataHandler(deps HandlerDeps) http.Handler {
 	})
 }
 
+// readContext derives the storage deadline of one request.
+func (d HandlerDeps) readContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if d.Timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d.Timeout)
+}
+
+// historyCapable reports whether start/end apply; totals have a single lifetime value.
 func historyCapable(s solis.Store) bool {
-	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly ||
-		s == solis.StoreTotal
+	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly
 }
 
 // dataRequest is one parsed /api/data request.
@@ -196,28 +209,36 @@ type TimeRange struct {
 }
 
 // ParseTimeRange parses start/end as YYYY-MM-DD, YYYY-MM or YYYY; start defaults to 30
-// days before now and end to now.
+// days before now and end to now. A month or year end is inclusive: it expands to the
+// last day of that period (end=2026 covers all of 2026).
 func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
-	s, err := parseTime(start, now.Add(-defaultHistoryWindow))
+	s, _, err := parseTime(start, now.Add(-defaultHistoryWindow))
 	if err != nil {
 		return TimeRange{}, err
 	}
-	e, err := parseTime(end, now)
+	e, layout, err := parseTime(end, now)
 	if err != nil {
 		return TimeRange{}, err
+	}
+	switch layout {
+	case period.MonthLayout:
+		e = e.AddDate(0, 1, -1)
+	case period.YearLayout:
+		e = e.AddDate(1, 0, -1)
 	}
 	return TimeRange{Start: s, End: e}, nil
 }
 
-func parseTime(s string, def time.Time) (time.Time, error) {
+// parseTime returns the parsed time and the matching layout ("" for the default).
+func parseTime(s string, def time.Time) (time.Time, string, error) {
 	if s == "" {
-		return def, nil
+		return def, "", nil
 	}
 	for _, layout := range []string{period.DayLayout, period.MonthLayout, period.YearLayout} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
+			return t, layout, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("%w: %q (want YYYY-MM-DD, YYYY-MM or YYYY)",
+	return time.Time{}, "", fmt.Errorf("%w: %q (want YYYY-MM-DD, YYYY-MM or YYYY)",
 		service.ErrInvalidRange, s)
 }

@@ -17,6 +17,9 @@ const (
 	MonthLayout = "2006-01"
 	// YearLayout formats yearly keys (YYYY).
 	YearLayout = "2006"
+	// TimestampLayout formats instants stored or served as text (status changes): UTC,
+	// fixed width, so string order equals time order. Format t.UTC() with it.
+	TimestampLayout = "2006-01-02T15:04:05.000Z"
 )
 
 // ErrInvalidKey is returned when a period key does not match its layout.

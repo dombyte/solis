@@ -24,6 +24,8 @@ var (
 	ErrLocked = errors.New("database is locked by a running instance")
 	// ErrInvalidArgs is returned for invalid job arguments.
 	ErrInvalidArgs = errors.New("invalid arguments")
+	// ErrPurgedHistory is returned when the daily rows a job needs were deleted.
+	ErrPurgedHistory = errors.New("daily history incomplete")
 )
 
 // Store runs a backfill transaction.
@@ -92,6 +94,9 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int) (
 	Report, error) {
 	var rep Report
+	if err := checkPurged(tx, now, years); err != nil {
+		return rep, err
+	}
 	for back := years; back >= 0; back-- {
 		year, err := period.AddYears(now.Year, -back)
 		if err != nil {
@@ -107,6 +112,27 @@ func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int
 		}
 	}
 	return rep, nil
+}
+
+// checkPurged refuses a job that would recompute from daily rows retention already
+// deleted: the oldest touched year must start on or after the purge watermark, and the
+// baseline (the sum of all daily rows, refreshed when a closed year is touched) needs
+// the complete history.
+func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
+	purged := tx.PurgedBefore()
+	if purged == "" {
+		return nil
+	}
+	oldest, err := period.AddYears(now.Year, -years)
+	if err != nil {
+		return err
+	}
+	if years > 0 || oldest+"-01-01" < purged {
+		return fmt.Errorf("%w: daily rows before %s were removed by retention "+
+			"(storage.daily_retention); closed years can no longer be recomputed",
+			ErrPurgedHistory, purged)
+	}
+	return nil
 }
 
 func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year string,

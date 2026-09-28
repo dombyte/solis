@@ -18,6 +18,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
+	"github.com/dombyte/solis/internal/storage/mocks"
 	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
@@ -210,5 +211,32 @@ func TestReportFormatAndCounts(t *testing.T) {
 	}
 	for _, g := range golden {
 		assert.Contains(t, b.String(), g)
+	}
+}
+
+func TestCheckPurged(t *testing.T) {
+	now := period.Of(time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	tests := []struct {
+		purged  string
+		years   int
+		refused bool
+	}{
+		{"", 3, false},
+		{"2025-08-05", 0, false},
+		{"2025-08-05", 1, true},  // closed years and the baseline need all daily rows
+		{"2026-03-01", 0, true},  // defensive: the current year itself is incomplete
+		{"2026-01-01", 0, false}, // cleanup never passes the first open day
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%d", tt.purged, tt.years), func(t *testing.T) {
+			tx := mocks.NewMockBackfillTx(t)
+			tx.EXPECT().PurgedBefore().Return(tt.purged)
+			err := checkPurged(tx, now, tt.years)
+			if tt.refused {
+				assert.ErrorIs(t, err, ErrPurgedHistory)
+				return
+			}
+			assert.NoError(t, err)
+		})
 	}
 }

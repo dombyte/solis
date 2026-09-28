@@ -44,7 +44,9 @@ func backfill(years int, stdout, stderr io.Writer) error {
 	backupCfg := &database.BackupConfig{Enabled: true, MaxBackups: st.MaxBackups}
 	return maintenance.RunBackfill(context.Background(), maintenance.Env{
 		DBPath: st.Path,
-		Backup: func() (string, error) { return database.CreateBackup(st.Path, backupCfg, log) },
+		Backup: func() (string, error) {
+			return database.CreateBackup(st.Path, backupCfg, clock.Now(), log)
+		},
 		OpenStore: func() (maintenance.Store, func() error, error) {
 			mgr := database.NewManager(st, backupCfg, clock, log)
 			if err := mgr.Prepare(context.Background()); err != nil {

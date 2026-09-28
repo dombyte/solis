@@ -14,7 +14,8 @@ import (
 )
 
 func TestGenerateBackupFilename(t *testing.T) {
-	got := GenerateBackupFilename("/path/to/db/solis.db")
+	got := GenerateBackupFilename("/path/to/db/solis.db",
+		time.Date(2026, 6, 27, 14, 30, 22, 7_000_000, time.UTC))
 	assert.True(t, filepath.Ext(got) == ".backup", got)
 	assert.Contains(t, got, filepath.Join("/path/to/db", "backups"))
 	assert.Contains(t, got, "solis.db.")
@@ -67,7 +68,7 @@ func TestCreateBackup(t *testing.T) {
 	newSQLiteDB(t, dbPath)
 	cfg := &BackupConfig{Enabled: true, MaxBackups: 3, BackupInterval: 24 * time.Hour}
 
-	backupPath, err := CreateBackup(dbPath, cfg, zerolog.Nop())
+	backupPath, err := CreateBackup(dbPath, cfg, time.Now(), zerolog.Nop())
 	require.NoError(t, err)
 	st, err := os.Stat(backupPath)
 	require.NoError(t, err)
@@ -82,14 +83,38 @@ func TestCreateBackup(t *testing.T) {
 	assert.Equal(t, "test data", name)
 
 	cfg.Enabled = false
-	backupPath, err = CreateBackup(dbPath, cfg, zerolog.Nop())
+	backupPath, err = CreateBackup(dbPath, cfg, time.Now(), zerolog.Nop())
 	require.NoError(t, err)
 	assert.Empty(t, backupPath, "disabled backup is a no-op")
 }
 
 func TestCreateBackup_MissingSource(t *testing.T) {
 	cfg := &BackupConfig{Enabled: true}
-	_, err := CreateBackup(filepath.Join(t.TempDir(), "missing.db"), cfg, zerolog.Nop())
+	_, err := CreateBackup(filepath.Join(t.TempDir(), "missing.db"), cfg, time.Now(),
+		zerolog.Nop())
+	assert.Error(t, err)
+}
+
+func TestVerifyBackupFile_RejectsCorruptFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "x.backup")
+	require.NoError(t, os.WriteFile(path, []byte("definitely not a sqlite database file"), 0o600))
+	require.Error(t, verifyBackupFile(path, zerolog.Nop()))
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "an unverifiable backup is removed")
+
+	require.NoError(t, os.WriteFile(path, nil, 0o600))
+	assert.ErrorContains(t, verifyBackupFile(path, zerolog.Nop()), "empty")
+}
+
+func TestBackupFilename_MillisecondsRoundTrip(t *testing.T) {
+	at := time.Date(2026, 6, 27, 14, 30, 22, 7_000_000, time.UTC)
+	name := GenerateBackupFilename("/db/solis.db", at)
+	assert.Equal(t, filepath.Join("/db", "backups", "solis.db.20260627_143022_007.backup"), name)
+	info, err := ExtractBackupInfo(name)
+	require.NoError(t, err)
+	assert.True(t, info.Timestamp.Equal(at))
+	assert.NotEqual(t, name, GenerateBackupFilename("/db/solis.db", at.Add(time.Millisecond)))
+	_, err = ExtractBackupInfo("/db/backups/solis.db.20260627_143022_x.backup")
 	assert.Error(t, err)
 }
 

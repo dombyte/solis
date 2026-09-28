@@ -65,7 +65,7 @@ func TestPrepare_LegacyDatabaseIsBackedUpAndMigrated(t *testing.T) {
 	require.NoError(t, createTestDB(path))
 	m := newManager(t, path, clocktest.New(time.Now()))
 	require.NoError(t, m.Prepare(context.Background()))
-	assert.Equal(t, 3, schemaVersion(t, path))
+	assert.Equal(t, CurrentSchemaVersion, schemaVersion(t, path))
 	backups, err := ListBackups(path)
 	require.NoError(t, err)
 	assert.Len(t, backups, 1)

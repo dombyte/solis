@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
 )
@@ -217,14 +218,22 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 		out.History = append(out.History, StatusEntry{Timestamp: p.Timestamp,
 			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue))})
 	}
-	if v := s.d.Cache.Get(key); v != nil && v.StatusDecoded != nil {
+	if v := s.d.Cache.Get(key); v != nil && v.StatusDecoded != nil && !lastIs(points, v) {
 		out.History = append(out.History, StatusEntry{
-			Timestamp: v.Timestamp.Format(time.RFC3339), StatusDecoded: v.StatusDecoded})
+			Timestamp:     v.Timestamp.UTC().Format(period.TimestampLayout),
+			StatusDecoded: v.StatusDecoded})
 	}
+	// Both sources use period.TimestampLayout, so string order is time order.
 	sort.SliceStable(out.History, func(i, j int) bool {
 		return out.History[i].Timestamp > out.History[j].Timestamp
 	})
 	return out, nil
+}
+
+// lastIs reports whether the newest stored change already records the cached state
+// (the usual case: the poller stores every change), so it is not listed twice.
+func lastIs(points []*storage.ErrorDataPoint, v *solis.Value) bool {
+	return len(points) > 0 && points[len(points)-1].RawValue == v.RawValue
 }
 
 // maxTime is the upper bound of an unbounded history query.

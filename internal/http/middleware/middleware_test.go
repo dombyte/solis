@@ -32,6 +32,19 @@ func TestRecover_ReraisesAbortHandler(t *testing.T) {
 	})
 }
 
+func TestRecover_AbortsAfterPartialWrite(t *testing.T) {
+	h := Recover(zerolog.Nop())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"partial":`))
+		panic("boom")
+	}))
+	rec := httptest.NewRecorder()
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+	assert.Equal(t, `{"partial":`, rec.Body.String(), "no second response appended")
+}
+
 func TestLogger(t *testing.T) {
 	var logs bytes.Buffer
 	log := zerolog.New(&logs).Level(zerolog.DebugLevel)

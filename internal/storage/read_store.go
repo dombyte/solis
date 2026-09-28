@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/dombyte/solis/internal/database/migrations"
 	"github.com/dombyte/solis/internal/period"
 )
 
@@ -61,14 +63,21 @@ func scanRows[T any](ctx context.Context, db *sql.DB, q query,
 	return out, nil
 }
 
-// GetErrorHistory returns the status/fault changes of key in [start, end].
+// statusTimestamp formats t for error_data (fixed-width UTC, sortable as text).
+func statusTimestamp(t time.Time) string {
+	return t.UTC().Format(migrations.StatusTimestampLayout)
+}
+
+// GetErrorHistory returns the status/fault changes of key in [start, end], oldest first.
+// Over the row cap the newest maxErrorRows changes are kept. CAST drops the DATETIME
+// decltype so the driver returns the stored text instead of reformatting it.
 func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end time.Time) (
 	[]*ErrorDataPoint, error) {
-	return scanRows(ctx, s.db, query{what: "error history",
-		sql: `SELECT timestamp, raw_value, string_value FROM error_data
+	out, err := scanRows(ctx, s.db, query{what: "error history",
+		sql: `SELECT CAST(timestamp AS TEXT), raw_value, string_value FROM error_data
 		WHERE register_key = ? AND timestamp >= ? AND timestamp <= ?
-		ORDER BY timestamp LIMIT ?`,
-		args: []any{key, start, end, maxErrorRows}},
+		ORDER BY timestamp DESC LIMIT ?`,
+		args: []any{key, statusTimestamp(start), statusTimestamp(end), maxErrorRows}},
 		func(r *sql.Rows) (*ErrorDataPoint, error) {
 			var dp ErrorDataPoint
 			var str sql.NullString
@@ -76,13 +85,16 @@ func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end ti
 			dp.StringValue = str.String
 			return &dp, err
 		})
+	slices.Reverse(out)
+	return out, err
 }
 
 // GetDailyHistory returns the daily rows of key between the start and end days.
+// substr() drops the DATE decltype so the driver returns the raw YYYY-MM-DD key.
 func (s *Storage) GetDailyHistory(ctx context.Context, key string, start, end time.Time) (
 	[]*DailyDataPoint, error) {
 	return scanRows(ctx, s.db, rangeQuery("daily history",
-		`SELECT date, value, raw_value FROM daily_values
+		`SELECT substr(date, 1, 10), value, raw_value FROM daily_values
 		WHERE register_key = ? AND date >= ? AND date <= ? ORDER BY date LIMIT ?`,
 		bounds{key, start, end, period.DayLayout, maxPeriodRows}),
 		func(r *sql.Rows) (*DailyDataPoint, error) {
@@ -117,10 +129,12 @@ func (s *Storage) GetYearlyHistory(ctx context.Context, key string, start, end t
 		})
 }
 
-// GetTotalHistory returns the stored total of key, or nil when none exists.
+// GetTotalHistory returns the stored total of key, or nil when none exists. The
+// timestamp is returned as stored (CAST drops the DATETIME decltype).
 func (s *Storage) GetTotalHistory(ctx context.Context, key string) (*TotalDataPoint, error) {
 	var dp TotalDataPoint
-	err := s.db.QueryRowContext(ctx, `SELECT value, raw_value, timestamp FROM total_values
+	err := s.db.QueryRowContext(ctx, `SELECT value, raw_value, CAST(timestamp AS TEXT)
+		FROM total_values
 		WHERE register_key = ?`, key).Scan(&dp.Value, &dp.RawValue, &dp.Timestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

@@ -6,25 +6,31 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
-	"strconv"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/utils"
 )
 
 // ErrInvalidConfig is wrapped by every validation failure.
 var ErrInvalidConfig = errors.New("invalid config")
 
-// removedKeys are v2 settings that v3 ignores; their presence is reported as a warning.
+// removedKeys are settings that v3 ignores; their presence is reported as a warning.
 func removedKeys() map[string]string {
 	return map[string]string{
 		"app.serve_only": "serve-only mode was removed in v3",
 		"aggregator": "the aggregator cadence derives from poller.interval; " +
 			"use `solis backfill` instead of backfill_current_year_monthly",
+		"storage.monthly_retention": "monthly rows follow storage.daily_retention",
+		"storage.yearly_retention":  "yearly rows follow storage.daily_retention",
+		"storage.enable_migrations": "schema migrations always run on startup",
 	}
 }
 
@@ -100,13 +106,11 @@ type RolloverSettings struct {
 type StorageSettings struct {
 	// Path is the path to the SQLite database file.
 	Path string `mapstructure:"path"`
-	// DailyRetention is the retention period for daily aggregated data.
+	// DailyRetention is the retention of daily rows; monthly and yearly rows follow it.
+	// Only periods of already frozen years are ever deleted, so computed values never
+	// shrink (e.g. "1y", "2w", "400d", "8760h").
 	DailyRetention time.Duration `mapstructure:"daily_retention"`
-	// MonthlyRetention is the retention period for monthly aggregated data.
-	MonthlyRetention time.Duration `mapstructure:"monthly_retention"`
-	// YearlyRetention is the retention period for yearly aggregated data.
-	YearlyRetention time.Duration `mapstructure:"yearly_retention"`
-	// ErrorRetention is the retention period for error/fault data.
+	// ErrorRetention is the retention of error/status change rows (e.g. "1y", "30d").
 	ErrorRetention time.Duration `mapstructure:"error_retention"`
 	// WalMode enables Write-Ahead Logging for better concurrency.
 	WalMode bool `mapstructure:"wal_mode"`
@@ -114,8 +118,6 @@ type StorageSettings struct {
 	Synchronous string `mapstructure:"synchronous"`
 	// TempStore controls where temporary files are stored: DEFAULT, FILE, MEMORY.
 	TempStore string `mapstructure:"temp_store"`
-	// EnableMigrations enables automatic schema migrations on startup.
-	EnableMigrations bool `mapstructure:"enable_migrations"`
 	// EnableBackup enables database backup functionality.
 	EnableBackup bool `mapstructure:"enable_backup"`
 	// MaxBackups is the maximum number of backup files to keep (0 = unlimited).
@@ -137,10 +139,9 @@ func setDefaults(v *viper.Viper) {
 		"modbus.timeout":      "5s", "modbus.slave_id": 1,
 		"rollover.time":           "23:59",
 		"storage.path":            "./data/solis.db",
-		"storage.daily_retention": "8760h", "storage.monthly_retention": "8760h",
-		"storage.yearly_retention": "8760h", "storage.error_retention": "720h",
+		"storage.daily_retention": "1y", "storage.error_retention": "1y",
 		"storage.wal_mode": true, "storage.synchronous": "NORMAL",
-		"storage.temp_store": "MEMORY", "storage.enable_migrations": true,
+		"storage.temp_store":    "MEMORY",
 		"storage.enable_backup": true, "storage.max_backups": 3,
 		"storage.backup_interval": "24h", "storage.cleanup_interval": "24h",
 	}
@@ -171,7 +172,8 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 	}
 
 	var cfg AppConfig
-	if err := v.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg, viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(
+		durationHook, mapstructure.StringToSliceHookFunc(",")))); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	for key, why := range removedKeys() {
@@ -197,55 +199,52 @@ func (c *AppConfig) Validate() error {
 			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 		}
 	}
+	if err := c.validatePollTimeout(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
 	return nil
 }
 
-// Validate validates Modbus configuration.
+// validatePollTimeout keeps one poll cycle inside the supervisor's healthy grace: the
+// poller beats at cycle start and end, so a longer cycle would restart a working poller.
+func (c *AppConfig) validatePollTimeout() error {
+	grace := health.HealthyGraceFactor * c.Poller.Interval
+	if c.Poller.PollTimeout >= grace {
+		return fmt.Errorf("poll_timeout %s must be below %d x poller.interval (%s)",
+			c.Poller.PollTimeout, health.HealthyGraceFactor, grace)
+	}
+	return nil
+}
+
+// durationHook decodes duration strings with the extra units d, w and y ("1y", "2w").
+func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
+	s, ok := data.(string)
+	if !ok || to != reflect.TypeFor[time.Duration]() {
+		return data, nil
+	}
+	return utils.ParseDuration(s)
+}
+
+// ModbusClientSettings converts the section into the Modbus client's settings.
+func (m *ModbusSettings) ModbusClientSettings() modbus.Settings {
+	return modbus.Settings{Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
+		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits}
+}
+
+// Validate validates Modbus configuration (the client's own rules, checked at startup).
 func (m *ModbusSettings) Validate() error {
-	scheme, rest, ok := strings.Cut(m.Address, "://")
-	if !ok || rest == "" {
-		return fmt.Errorf("invalid modbus address %q: expected tcp://host:port or "+
-			"rtu://<device>", m.Address)
-	}
-	var err error
-	switch scheme {
-	case "tcp":
-		err = validateModbusTCP(m.Address, rest)
-	case "rtu":
-		err = validateModbusRTU(m.Parity)
-	default:
-		err = fmt.Errorf("invalid modbus address %q: scheme must be tcp or rtu", m.Address)
-	}
-	if err != nil {
-		return err
-	}
-	if m.Timeout <= 0 {
-		return errors.New("modbus timeout must be positive")
-	}
-	return nil
-}
-
-func validateModbusTCP(address, hostport string) error {
-	host, portStr, err := net.SplitHostPort(hostport)
-	if err != nil || host == "" {
-		return fmt.Errorf("invalid modbus tcp address %q: host:port required", address)
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		return fmt.Errorf("invalid modbus tcp port %q", portStr)
-	}
-	return validatePort("modbus port", port)
-}
-
-func validateModbusRTU(parity string) error {
-	if !oneOf(strings.ToUpper(parity), "", "N", "E", "O") {
-		return fmt.Errorf("invalid modbus parity: %s (must be N, E, or O)", parity)
-	}
-	return nil
+	return m.ModbusClientSettings().Validate()
 }
 
 // Validate validates App configuration.
 func (a *AppSettings) Validate() error {
+	if !oneOf(strings.ToUpper(a.Debug), "DEBUG", "INFO", "WARN", "ERROR", "FATAL") {
+		return fmt.Errorf("invalid debug level: %q (must be DEBUG, INFO, WARN, ERROR, or "+
+			"FATAL)", a.Debug)
+	}
+	if a.Timeout <= 0 {
+		return errors.New("app timeout must be positive")
+	}
 	return validatePort("server port", a.Port)
 }
 
@@ -312,8 +311,7 @@ func (s *StorageSettings) validateRetention() error {
 		name string
 		d    time.Duration
 	}{
-		{"daily_retention", s.DailyRetention}, {"monthly_retention", s.MonthlyRetention},
-		{"yearly_retention", s.YearlyRetention}, {"error_retention", s.ErrorRetention},
+		{"daily_retention", s.DailyRetention}, {"error_retention", s.ErrorRetention},
 		{"cleanup_interval", s.CleanupInterval},
 	}
 	for _, d := range durations {

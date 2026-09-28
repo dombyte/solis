@@ -57,14 +57,11 @@ rollover:
 
 storage:
   path: ./data/solis.db
-  daily_retention: 87600h
-  monthly_retention: 87600h
-  yearly_retention: 87600h
-  error_retention: 720h
+  daily_retention: 1y
+  error_retention: 1y
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
-  enable_migrations: true
   enable_backup: true
   max_backups: 3
   backup_interval: 24h
@@ -75,9 +72,12 @@ storage:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `debug` | string | INFO | Log level: DEBUG, INFO, WARN, ERROR, FATAL |
+| `debug` | string | INFO | Log level: DEBUG, INFO, WARN, ERROR, FATAL (anything else fails startup) |
 | `port` | int | 8080 | HTTP server port |
-| `timeout` | duration | 30s | Request timeout |
+| `timeout` | duration | 30s | Request timeout and deadline of every storage call (must be > 0) |
+
+Durations accept Go units (`s`, `m`, `h`) plus `d` (24h), `w` (7d) and `y` (365d), also
+combined (`1y6w`, `1d12h`).
 
 ### Poller Settings
 
@@ -87,7 +87,11 @@ storage:
 | `block_attempts` | int | 3 | Retry attempts per block if a read fails |
 | `block_retry_delay` | duration | 1s | Delay between retry attempts for the same block |
 | `block_interval` | duration | 0s | Delay between successive block reads |
-| `poll_timeout` | duration | 30s | Max duration for a full poll cycle before aborting |
+| `poll_timeout` | duration | 30s | Max duration for a full poll cycle before aborting; must be below 3× `interval` (the health supervisor's grace) |
+
+Only transport failures drop the Modbus connection. Exception replies (e.g. illegal address,
+device busy) and, on RTU, CRC errors, short frames and timeouts keep it open, so the block is
+retried up to `block_attempts` times.
 
 ### Modbus Settings
 
@@ -115,18 +119,22 @@ The Modbus client never fails construction on an unreachable device: it starts i
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `path` | string | ./data/solis.db | Database file path |
-| `daily_retention` | duration | 87600h | Retention for daily values |
-| `monthly_retention` | duration | 87600h | Retention for monthly values |
-| `yearly_retention` | duration | 87600h | Retention for yearly values |
-| `error_retention` | duration | 720h | Retention for error/fault data |
+| `daily_retention` | duration | 1y | Retention for daily values; monthly and yearly values follow it |
+| `error_retention` | duration | 1y | Retention for error/fault data |
 | `wal_mode` | bool | true | Enable Write-Ahead Logging |
 | `synchronous` | string | NORMAL | Sync mode: OFF, NORMAL, FULL, EXTRA |
 | `temp_store` | string | MEMORY | Temp storage: DEFAULT, FILE, MEMORY |
-| `enable_migrations` | bool | true | Enable automatic schema migrations |
 | `enable_backup` | bool | true | Enable periodic database backups |
 | `max_backups` | int | 3 | Maximum backup files to keep (0 = unlimited) |
 | `backup_interval` | duration | 24h | Interval for periodic online backups |
 | `cleanup_interval` | duration | 20h | Interval for retention cleanup |
+
+Retention never corrupts computed values: cleanup deletes daily, monthly and yearly rows
+older than `daily_retention` only up to the start of the first period that can still be
+recomputed (the year after the last frozen year and the total baseline). The current year is
+therefore always kept, whatever the setting. Schema migrations always run on startup;
+`monthly_retention`, `yearly_retention` and `enable_migrations` were removed and are ignored
+with a warning.
 
 There is no `aggregator` section: the aggregator is event-driven off the poller and has no
 config knobs of its own (debounce = 4× `poller.interval`, heartbeat = 5×). To recompute
@@ -204,7 +212,7 @@ GET /api/data/{key}                                           # current value (f
 GET /api/data/{daily_key}?start=2024-01-01&end=2024-01-31      # daily history
 GET /api/data/{monthly_key}?start=2024-01&end=2024-12          # monthly history
 GET /api/data/{yearly_key}?start=2023&end=2024                 # yearly history
-GET /api/data/{total_key}                                      # lifetime value
+GET /api/data/{total_key}                                      # lifetime value (no start/end)
 GET /api/data/{status_key}                                     # decoded change history
 ```
 
@@ -222,9 +230,13 @@ changed, subscribed values are pushed (diffed per client), coalesced into one fr
 → { "type": "subscribe",   "keys": ["pv_total_power", "solis_status"] }
 ← { "type": "snapshot",    "values": { "pv_total_power": { "value": 5230, "timestamp": "…", "unit": "W" } } }
 ← { "type": "update",      "ts": "…", "values": { "pv_total_power": { "value": 5102.5 } } }
+← { "type": "update",      "ts": "…", "values": {}, "removed": ["battery_power_signed"] }
 → { "type": "unsubscribe", "keys": ["solis_status"] }
 ← { "type": "error",       "code": "unknown_keys", "keys": ["foo"] }
 ```
+
+`removed` (optional) lists subscribed keys that no longer have a current value; clients drop
+them instead of showing a stale value.
 
 `ping` from the client is accepted and ignored. Unknown keys never drop the connection. History
 stays on REST — there is no history over WebSocket.
@@ -249,8 +261,10 @@ solis backfill --years 2   # recompute monthly + yearly for the current year + 2
 ```
 
 The job refuses to run while the server holds its lock on the database, always takes a
-SHA-256-verified backup first (aborting with no writes on backup failure), and refreshes the
-total baseline for any closed year it touches.
+backup first and verifies it with `PRAGMA integrity_check` (aborting with no writes on backup
+failure), and refreshes the total baseline for any closed year it touches. Once retention
+cleanup has deleted daily rows, closed years can no longer be recomputed: the job then
+refuses `--years N > 0` instead of overwriting history with partial sums.
 
 ## Running
 

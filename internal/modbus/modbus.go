@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -24,6 +26,14 @@ import (
 const (
 	InitialBackoff = time.Second
 	MaxBackoff     = 30 * time.Second
+)
+
+// Settings bounds.
+const (
+	maxPort     = 65535
+	minDataBits = 5
+	maxDataBits = 8
+	maxStopBits = 2
 )
 
 var (
@@ -87,8 +97,41 @@ func (s Settings) Validate() error {
 	if s.Timeout <= 0 {
 		return fmt.Errorf("%w: timeout %s must be positive", ErrInvalidSettings, s.Timeout)
 	}
+	if scheme == "tcp" {
+		if err := validateHostPort(s.Address); err != nil {
+			return err
+		}
+	}
+	return s.validateSerial()
+}
+
+// validateHostPort checks the host:port part of a tcp:// address.
+func validateHostPort(address string) error {
+	_, hostport, _ := strings.Cut(address, "://")
+	host, portStr, err := net.SplitHostPort(hostport)
+	if err != nil || host == "" {
+		return fmt.Errorf("%w: tcp address %q: host:port required", ErrInvalidSettings,
+			address)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > maxPort {
+		return fmt.Errorf("%w: tcp port %q must be 1-%d", ErrInvalidSettings, portStr,
+			maxPort)
+	}
+	return nil
+}
+
+// validateSerial range-checks the rtu line settings; zero keeps the library default.
+func (s Settings) validateSerial() error {
 	if _, err := parity(s.Parity); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidSettings, err)
+	}
+	if s.DataBits != 0 && (s.DataBits < minDataBits || s.DataBits > maxDataBits) {
+		return fmt.Errorf("%w: data_bits %d must be %d-%d", ErrInvalidSettings, s.DataBits,
+			minDataBits, maxDataBits)
+	}
+	if s.StopBits > maxStopBits {
+		return fmt.Errorf("%w: stop_bits %d must be 1 or 2", ErrInvalidSettings, s.StopBits)
 	}
 	return nil
 }
@@ -107,9 +150,10 @@ func parity(p string) (uint, error) {
 	}
 }
 
-// Client is a single Modbus TCP connection with automatic reconnection.
+// Client is a single Modbus connection (TCP or RTU) with automatic reconnection.
 type Client struct {
 	set   Settings
+	rtu   bool
 	clock utils.Clock
 	log   zerolog.Logger
 
@@ -124,14 +168,17 @@ func New(set Settings, clock utils.Clock, log zerolog.Logger) (*Client, error) {
 	if err := set.Validate(); err != nil {
 		return nil, err
 	}
-	return &Client{set: set, clock: clock, log: log, lost: make(chan struct{}, 1)}, nil
+	scheme, _, _ := set.scheme()
+	return &Client{set: set, rtu: scheme == "rtu", clock: clock, log: log,
+		lost: make(chan struct{}, 1)}, nil
 }
 
 // IsConnected reports whether the connection is up.
 func (c *Client) IsConnected() bool { return c.connected.Load() }
 
-// ReadRegisters reads count input registers starting at addr. A failed read marks the
-// connection lost; the Run loop reconnects.
+// ReadRegisters reads count input registers starting at addr. Only a transport failure
+// marks the connection lost (the Run loop reconnects); a Modbus exception reply or, on
+// RTU, a garbled/missing frame keeps it open so the caller can retry the block.
 func (c *Client) ReadRegisters(ctx context.Context, addr, count uint16) ([]uint16, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -144,10 +191,34 @@ func (c *Client) ReadRegisters(ctx context.Context, addr, count uint16) ([]uint1
 	}
 	regs, err := mc.ReadRegisters(addr, count, sv.INPUT_REGISTER)
 	if err != nil {
-		c.markLost(err)
+		if !c.keepsConnection(err) {
+			c.markLost(err)
+		}
 		return nil, &ReadError{Addr: addr, Count: count, Err: err}
 	}
 	return regs, nil
+}
+
+// keepsConnection reports whether err leaves the link usable. Exception replies are
+// complete protocol frames. On RTU the library already resyncs the line after a bad CRC,
+// short frame or protocol error, and a timeout leaves nothing buffered; on TCP those mean
+// the stream may be out of step, so the connection is dropped.
+func (c *Client) keepsConnection(err error) bool {
+	var me sv.Error
+	if !errors.As(err, &me) {
+		return false
+	}
+	switch me {
+	case sv.ErrIllegalFunction, sv.ErrIllegalDataAddress, sv.ErrIllegalDataValue,
+		sv.ErrServerDeviceFailure, sv.ErrAcknowledge, sv.ErrServerDeviceBusy,
+		sv.ErrMemoryParityError, sv.ErrGWPathUnavailable, sv.ErrGWTargetFailedToRespond,
+		sv.ErrBadUnitId, sv.ErrUnexpectedParameters:
+		return true
+	case sv.ErrBadCRC, sv.ErrShortFrame, sv.ErrProtocolError, sv.ErrRequestTimedOut:
+		return c.rtu
+	default:
+		return false
+	}
 }
 
 func (c *Client) markLost(cause error) {

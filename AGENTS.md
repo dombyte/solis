@@ -480,9 +480,12 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 → { "type": "subscribe",   "keys": ["pv_total_power", "solis_status"] }
 ← { "type": "snapshot",    "values": { "pv_total_power": { "value": 5230, "timestamp": "…", "unit": "W" } } }
 ← { "type": "update",      "ts": "…", "values": { "pv_total_power": { "value": 5102.5 } } }
+← { "type": "update",      "ts": "…", "values": {}, "removed": ["battery_power_signed"] }
 → { "type": "unsubscribe", "keys": ["solis_status"] }
 ← { "type": "error",       "code": "unknown_keys", "keys": ["foo"] }
 ```
+- `removed` lists subscribed keys that disappeared from the cache (`ReplaceDomain` events
+  carry removed keys too); clients drop those values.
 - Only changed, subscribed keys are pushed (diff by value/status per client); pushes are coalesced
   (~75 ms) so poller + aggregator events close together become one frame.
 - Unknown keys never drop the connection. `ping` from the client is accepted and ignored.
@@ -573,11 +576,16 @@ rollover:
 
 storage:
   path: ./data/solis.db
-  # retention, WAL, backup and cleanup settings unchanged from v2
+  daily_retention: 1y  # monthly/yearly rows follow it; only frozen years are ever deleted
+  error_retention: 1y  # durations accept d (24h), w (7d), y (365d) on top of s/m/h
+  # WAL, backup and cleanup settings unchanged from v2
 ```
 
 - Removed in v3: `app.serve_only`, the whole `aggregator` section (incl.
-  `backfill_current_year_monthly` → use the `backfill` CLI).
+  `backfill_current_year_monthly` → use the `backfill` CLI), `storage.monthly_retention`,
+  `storage.yearly_retention` (follow `daily_retention`) and `storage.enable_migrations`
+  (migrations always run).
+- Cross-field rule: `poller.poll_timeout` < 3 × `poller.interval` (health healthy grace).
 - Timezone comes from the `TZ` env var (`time.Local`), never from config. Pin `TZ` in
   docker-compose; the image ships zoneinfo.
 
@@ -752,8 +760,10 @@ Decoded values are full precision; rounding to 2 decimals happens only in JSON s
 - `solis backfill --years N` (default 0): recompute monthly + yearly (always both) for the current
   year plus N closed years; refresh the total baseline when a closed year is touched.
 - Hard-refuse when the app is running: exclusive `flock` on a lock file next to the DB (the server
-  holds a shared lock). Always take a SHA-256-verified backup first (`database.CreateBackup`);
-  no backup → no write → exit 1.
+  holds a shared lock). Always take a backup first, verified with `PRAGMA integrity_check`
+  (`database.CreateBackup`); no backup → no write → exit 1.
+- Refuses to recompute periods whose daily rows retention already deleted (meta
+  `purged_before`); with any purge, `--years N > 0` fails instead of writing partial sums.
 - Uses the same `aggregation` functions as the live aggregator. Output format: spec §12.1.
 - Dangerous behavior belongs in CLI jobs, never in config toggles.
 

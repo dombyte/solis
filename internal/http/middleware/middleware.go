@@ -12,10 +12,12 @@ import (
 )
 
 // Recover turns handler panics into a 500 JSON response; the panic value is logged,
-// never sent to the client.
+// never sent to the client. When the handler already wrote the response head, a second
+// write would corrupt the body, so the connection is aborted instead.
 func Recover(log zerolog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			defer func() {
 				if p := recover(); p != nil {
 					if p == http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
@@ -23,10 +25,13 @@ func Recover(log zerolog.Logger) func(http.Handler) http.Handler {
 					}
 					log.Error().Interface("panic", p).Str("path", r.URL.Path).
 						Msg("panic in HTTP handler")
-					writeInternalError(w)
+					if ww.Status() != 0 {
+						panic(http.ErrAbortHandler)
+					}
+					writeInternalError(ww)
 				}
 			}()
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(ww, r)
 		})
 	}
 }

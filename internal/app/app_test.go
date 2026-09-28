@@ -66,8 +66,7 @@ func testConfig(t *testing.T, modbusPort, httpPort int) *config.AppConfig {
 			SlaveID: 1, Timeout: time.Second},
 		Rollover: config.RolloverSettings{Time: "23:59"},
 		Storage: config.StorageSettings{Path: filepath.Join(t.TempDir(), "solis.db"),
-			DailyRetention: time.Hour * 24 * 365, MonthlyRetention: time.Hour * 24 * 365,
-			YearlyRetention: time.Hour * 24 * 365, ErrorRetention: time.Hour * 24 * 30,
+			DailyRetention: time.Hour * 24 * 365, ErrorRetention: time.Hour * 24 * 30,
 			WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY", EnableBackup: false,
 			CleanupInterval: time.Hour},
 	}
