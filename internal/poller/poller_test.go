@@ -18,6 +18,7 @@ import (
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
+	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/util"
@@ -300,6 +301,35 @@ func TestPoll_ColdStartSeedsFromStorage(t *testing.T) {
 	e.waitPolls(1)
 	assert.InDelta(t, 30.0, e.daily("pv_energy_daily", "2026-08-05"), 1e-9)
 	assert.InDelta(t, 0.2, e.daily("pv_energy_daily", "2026-08-06"), 1e-9)
+}
+
+// A restart after an outage closes the days missed while the app was down on its first
+// poll (review ACQ-M1), instead of waiting for the next night's reset.
+func TestPoll_RestartAfterOutageClosesMissedDays(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 6, 12, 0, 0, 0, time.Local))
+	_, _, err := e.st.EnsureCutover(bg, period.Of(time.Date(2026, 8, 2, 12, 0, 0, 0, time.Local)))
+	require.NoError(t, err)
+	e.start()
+	e.waitPolls(1)
+	stt, err := e.st.CloseState(bg)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-08-05", stt.ClosedThrough)
+}
+
+// Day closes are written even while Modbus is unreachable (review ACQ-L5), and the cache
+// is left alone because nothing was read.
+func TestPoll_DisconnectedStillClosesDays(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 6, 12, 0, 0, 0, time.Local))
+	_, _, err := e.st.EnsureCutover(bg, period.Of(time.Date(2026, 8, 2, 12, 0, 0, 0, time.Local)))
+	require.NoError(t, err)
+	e.dev.connected.Store(false)
+	e.start()
+	require.Eventually(t, func() bool {
+		stt, err := e.st.CloseState(bg)
+		return err == nil && stt.ClosedThrough == "2026-08-05"
+	}, time.Second, time.Millisecond)
+	assert.Zero(t, e.dev.reads.Load())
+	assert.Zero(t, e.polls.Load(), "no cache replacement without a read")
 }
 
 func TestPoll_MidDayDipKeepsCachedMax(t *testing.T) {

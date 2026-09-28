@@ -77,6 +77,106 @@ func (_c *MockBackfillTx_Baseline_Call) RunAndReturn(run func() (string, map[str
 	return _c
 }
 
+// Cutover provides a mock function with no fields
+func (_m *MockBackfillTx) Cutover() string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Cutover")
+	}
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockBackfillTx_Cutover_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Cutover'
+type MockBackfillTx_Cutover_Call struct {
+	*mock.Call
+}
+
+// Cutover is a helper method to define mock.On call
+func (_e *MockBackfillTx_Expecter) Cutover() *MockBackfillTx_Cutover_Call {
+	return &MockBackfillTx_Cutover_Call{Call: _e.mock.On("Cutover")}
+}
+
+func (_c *MockBackfillTx_Cutover_Call) Run(run func()) *MockBackfillTx_Cutover_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBackfillTx_Cutover_Call) Return(_a0 string) *MockBackfillTx_Cutover_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBackfillTx_Cutover_Call) RunAndReturn(run func() string) *MockBackfillTx_Cutover_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FirstDailyDay provides a mock function with no fields
+func (_m *MockBackfillTx) FirstDailyDay() (string, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for FirstDailyDay")
+	}
+
+	var r0 string
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (string, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockBackfillTx_FirstDailyDay_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FirstDailyDay'
+type MockBackfillTx_FirstDailyDay_Call struct {
+	*mock.Call
+}
+
+// FirstDailyDay is a helper method to define mock.On call
+func (_e *MockBackfillTx_Expecter) FirstDailyDay() *MockBackfillTx_FirstDailyDay_Call {
+	return &MockBackfillTx_FirstDailyDay_Call{Call: _e.mock.On("FirstDailyDay")}
+}
+
+func (_c *MockBackfillTx_FirstDailyDay_Call) Run(run func()) *MockBackfillTx_FirstDailyDay_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockBackfillTx_FirstDailyDay_Call) Return(_a0 string, _a1 error) *MockBackfillTx_FirstDailyDay_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockBackfillTx_FirstDailyDay_Call) RunAndReturn(run func() (string, error)) *MockBackfillTx_FirstDailyDay_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PeriodValue provides a mock function with given fields: l, key, p
 func (_m *MockBackfillTx) PeriodValue(l period.Level, key string, p string) (float64, bool, error) {
 	ret := _m.Called(l, key, p)

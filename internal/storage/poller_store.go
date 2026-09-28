@@ -12,8 +12,11 @@ import (
 const writerPoller = "poller"
 
 // WritePoll persists one poll cycle atomically: daily max-writes, status changes and
-// day closes. Rows violating the write domain or a closed day are skipped and reported
-// in the returned (joined) error; the rest of the poll is still committed.
+// day closes. Any row (daily, status or close) violating the write domain, a closed day
+// or naming an unknown key is skipped and reported in the returned (joined) error; the
+// rest of the poll is still committed, so a rejection never rolls back the other rows
+// (review AGG-M1). Only a storage failure returns a non-rejection error and commits
+// nothing.
 func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
 	s.log.Debug().Int("daily", len(w.Daily)).Int("status", len(w.Status)).
 		Int("closes", len(w.Close)).Msg("write poll starting")
@@ -22,18 +25,9 @@ func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
 	next := s.meta.clone()
 	var rejected []error
 	err := s.withTx(ctx, func(tx *sql.Tx) error {
-		for _, r := range w.Daily {
-			if err := s.writeDaily(tx, &next, r); err != nil {
-				if !IsRejection(err) {
-					return err
-				}
-				rejected = append(rejected, err)
-			}
-		}
-		if err := s.writeStatus(tx, w.Status); err != nil {
-			return err
-		}
-		return s.closeDays(tx, &next, w.Close)
+		var err error
+		rejected, err = s.applyPoll(tx, &next, w)
+		return err
 	})
 	if err != nil {
 		return err
@@ -45,6 +39,36 @@ func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
 		s.log.Debug().Msg("write poll completed")
 	}
 	return errors.Join(rejected...)
+}
+
+// applyPoll writes every row of w inside tx and returns the rejected rows.
+func (s *Storage) applyPoll(tx *sql.Tx, next *metaState, w PollWrite) ([]error, error) {
+	var rejected []error
+	for _, r := range w.Daily {
+		if err := collect(&rejected, s.writeDaily(tx, next, r)); err != nil {
+			return nil, err
+		}
+	}
+	for _, r := range w.Status {
+		if err := collect(&rejected, s.writeStatus(tx, r)); err != nil {
+			return nil, err
+		}
+	}
+	for _, c := range w.Close {
+		if err := collect(&rejected, s.closeDay(tx, next, c)); err != nil {
+			return nil, err
+		}
+	}
+	return rejected, nil
+}
+
+// collect records a rejected row and returns any other (storage) error.
+func collect(rejected *[]error, err error) error {
+	if err != nil && IsRejection(err) {
+		*rejected = append(*rejected, err)
+		return nil
+	}
+	return err
 }
 
 // IsRejection reports whether err only carries rejected rows (closed period, foreign
@@ -79,38 +103,42 @@ func (s *Storage) writeDaily(tx *sql.Tx, m *metaState, r DailyRow) error {
 	return nil
 }
 
-func (s *Storage) writeStatus(tx *sql.Tx, rows []StatusRow) error {
-	for _, r := range rows {
-		reg, err := s.lookup(r.Key)
-		if err != nil {
-			return err
-		}
-		if reg.Store != solis.StoreStatus {
-			return &WriteDomainError{Writer: writerPoller, Key: r.Key, Reason: "not a status register"}
-		}
-		// Two changes of one key within a millisecond keep the later value instead of
-		// failing the whole poll transaction on UNIQUE(register_key, timestamp).
-		if _, err := tx.Exec(`INSERT INTO error_data (timestamp, register_key, raw_value,
-			string_value) VALUES (?, ?, ?, '')
-			ON CONFLICT(register_key, timestamp) DO UPDATE SET raw_value = excluded.raw_value`,
-			statusTimestamp(r.At), r.Key, r.Raw); err != nil {
-			return fmt.Errorf("storage: write status %s: %w", r.Key, err)
-		}
+func (s *Storage) writeStatus(tx *sql.Tx, r StatusRow) error {
+	reg, err := s.lookup(r.Key)
+	if err != nil {
+		return err
+	}
+	if reg.Store != solis.StoreStatus {
+		return &WriteDomainError{Writer: writerPoller, Key: r.Key, Reason: "not a status register"}
+	}
+	// Two changes of one key within a millisecond keep the later value instead of
+	// failing the whole poll transaction on UNIQUE(register_key, timestamp).
+	if _, err := tx.Exec(`INSERT INTO error_data (timestamp, register_key, raw_value,
+		string_value) VALUES (?, ?, ?, '')
+		ON CONFLICT(register_key, timestamp) DO UPDATE SET raw_value = excluded.raw_value`,
+		statusTimestamp(r.At), r.Key, r.Raw); err != nil {
+		return fmt.Errorf("storage: write status %s: %w", r.Key, err)
 	}
 	return nil
 }
 
-func (s *Storage) closeDays(tx *sql.Tx, m *metaState, closes []DayClose) error {
-	for _, c := range closes {
-		if _, err := s.lookup(c.Key); err != nil {
-			return err
-		}
-		v, err := advance(tx, metaClosedDaily+c.Key, m.closedDaily[c.Key], c.Day)
-		if err != nil {
-			return err
-		}
-		m.closedDaily[c.Key] = v
+// closeDay advances the closed-day watermark of one poller-owned (non-net daily) key.
+func (s *Storage) closeDay(tx *sql.Tx, m *metaState, c DayClose) error {
+	reg, err := s.lookup(c.Key)
+	if err != nil {
+		return err
 	}
+	if reg.Store != solis.StoreDaily || reg.Net {
+		return &WriteDomainError{
+			Writer: writerPoller, Key: c.Key,
+			Reason: "only non-net daily registers have poller day closes",
+		}
+	}
+	v, err := advance(tx, metaClosedDaily+c.Key, m.closedDaily[c.Key], c.Day)
+	if err != nil {
+		return err
+	}
+	m.closedDaily[c.Key] = v
 	return nil
 }
 

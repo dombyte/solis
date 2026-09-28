@@ -235,6 +235,39 @@ func TestBaselineFold_Idempotent(t *testing.T) {
 	assert.InDelta(t, 4000.0, st.Baseline["pv_energy_total"], 1e-9)
 }
 
+// A rejected status row or day close is skipped like a rejected daily row: the valid
+// rows of the same poll still commit (review AGG-M1), and a net key never gets a poller
+// close watermark (AGG-L4).
+func TestWritePoll_RejectedStatusAndCloseDoNotRollBack(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	now := day("2026-08-05")
+	err := s.WritePoll(ctx, PollWrite{
+		Daily: []DailyRow{{Key: "pv_energy_daily", Day: "2026-08-05", Value: 7, Raw: 70}},
+		Status: []StatusRow{
+			{Key: "pv_energy_daily", Raw: 1, At: now}, // not a status register
+			{Key: "solis_status", Raw: 3, At: now},
+		},
+		Close: []DayClose{
+			{Key: "zz", Day: "2026-08-04"},
+			{Key: "grid_energy_daily", Day: "2026-08-04"}, // net: aggregator-owned
+			{Key: "pv_energy_daily", Day: "2026-08-04"},
+		},
+	})
+	require.Error(t, err)
+	assert.True(t, IsRejection(err))
+	assert.ErrorIs(t, err, ErrWriteDomain)
+	assert.ErrorIs(t, err, ErrUnknownKey)
+
+	assert.InDelta(t, 7.0, dailyValue(t, s, "pv_energy_daily", "2026-08-05"), 0)
+	seed, err := s.Seed(ctx, nil)
+	require.NoError(t, err)
+	assert.InDelta(t, 3.0, seed.Status["solis_status"], 0)
+	assert.NotContains(t, seed.Status, "pv_energy_daily")
+	assert.Equal(t, "2026-08-04", seed.Closed["pv_energy_daily"])
+	assert.NotContains(t, seed.Closed, "grid_energy_daily")
+	assert.NotContains(t, seed.Closed, "zz")
+}
+
 func TestSeed(t *testing.T) {
 	s, _, _ := newStore(t, day("2026-08-05"))
 	now := day("2026-08-05")
@@ -330,6 +363,39 @@ func TestBackfill(t *testing.T) {
 	assert.ErrorIs(t, err, boom)
 	m, _ := s.GetMonthlyHistory(ctx, "pv_energy_monthly", day("2026-08-01"), day("2026-08-01"))
 	assert.InDelta(t, 42.0, m[0].Value, 0)
+}
+
+func TestBackfillTx_FirstDailyDayAndCutover(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-09-27"))
+	require.NoError(t, s.Backfill(ctx, func(tx BackfillTx) error {
+		first, err := tx.FirstDailyDay()
+		require.NoError(t, err)
+		assert.Empty(t, first)
+		assert.Empty(t, tx.Cutover())
+		return nil
+	}))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2025-06-01", Value: 1},
+		{Key: "pv_energy_daily", Day: "2026-01-01", Value: 1},
+	}}))
+	_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-09-01")))
+	require.NoError(t, err)
+	require.NoError(t, s.Backfill(ctx, func(tx BackfillTx) error {
+		first, err := tx.FirstDailyDay()
+		require.NoError(t, err)
+		assert.Equal(t, "2025-06-01", first)
+		assert.Equal(t, "2026-09-01", tx.Cutover())
+		return nil
+	}))
+	cctx, cancel := context.WithCancel(ctx)
+	require.NoError(t, s.Backfill(ctx, func(tx BackfillTx) error {
+		cancel()
+		b := tx.(*backfillTx)
+		b.ctx = cctx
+		_, err := tx.FirstDailyDay()
+		assert.Error(t, err)
+		return nil
+	}))
 }
 
 func TestHistoryAndJSONRounding(t *testing.T) {

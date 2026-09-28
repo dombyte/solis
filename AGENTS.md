@@ -318,6 +318,12 @@ Deliberate choices where the implementation fills a gap in, or deviates from, th
   forced close) only makes that happen sooner.
 - **Day attribution:** the "new day" after a counter reset is the day whose local midnight is
   nearest the rollover time; per-key bases live in memory and are seeded from the DB at start.
+  The inverter resets all daily counters together: a key that cannot show its own reset (no
+  base, or a base of 0, so it never decreases) follows a reset another key confirmed in the
+  same window, and is held (not written) from the opening day's midnight until then, so its
+  post-reset energy is never counted on both days. After a confirmed reset any decrease on
+  the closing day is the reset. Seeding returns the day closes missed while the app was
+  down, and closes are written even while Modbus is disconnected.
 - **WebSocket diff:** by `value` + `status_decoded` only (timestamps change every poll); each
   `update` frame carries one frame-level `ts`.
 - **Liveness:** every component beats from its own loop, idle or not; the Modbus reconnect loop
@@ -826,6 +832,11 @@ Decoded values are full precision; rounding to 2 decimals happens only in JSON s
   (`database.CreateBackup`); no backup → no write → exit 1.
 - Refuses to recompute periods whose daily rows retention already deleted (meta
   `purged_before`); with any purge, `--years N > 0` fails instead of writing partial sums.
+- Periods that start before the oldest stored daily row (v2 retention deleted it, or logging
+  began later) are skipped and keep their stored value; the report lists them.
+- The total baseline refresh sums the daily rows from the cutover year's 1 January through
+  the baseline year, exactly what the live aggregator folds (pre-cutover years are never
+  carried into totals); nothing is refreshed while the baseline year precedes the cutover.
 - Uses the same `aggregation` functions as the live aggregator. Output format: spec §12.1.
 - Dangerous behavior belongs in CLI jobs, never in config toggles.
 

@@ -53,11 +53,14 @@ type keyState struct {
 }
 
 // DayAttributor owns day attribution and rollover detection for all daily keys. Each key
-// is tracked independently; the forced close at window expiry applies to all keys.
-// It is not safe for concurrent use (the poll loop is its only user).
+// is tracked independently, except that the inverter resets all counters together: once
+// one key confirmed the reset in a window, keys that cannot see it themselves (no base,
+// or a base of 0, so no decrease) follow it. The forced close at window expiry applies
+// to all keys. It is not safe for concurrent use (the poll loop is its only user).
 type DayAttributor struct {
-	roll period.Rollover
-	keys map[string]*keyState
+	roll      period.Rollover
+	keys      map[string]*keyState
+	confirmed string // Opening day of the latest window with a confirmed reset
 }
 
 // NewDayAttributor creates an attributor for the given daily keys.
@@ -81,21 +84,43 @@ func (d *DayAttributor) SeedDays(now time.Time) []string {
 
 // Seed initialises every key from stored rows (day -> key -> value) and the persisted
 // closed-day watermarks, so a restart inside the window compares correctly (spec §7.2).
+// It returns the closes missed while the app was down: per key, the day before the
+// expected open day when the key's watermark is older.
 func (d *DayAttributor) Seed(now time.Time, rows map[string]map[string]float64,
 	closed map[string]string,
+) (map[string]string, error) {
+	expected := d.roll.LastEnded(now).Opening
+	closedThrough, err := period.AddDays(expected, -1)
+	if err != nil {
+		return nil, err
+	}
+	missed := make(map[string]string)
+	for k, st := range d.keys {
+		d.seedKey(k, st, now, rows, closed[k])
+		if c := closed[k]; c != "" && c < closedThrough {
+			missed[k] = closedThrough
+		}
+	}
+	return missed, nil
+}
+
+// seedKey restores one key: its base on the expected day, or, inside a window, the new
+// day when a stored row or its watermark shows it already advanced (which also means
+// the reset was confirmed in this window).
+func (d *DayAttributor) seedKey(k string, st *keyState, now time.Time,
+	rows map[string]map[string]float64, closed string,
 ) {
 	expected := d.roll.LastEnded(now).Opening
+	*st = keyState{openDay: expected}
+	if v, ok := rows[expected][k]; ok {
+		st.base, st.hasBase = v, true
+	}
 	w, in := inWindow(d.roll, now)
-	for k, st := range d.keys {
-		*st = keyState{openDay: expected}
-		if v, ok := rows[expected][k]; ok {
-			st.base, st.hasBase = v, true
-		}
-		_, advanced := rows[w.Opening][k]
-		if in && (advanced || closed[k] >= expected) {
-			st.openDay = w.Opening
-			st.base, st.hasBase = rows[w.Opening][k], advanced
-		}
+	_, advanced := rows[w.Opening][k]
+	if in && (advanced || closed >= expected) {
+		st.openDay = w.Opening
+		st.base, st.hasBase = rows[w.Opening][k], advanced
+		d.confirmed = w.Opening
 	}
 }
 
@@ -126,28 +151,59 @@ func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribut
 	if !ok {
 		return Attribution{Decision: Discard, Warn: "unknown daily key " + key}
 	}
+	w, in := inWindow(d.roll, now)
+	if a, blind := d.blindReset(st, v, w, in, now); blind {
+		return a
+	}
 	if !st.hasBase || v >= st.base { // value fits: normal max-write
 		st.base, st.hasBase = v, true
 		return Attribution{Decision: WriteCurrent, Day: st.openDay}
 	}
-	if w, in := inWindow(d.roll, now); in {
-		return st.decreaseInWindow(key, v, w)
+	if in {
+		return d.decreaseInWindow(key, st, v, w)
 	}
 	return Attribution{Decision: Discard, Warn: fmt.Sprintf(
 		"%s decreased %.2f -> %.2f outside the rollover window; ignored until it "+
 			"exceeds the stored max", key, st.base, v)}
 }
 
+// blindReset handles a key on the closing day that cannot see the reset itself: with no
+// base or a base of 0 the counter never decreases. Such a key follows a reset another
+// key confirmed in this window; without a confirmation its values are held (discarded
+// silently) from the opening day's midnight on, so post-reset energy is never written
+// to the closing day and counted again on the opening day (review ACQ-H1). It reports
+// false when the normal rules apply (the key can detect its reset, or it is still
+// before midnight without a confirmation).
+func (d *DayAttributor) blindReset(st *keyState, v float64, w period.Window, in bool,
+	now time.Time,
+) (Attribution, bool) {
+	switch {
+	case !in || st.openDay != w.Closing || (st.hasBase && st.base > 0):
+		return Attribution{}, false
+	case d.confirmed == w.Opening:
+		st.openDay, st.base, st.hasBase = w.Opening, v, true
+		return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}, true
+	case now.Before(w.Midnight):
+		return Attribution{}, false
+	default:
+		return Attribution{Decision: Discard}, true
+	}
+}
+
 // decreaseInWindow handles a decrease inside window w: a substantial decrease on the
-// closing day confirms the reset (one advance per window); anything else is discarded.
-func (k *keyState) decreaseInWindow(key string, v float64, w period.Window) Attribution {
+// closing day, or any decrease once another key confirmed the reset in this window,
+// confirms the reset (one advance per window); anything else is discarded.
+func (d *DayAttributor) decreaseInWindow(key string, k *keyState, v float64,
+	w period.Window,
+) Attribution {
 	if k.openDay != w.Closing {
 		return Attribution{Decision: Discard, Warn: fmt.Sprintf(
 			"%s decreased %.2f -> %.2f after its reset in this window; ignored", key, k.base, v)}
 	}
-	if !isReset(k.base, v) {
+	if d.confirmed != w.Opening && !isReset(k.base, v) {
 		return Attribution{Decision: Discard} // glitch dip inside the window
 	}
+	d.confirmed = w.Opening
 	k.openDay, k.base = w.Opening, v
 	return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}
 }

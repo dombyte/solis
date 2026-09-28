@@ -27,6 +27,11 @@ type BackfillTx interface {
 	// PurgedBefore is the earliest day retention cleanup kept ("" = nothing deleted);
 	// daily rows before it are gone, so periods starting earlier cannot be recomputed.
 	PurgedBefore() string
+	// FirstDailyDay is the oldest stored daily row ("" = none). Periods starting
+	// before it have no complete daily history (v2 retention, or logging started later).
+	FirstDailyDay() (string, error)
+	// Cutover is the v3 cutover day ("" = not recorded yet).
+	Cutover() string
 }
 
 // Backfill runs fn in one transaction and commits only when fn returns nil.
@@ -96,6 +101,18 @@ func (b *backfillTx) Baseline() (string, map[string]float64) {
 }
 
 func (b *backfillTx) PurgedBefore() string { return b.meta.purgedBefore }
+
+func (b *backfillTx) Cutover() string { return b.meta.cutover }
+
+func (b *backfillTx) FirstDailyDay() (string, error) {
+	var first string
+	err := b.tx.QueryRowContext(b.ctx,
+		`SELECT COALESCE(MIN(date), '') FROM daily_values`).Scan(&first)
+	if err != nil {
+		return "", fmt.Errorf("storage: first daily day: %w", err)
+	}
+	return first, nil
+}
 
 func (b *backfillTx) PutBaseline(values map[string]float64) error {
 	for k, v := range values {

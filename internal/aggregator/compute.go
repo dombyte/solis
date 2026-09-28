@@ -48,18 +48,38 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 		}
 	}
 	if err := a.d.Store.WriteComputed(ctx, rs.write); err != nil {
-		if !isLag(err) {
+		if !storage.IsRejection(err) {
 			return err
 		}
-		// A write into a period another instance just closed is lag, not failure.
-		a.d.Log.Debug().Err(err).Msg("computed rows rejected by storage")
+		// Rejected rows were skipped; everything else (rows, freezes, fold) committed,
+		// so the run succeeded and the cache is merged (review AGG-M3).
+		a.logRejections(err)
 	}
 	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(rs.current, now), now)
 	return nil
 }
 
-func isLag(err error) bool {
-	return errors.Is(err, storage.ErrPeriodClosed) && !errors.Is(err, storage.ErrWriteDomain)
+// logRejections classifies each rejected row: a write into a period that was closed
+// meanwhile is lag (debug); a write-domain or unknown-key rejection is an aggregator
+// bug that a restart cannot fix, so it is logged as an error instead of turning the
+// component Recovering on every run.
+func (a *Aggregator) logRejections(err error) {
+	for _, e := range joinedErrors(err) {
+		if errors.Is(e, storage.ErrPeriodClosed) {
+			a.d.Log.Debug().Err(e).Msg("computed row rejected: period closed meanwhile")
+			continue
+		}
+		a.d.Log.Error().Err(e).Str("tag", "write_domain").
+			Msg("computed row rejected by storage (aggregator bug)")
+	}
+}
+
+// joinedErrors unpacks an errors.Join result into its parts (a single error otherwise).
+func joinedErrors(err error) []error {
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		return j.Unwrap()
+	}
+	return []error{err}
 }
 
 // sums runs one SQL sum per daily source key.

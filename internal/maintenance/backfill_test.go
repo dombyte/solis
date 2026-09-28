@@ -126,19 +126,67 @@ func summary(t *testing.T, out string) (rec, same, lower int) {
 	return rec, same, lower
 }
 
-func TestBackfill_ClosedYearRefreshesBaseline(t *testing.T) {
+// --years 1 over a closed year with partial pre-cutover history: months from the oldest
+// daily row on are recomputed, earlier months and the year keep their stored value
+// (DB-H1), and pre-cutover years are never folded into the baseline (DB-H2).
+func TestBackfill_ClosedYearKeepsIncompletePeriodsAndBaseline(t *testing.T) {
 	f := newFixture(t)
+	st := f.open(t)
+	require.NoError(t, st.Backfill(bg, func(tx storage.BackfillTx) error {
+		return tx.PutPeriod(period.Yearly, "pv_energy_yearly", "2025", 1234)
+	}))
+	require.NoError(t, st.Close())
+
 	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 1))
 	out := f.out.String()
-	assert.Contains(t, out, "yearly   pv_energy_yearly         2025")
 	assert.Contains(t, out, "monthly  pv_energy_monthly        2025-06      n/a kWh -> 100.00 kWh")
-	assert.Contains(t, out, "total    pv_energy_total          baseline      n/a kWh -> 100.00 kWh")
+	assert.Contains(t, out, "skipped  monthly  2025-05  daily history starts 2025-06-01")
+	assert.Contains(t, out, "skipped  yearly   2025     daily history starts 2025-06-01")
+	assert.NotContains(t, out, "yearly   pv_energy_yearly         2025")
+	assert.NotContains(t, out, "baseline", "baseline year 2025 is before the cutover year")
+	assert.Contains(t, out, "6 periods skipped (incomplete daily history)")
 
+	st = f.open(t)
+	defer func() { _ = st.Close() }()
+	y2025 := time.Date(2025, 6, 1, 0, 0, 0, 0, time.Local)
+	pts, err := st.GetYearlyHistory(bg, "pv_energy_yearly", y2025, y2025)
+	require.NoError(t, err)
+	require.Len(t, pts, 1)
+	assert.InDelta(t, 1234.0, pts[0].Value, 1e-9, "inverter-reported year kept")
+	cs, err := st.CloseState(bg)
+	require.NoError(t, err)
+	assert.Empty(t, cs.Baseline, "pre-cutover history is not carried into totals")
+}
+
+// Once a year after the cutover was folded, the baseline refresh sums exactly the
+// cutover year through the baseline year, as the live aggregator does (DB-H2).
+func TestBackfill_BaselineRefreshStartsAtCutoverYear(t *testing.T) {
+	reg, err := solis.NewRegistry()
+	require.NoError(t, err)
+	f := &fixture{path: filepath.Join(t.TempDir(), "solis.db"), reg: reg}
 	st := f.open(t)
+	require.NoError(t, st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
+		{Key: "pv_energy_daily", Day: "2024-06-01", Value: 1000}, // pre-cutover year
+		{Key: "pv_energy_daily", Day: "2025-01-01", Value: 40},
+		{Key: "pv_energy_daily", Day: "2025-02-01", Value: 60},
+		{Key: "pv_energy_daily", Day: "2026-03-01", Value: 7},
+	}}))
+	_, _, err = st.EnsureCutover(bg, period.Of(time.Date(2025, 3, 1, 12, 0, 0, 0, time.Local)))
+	require.NoError(t, err)
+	require.NoError(t, st.WriteComputed(bg, storage.ComputedWrite{
+		At:    now,
+		Folds: []storage.BaselineFold{{Year: "2025", Add: map[string]float64{"pv_energy_total": 1}}},
+	}))
+	require.NoError(t, st.Close())
+
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 1))
+	assert.Contains(t, f.out.String(),
+		"total    pv_energy_total          baseline     1.00 kWh -> 100.00 kWh")
+	st = f.open(t)
 	defer func() { _ = st.Close() }()
 	cs, err := st.CloseState(bg)
 	require.NoError(t, err)
-	assert.InDelta(t, 100.0, cs.Baseline["pv_energy_total"], 1e-9)
+	assert.InDelta(t, 100.0, cs.Baseline["pv_energy_total"], 1e-9, "2024 row excluded")
 	assert.Equal(t, "2025", cs.BaselineYear)
 }
 
@@ -269,6 +317,28 @@ func TestRecompute_Errors(t *testing.T) {
 
 	tx = mocks.NewMockBackfillTx(t)
 	tx.EXPECT().PurgedBefore().Return("")
+	tx.EXPECT().FirstDailyDay().Return("2020-01-01", nil)
 	_, err = Recompute(tx, reg, period.Period{Year: "x"}, 0)
 	assert.ErrorIs(t, err, period.ErrInvalidKey)
+
+	tx = mocks.NewMockBackfillTx(t)
+	tx.EXPECT().PurgedBefore().Return("")
+	tx.EXPECT().FirstDailyDay().Return("", errors.New("disk I/O error"))
+	_, err = Recompute(tx, reg, period.Of(now), 0)
+	assert.ErrorContains(t, err, "disk I/O error")
+}
+
+// Periods whose start lies before the oldest daily row (v2 retention deleted it, or
+// logging began later) are skipped and keep their stored value (review DB-H1).
+func TestRecompute_SkipsPeriodsWithoutCompleteDailyHistory(t *testing.T) {
+	reg := newFixture(t).reg
+	tx := mocks.NewMockBackfillTx(t)
+	tx.EXPECT().PurgedBefore().Return("")
+	tx.EXPECT().FirstDailyDay().Return("", nil) // no daily rows at all
+	rep, err := Recompute(tx, reg, period.Of(now), 0)
+	require.NoError(t, err)
+	assert.Empty(t, rep.Lines, "nothing written without daily history")
+	assert.Len(t, rep.Skipped, 10, "Jan..Sep + the year")
+	assert.Equal(t, "skipped  yearly   2026     no daily history; stored value kept",
+		rep.Skipped[9].String())
 }

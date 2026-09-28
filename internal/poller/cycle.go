@@ -77,6 +77,38 @@ func (p *Poller) sleep(ctx context.Context, d time.Duration) error {
 // persist runs the write path: forced closes, day attribution, status changes, one
 // storage transaction, then cache replacement and PeriodClosed events.
 func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, now time.Time) error {
+	if err := p.forceClose(now); err != nil {
+		return err
+	}
+	w, cacheVals := p.attribute(values, now)
+	w.Status = p.statusChanges(values, now)
+	w.Close = p.closes()
+	if err := p.write(ctx, w); err != nil {
+		return err
+	}
+	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, cacheVals, now)
+	return nil
+}
+
+// closeDisconnected writes the due day closes while Modbus is unreachable, so an outage
+// across midnight does not stall the closed-day watermarks (review ACQ-L5). Nothing was
+// read, so the cache is left untouched.
+func (p *Poller) closeDisconnected(ctx context.Context, now time.Time) {
+	if err := p.forceClose(now); err != nil {
+		p.d.Log.Error().Err(err).Msg("forced close failed")
+		return
+	}
+	w := storage.PollWrite{Close: p.closes()}
+	if len(w.Close) == 0 {
+		return
+	}
+	if err := p.write(ctx, w); err != nil {
+		p.d.Log.Error().Err(err).Str("tag", "storage_failure").Msg("storing day closes failed")
+	}
+}
+
+// forceClose queues the closes of every key behind the day it must have reached by now.
+func (p *Poller) forceClose(now time.Time) error {
 	forced, err := p.attr.ForceClose(now)
 	if err != nil {
 		return err
@@ -84,11 +116,20 @@ func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, no
 	for k, d := range forced {
 		p.pendingCloses[k] = maxDay(p.pendingCloses[k], d)
 	}
-	w, cacheVals := p.attribute(values, now)
-	w.Status = p.statusChanges(values, now)
+	return nil
+}
+
+// closes lists the pending day closes (kept until a write commits them).
+func (p *Poller) closes() []storage.DayClose {
+	closes := make([]storage.DayClose, 0, len(p.pendingCloses))
 	for k, d := range p.pendingCloses {
-		w.Close = append(w.Close, storage.DayClose{Key: k, Day: d})
+		closes = append(closes, storage.DayClose{Key: k, Day: d})
 	}
+	return closes
+}
+
+// write stores w in one transaction and updates the loop state after the commit.
+func (p *Poller) write(ctx context.Context, w storage.PollWrite) error {
 	sctx, cancel := p.storageContext(ctx)
 	defer cancel()
 	if err := p.d.Store.WritePoll(sctx, w); err != nil && !storage.IsRejection(err) {
@@ -97,7 +138,6 @@ func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, no
 		p.d.Log.Warn().Err(err).Msg("storage rejected late or foreign writes")
 	}
 	p.committed(w)
-	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, cacheVals, now)
 	return nil
 }
 

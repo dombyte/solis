@@ -34,12 +34,31 @@ func (l Line) String() string {
 		l.Unit, l.New, l.Unit)
 }
 
+// Skip is one period left untouched because the daily history does not reach its start.
+type Skip struct {
+	Level      string
+	Period     string
+	FirstDaily string // oldest daily row ("" = none)
+}
+
+// String renders e.g. "skipped  yearly   2025     daily history starts 2025-06-01; kept".
+func (s Skip) String() string {
+	why := "no daily history"
+	if s.FirstDaily != "" {
+		why = "daily history starts " + s.FirstDaily
+	}
+	return fmt.Sprintf("skipped  %-8s %-7s  %s; stored value kept", s.Level, s.Period, why)
+}
+
 // Report collects the lines of one run.
 type Report struct {
-	Lines []Line
+	Lines   []Line
+	Skipped []Skip
 }
 
 func (r *Report) add(l Line) { r.Lines = append(r.Lines, l) }
+
+func (r *Report) skip(s Skip) { r.Skipped = append(r.Skipped, s) }
 
 // Counts returns recomputed, unchanged and lower (daily-data gap) row counts.
 func (r Report) Counts() (recomputed, unchanged, lower int) {
@@ -62,9 +81,13 @@ func (r Report) Write(w io.Writer) error {
 	for _, l := range r.Lines {
 		lines = append(lines, l.String())
 	}
+	for _, s := range r.Skipped {
+		lines = append(lines, s.String())
+	}
 	rec, same, lower := r.Counts()
 	lines = append(lines, fmt.Sprintf("summary: %d rows recomputed, %d unchanged, %d lower "+
-		"(daily-data gaps)", rec, same, lower))
+		"(daily-data gaps), %d periods skipped (incomplete daily history)", rec, same, lower,
+		len(r.Skipped)))
 	for _, s := range lines {
 		if _, err := fmt.Fprintln(w, s); err != nil {
 			return err

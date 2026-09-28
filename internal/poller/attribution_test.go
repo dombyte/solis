@@ -95,7 +95,8 @@ func TestAttribute_ForcedCloseAtWindowEnd(t *testing.T) {
 	runSteps(t, d, loc, []step{
 		{"2026-08-05 22:00", "backup", 0, WriteCurrent, "2026-08-05", "", false},
 		{"2026-08-05 22:00", "pv", 12, WriteCurrent, "2026-08-05", "", false},
-		{"2026-08-06 00:30", "backup", 0, WriteCurrent, "2026-08-05", "", false},
+		// A zero counter cannot show its reset; without a confirmation it is held.
+		{"2026-08-06 00:30", "backup", 0, Discard, "", "", false},
 	})
 	// Window ends at 00:59: every key still on the old day is force-closed.
 	closes, err := d.ForceClose(time.Date(2026, 8, 6, 0, 59, 0, 0, loc))
@@ -117,6 +118,61 @@ func TestAttribute_DecreaseOutsideWindowIgnoredUntilRecovered(t *testing.T) {
 		{"2026-08-05 12:05", "pv", 0.2, Discard, "", "", true}, // mid-day reboot
 		{"2026-08-05 12:10", "pv", 5, Discard, "", "", true},
 		{"2026-08-05 13:00", "pv", 10.1, WriteCurrent, "2026-08-05", "", false},
+	})
+}
+
+// The reproduction from the review (ACQ-H1): grid import is 0 all day, pv confirms the
+// midnight reset, and grid's first post-reset energy must land on the new day only.
+func TestAttribute_ZeroBaseKeyFollowsConfirmedReset(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv", "grid"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "pv", 30, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-05 22:00", "grid", 0, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-06 00:01", "pv", 0, WriteNewDay, "2026-08-06", "2026-08-05", false},
+		{"2026-08-06 00:50", "grid", 0.4, WriteNewDay, "2026-08-06", "2026-08-05", false},
+		{"2026-08-06 01:00", "grid", 0.5, WriteCurrent, "2026-08-06", "", false},
+	})
+}
+
+// Within one poll the keys are attributed in map order: a zero-base key seen before the
+// confirming key is held for one poll instead of being written to the closing day.
+func TestAttribute_ZeroBaseKeyBeforeConfirmationInSamePollIsHeld(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv", "grid"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "pv", 30, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-05 22:00", "grid", 0, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-05 23:50", "grid", 0, WriteCurrent, "2026-08-05", "", false}, // before midnight
+		{"2026-08-06 00:05", "grid", 0.1, Discard, "", "", false},
+		{"2026-08-06 00:05", "pv", 0.1, WriteNewDay, "2026-08-06", "2026-08-05", false},
+		{"2026-08-06 00:10", "grid", 0.2, WriteNewDay, "2026-08-06", "2026-08-05", false},
+	})
+}
+
+// Without any confirmation the zero-base key is held until the forced close and then
+// starts the new day with its full post-reset value: counted once, on the new day.
+func TestAttribute_ZeroBaseKeyWithoutConfirmationWaitsForForcedClose(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"grid"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "grid", 0, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-06 00:30", "grid", 0.3, Discard, "", "", false},
+		{"2026-08-06 01:00", "grid", 0.5, WriteCurrent, "2026-08-06", "", false},
+	})
+}
+
+// A small base cannot show a 90 % drop; once another key confirmed the reset, any
+// decrease on the closing day is the reset.
+func TestAttribute_SmallBaseFollowsConfirmedReset(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv", "grid"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "pv", 30, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-05 22:00", "grid", 0.5, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-05 23:45", "grid", 0.4, Discard, "", "", false}, // unconfirmed: glitch
+		{"2026-08-06 00:01", "pv", 0, WriteNewDay, "2026-08-06", "2026-08-05", false},
+		{"2026-08-06 00:05", "grid", 0.1, WriteNewDay, "2026-08-06", "2026-08-05", false},
 	})
 }
 
@@ -203,6 +259,41 @@ func TestSeed_ColdStartInsideWindow(t *testing.T) {
 	assert.Equal(t, "2026-08-05", got.Closed)
 	// pv continues on the new day.
 	assert.Equal(t, WriteCurrent, d.Attribute("pv", 0.4, now).Decision)
+}
+
+// Cold start inside the window with no stored row for the closing day (first install, or
+// down all day): the first post-midnight value is held unless a stored new-day row
+// already confirms the reset.
+func TestSeed_ColdStartWithoutBase(t *testing.T) {
+	loc := berlin(t)
+	now := time.Date(2026, 8, 6, 0, 10, 0, 0, loc)
+	d := NewDayAttributor(rollover(t, "23:59"), []string{"pv", "grid"})
+	_, err := d.Seed(now, nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, Discard, d.Attribute("grid", 0.1, now).Decision)
+
+	confirmed := NewDayAttributor(rollover(t, "23:59"), []string{"pv", "grid"})
+	_, err = confirmed.Seed(now, map[string]map[string]float64{"2026-08-06": {"pv": 0.2}}, nil)
+	require.NoError(t, err)
+	got := confirmed.Attribute("grid", 0.1, now)
+	assert.Equal(t, WriteNewDay, got.Decision)
+	assert.Equal(t, "2026-08-06", got.Day)
+}
+
+// A restart after an outage reports the days closed while the app was down (ACQ-M1).
+func TestSeed_ReportsClosesMissedDuringOutage(t *testing.T) {
+	loc := berlin(t)
+	d := NewDayAttributor(rollover(t, "23:59"), []string{"pv", "grid", "fresh"})
+	missed, err := d.Seed(time.Date(2026, 8, 6, 12, 0, 0, 0, loc), nil,
+		map[string]string{"pv": "2026-08-02", "grid": "2026-08-05"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"pv": "2026-08-05"}, missed)
+
+	// Inside the window the closing day is still open: only older days are missed.
+	missed, err = d.Seed(time.Date(2026, 8, 6, 0, 10, 0, 0, loc), nil,
+		map[string]string{"pv": "2026-08-04", "grid": "2026-08-03"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"grid": "2026-08-04"}, missed)
 }
 
 func TestSeed_OutsideWindowAndEmpty(t *testing.T) {

@@ -197,6 +197,7 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 	}
 	reader, ok := p.d.Source.Load()
 	if !ok || !reader.IsConnected() {
+		p.closeDisconnected(ctx, start)
 		p.Set(health.Recovering, "modbus not connected")
 		return
 	}
@@ -233,7 +234,13 @@ func (p *Poller) seed(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	p.attr.Seed(now, s.Daily, s.Closed)
+	missed, err := p.attr.Seed(now, s.Daily, s.Closed)
+	if err != nil {
+		return err
+	}
+	for k, d := range missed { // days closed while the app was down (review ACQ-M1)
+		p.pendingCloses[k] = maxDay(p.pendingCloses[k], d)
+	}
 	for k, v := range s.Status {
 		p.lastStatus[k] = v
 	}

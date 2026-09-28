@@ -131,35 +131,45 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 }
 
 // Recompute rewrites monthly and yearly rows (always both) of the affected years and, if a
-// closed year is included, the total baseline. It returns the report lines.
+// closed year is included, the total baseline. Periods that start before the oldest
+// daily row have no complete daily history: they are skipped and keep their stored
+// (e.g. inverter-reported) value instead of being overwritten with a partial or zero
+// sum. It returns the report lines.
 func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int) (
 	Report, error,
 ) {
-	var rep Report
 	if err := checkPurged(tx, now, years); err != nil {
-		return rep, err
+		return Report{}, err
 	}
+	first, err := tx.FirstDailyDay()
+	if err != nil {
+		return Report{}, err
+	}
+	r := &recomputer{tx: tx, reg: reg, now: now, first: first}
+	err = r.run(years)
+	return r.rep, err
+}
+
+// run recomputes the current year plus `years` closed years, then the baseline.
+func (r *recomputer) run(years int) error {
 	for back := years; back >= 0; back-- {
-		year, err := period.AddYears(now.Year, -back)
+		year, err := period.AddYears(r.now.Year, -back)
 		if err != nil {
-			return rep, err
+			return err
 		}
-		if err := recomputeYear(tx, reg, now, year, &rep); err != nil {
-			return rep, err
+		if err := r.year(year); err != nil {
+			return err
 		}
 	}
 	if years > 0 {
-		if err := refreshBaseline(tx, reg, &rep); err != nil {
-			return rep, err
-		}
+		return r.refreshBaseline()
 	}
-	return rep, nil
+	return nil
 }
 
 // checkPurged refuses a job that would recompute from daily rows retention already
 // deleted: the oldest touched year must start on or after the purge watermark, and the
-// baseline (the sum of all daily rows, refreshed when a closed year is touched) needs
-// the complete history.
+// baseline (refreshed when a closed year is touched) needs the complete history.
 func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
 	purged := tx.PurgedBefore()
 	if purged == "" {
@@ -175,10 +185,17 @@ func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
 	return nil
 }
 
-func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year string,
-	rep *Report,
-) error {
-	months, err := monthsOf(year, now)
+// recomputer carries one Recompute run.
+type recomputer struct {
+	tx    storage.BackfillTx
+	reg   Registry
+	now   period.Period
+	first string // oldest daily row ("" = none)
+	rep   Report
+}
+
+func (r *recomputer) year(year string) error {
+	months, err := monthsOf(year, r.now)
 	if err != nil {
 		return err
 	}
@@ -187,8 +204,8 @@ func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year 
 		if err != nil {
 			return err
 		}
-		j := job{level: period.Monthly, key: m, from: first, to: min(last, now.Day)}
-		if err := recomputePeriod(tx, reg, j, rep); err != nil {
+		j := job{level: period.Monthly, key: m, from: first, to: min(last, r.now.Day)}
+		if err := r.period(j); err != nil {
 			return err
 		}
 	}
@@ -196,10 +213,10 @@ func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year 
 	if err != nil {
 		return err
 	}
-	return recomputePeriod(tx, reg, job{
+	return r.period(job{
 		level: period.Yearly, key: year, from: first,
-		to: min(last, now.Day),
-	}, rep)
+		to: min(last, r.now.Day),
+	})
 }
 
 // monthsOf lists the months of year up to the current month.
@@ -221,60 +238,74 @@ type job struct {
 	key, from, to string
 }
 
-// recomputePeriod computes edges + net from daily sums and writes every row.
-func recomputePeriod(tx storage.BackfillTx, reg Registry, j job, rep *Report) error {
+// period computes edges + net from daily sums and writes every row, unless the daily
+// history does not reach back to the period's start (review DB-H1).
+func (r *recomputer) period(j job) error {
+	if r.first == "" || j.from < r.first {
+		r.rep.skip(Skip{Level: j.level.String(), Period: j.key, FirstDaily: r.first})
+		return nil
+	}
 	l, p := j.level, j.key
-	edges := reg.Edges(l)
-	sums := aggregation.Values{}
-	for _, k := range aggregation.SourceKeys(edges) {
-		v, err := tx.SumDaily(k, j.from, j.to)
-		if err != nil {
-			return err
-		}
-		sums[k] = v
+	edges := r.reg.Edges(l)
+	sums, err := r.sums(aggregation.SourceKeys(edges), j.from, j.to)
+	if err != nil {
+		return err
 	}
 	vals := aggregation.ApplyEdges(edges, sums)
-	vals = aggregation.Merge(vals, aggregation.ApplyNet(reg.NetPairs(l), vals))
+	vals = aggregation.Merge(vals, aggregation.ApplyNet(r.reg.NetPairs(l), vals))
 	for _, key := range sortedKeys(vals) {
-		old, had, err := tx.PeriodValue(l, key, p)
+		old, had, err := r.tx.PeriodValue(l, key, p)
 		if err != nil {
 			return err
 		}
-		if err := tx.PutPeriod(l, key, p, vals[key]); err != nil {
+		if err := r.tx.PutPeriod(l, key, p, vals[key]); err != nil {
 			return err
 		}
-		rep.add(Line{
+		r.rep.add(Line{
 			Level: l.String(), Key: key, Period: p, Old: old, HadOld: had,
-			New: vals[key], Unit: unitOf(reg, key),
+			New: vals[key], Unit: unitOf(r.reg, key),
 		})
 	}
 	return nil
 }
 
-// refreshBaseline recomputes baseline = sum of all daily rows up to the baseline year.
-func refreshBaseline(tx storage.BackfillTx, reg Registry, rep *Report) error {
-	year, old := tx.Baseline()
-	if year == "" {
-		return nil
-	}
-	edges := reg.Edges(period.Total)
+// sums runs one bounded daily sum per source key.
+func (r *recomputer) sums(keys []string, from, to string) (aggregation.Values, error) {
 	sums := aggregation.Values{}
-	for _, k := range aggregation.SourceKeys(edges) {
-		v, err := tx.SumDaily(k, "", year+"-12-31")
+	for _, k := range keys {
+		v, err := r.tx.SumDaily(k, from, to)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		sums[k] = v
+	}
+	return sums, nil
+}
+
+// refreshBaseline recomputes the total baseline the way the live aggregator builds it:
+// the daily rows of every folded year since the cutover year (totals are app-lifetime,
+// review DB-H2). Pre-cutover years are never added, and while no year since the cutover
+// has been folded there is nothing to refresh.
+func (r *recomputer) refreshBaseline() error {
+	year, old := r.tx.Baseline()
+	cutover := r.tx.Cutover()
+	if year == "" || len(cutover) < len("2006") || year < cutover[:4] {
+		return nil
+	}
+	edges := r.reg.Edges(period.Total)
+	sums, err := r.sums(aggregation.SourceKeys(edges), cutover[:4]+"-01-01", year+"-12-31")
+	if err != nil {
+		return err
 	}
 	next := aggregation.ApplyEdges(edges, sums)
 	for _, key := range sortedKeys(next) {
 		o, had := old[key]
-		rep.add(Line{
+		r.rep.add(Line{
 			Level: "total", Key: key, Period: "baseline", Old: o, HadOld: had,
-			New: next[key], Unit: unitOf(reg, key),
+			New: next[key], Unit: unitOf(r.reg, key),
 		})
 	}
-	return tx.PutBaseline(next)
+	return r.tx.PutBaseline(next)
 }
 
 func unitOf(reg Registry, key string) string {

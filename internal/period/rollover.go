@@ -87,6 +87,9 @@ type Window struct {
 	Closing string
 	// Opening is the day key that starts in this window.
 	Opening string
+	// Midnight is the local start of the Opening day, when the inverter resets its
+	// daily counters.
+	Midnight time.Time
 }
 
 // Contains reports whether t lies inside the window (inclusive start, exclusive end).
@@ -103,11 +106,12 @@ func (r Rollover) windowOn(day time.Time) Window {
 		opening = opening.AddDate(0, 0, 1)
 	}
 	return Window{
-		Anchor:  anchor,
-		Start:   anchor.Add(-WindowHalfWidth),
-		End:     anchor.Add(WindowHalfWidth),
-		Closing: opening.AddDate(0, 0, -1).Format(DayLayout),
-		Opening: opening.Format(DayLayout),
+		Anchor:   anchor,
+		Start:    anchor.Add(-WindowHalfWidth),
+		End:      anchor.Add(WindowHalfWidth),
+		Closing:  opening.AddDate(0, 0, -1).Format(DayLayout),
+		Opening:  opening.Format(DayLayout),
+		Midnight: opening,
 	}
 }
 
