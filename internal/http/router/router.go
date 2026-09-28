@@ -4,6 +4,7 @@ package router
 import (
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -58,11 +59,13 @@ func SetupRoutes(d Deps) *chi.Mux {
 		d.DocsDir = DocsDist
 	}
 	r := chi.NewRouter()
+	r.Use(chimw.RequestID) // first, so the logger and recoverer see the id
 	r.Use(middleware.Recover(d.Log))
 	r.Use(middleware.Logger(d.Log))
-	r.Use(chimw.RequestID)
+	r.Use(middleware.SecurityHeaders)
 	r.Use(cacheHeaders)
-	r.Use(cors)
+	// No CORS: the SPA and the dev server proxy are same-origin, so a permissive
+	// Access-Control-Allow-Origin would only let other websites read the data.
 
 	if d.WebSocket != nil {
 		r.Handle("/ws", d.WebSocket)
@@ -83,23 +86,53 @@ func mountDocs(r chi.Router, dir string) {
 		return
 	}
 	r.Handle("/docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
-	r.Handle("/docs/*", http.StripPrefix("/docs/", http.FileServer(http.Dir(dir))))
+	r.Handle("/docs/*", http.StripPrefix("/docs/", staticDir(dir)))
 }
 
 func mountFrontend(r chi.Router, dir string) {
 	if _, err := os.Stat(dir); err != nil {
 		return
 	}
-	r.Handle("/assets/*", http.StripPrefix("/assets/",
-		http.FileServer(http.Dir(filepath.Join(dir, "assets")))))
-	r.Handle("/data/*", http.StripPrefix("/data/",
-		http.FileServer(http.Dir(filepath.Join(dir, "data")))))
+	r.Handle("/assets/*", http.StripPrefix("/assets/", staticDir(filepath.Join(dir, "assets"))))
+	r.Handle("/data/*", http.StripPrefix("/data/", staticDir(filepath.Join(dir, "data"))))
 	for name, ct := range staticFiles() {
 		r.Handle("/"+name, serveFile(filepath.Join(dir, name), ct))
 	}
 	index := filepath.Join(dir, "index.html")
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) { http.ServeFile(w, req, index) })
 	r.NotFound(spaFallback(dir, index))
+}
+
+// staticDir serves the files under dir without directory listings or dotfiles: a
+// directory is only served when it has an index.html, anything else is a 404.
+func staticDir(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clean := path.Clean("/" + r.URL.Path)
+		if hiddenPath(clean) {
+			http.NotFound(w, r)
+			return
+		}
+		full := filepath.Join(dir, filepath.FromSlash(clean))
+		// #nosec G703 -- full is Join(dir, Clean("/"+URL.Path)): rooted under dir
+		if st, err := os.Stat(full); err == nil && st.IsDir() {
+			if _, err := os.Stat(filepath.Join(full, "index.html")); err != nil {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// hiddenPath reports whether any segment of the cleaned URL path is a dotfile.
+func hiddenPath(clean string) bool {
+	for _, seg := range strings.Split(clean, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 func serveFile(path, contentType string) http.Handler {
@@ -151,20 +184,6 @@ func cacheHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "public, max-age=86400")
 		case !hasPrefix(p, backendPrefixes()):
 			w.Header().Set("Cache-Control", "no-store")
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// cors keeps the v2 permissive CORS headers for the REST API.
-func cors(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return
 		}
 		next.ServeHTTP(w, r)
 	})

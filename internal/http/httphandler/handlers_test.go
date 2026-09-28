@@ -1,6 +1,7 @@
 package httphandler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -207,7 +208,25 @@ func TestErrorMapper(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, m.Status(fmt.Errorf("x: %w", service.ErrUnknownKey)))
 	assert.Equal(t, http.StatusBadRequest, m.Status(service.ErrWrongKind))
 	assert.Equal(t, http.StatusGatewayTimeout, m.Status(context.DeadlineExceeded))
+	assert.Equal(t, StatusClientClosedRequest, m.Status(fmt.Errorf("q: %w", context.Canceled)))
 	assert.Equal(t, http.StatusInternalServerError, m.Status(errors.New("x")))
+}
+
+// A client that disconnects mid-query is not a server error: 499 and a debug log, no
+// error-level log line (review HTTP-L2).
+func TestErrorMapper_ClientClosedIsNotLoggedAsError(t *testing.T) {
+	var logs bytes.Buffer
+	m := NewErrorMapper(zerolog.New(&logs).Level(zerolog.InfoLevel))
+	rec := httptest.NewRecorder()
+	m.Write(rec, fmt.Errorf("storage: %w", context.Canceled))
+	assert.Equal(t, StatusClientClosedRequest, rec.Code)
+	assert.Empty(t, logs.String())
+
+	rec = httptest.NewRecorder()
+	m.Write(rec, errors.New("disk I/O error"))
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, logs.String(), "request failed")
+	assert.NotContains(t, rec.Body.String(), "disk I/O")
 }
 
 func TestParseTimeRange(t *testing.T) {
@@ -217,6 +236,10 @@ func TestParseTimeRange(t *testing.T) {
 	assert.Equal(t, t0, tr.End)
 	_, err = ParseTimeRange("2026-08-01", "bad", t0)
 	assert.ErrorIs(t, err, service.ErrInvalidRange)
+	// start after end is rejected instead of silently returning [] (review HTTP-L4).
+	_, err = ParseTimeRange("2026-08-05", "2026-08-01", t0)
+	assert.ErrorIs(t, err, service.ErrInvalidRange)
+	assert.ErrorContains(t, err, "start 2026-08-05 is after end 2026-08-01")
 
 	// Month/year ends are inclusive of the whole period.
 	tests := []struct{ start, end, wantStart, wantEnd string }{

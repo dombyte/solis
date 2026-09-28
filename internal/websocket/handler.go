@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strings"
@@ -60,7 +61,7 @@ func SameOrigin(r *http.Request) bool {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hub, ok := h.hubs.Load()
 	if !ok {
-		http.Error(w, "websocket hub restarting", http.StatusServiceUnavailable)
+		writeUnavailable(w)
 		return
 	}
 	conn, err := h.upgrader.Upgrade(w, r, nil)
@@ -75,4 +76,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	go c.writePump()
 	go c.readPump()
+}
+
+// writeUnavailable answers 503 with the API's JSON error body while the hub restarts.
+func writeUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // best effort
+		"error":   http.StatusText(http.StatusServiceUnavailable),
+		"message": "websocket hub restarting",
+		"code":    http.StatusServiceUnavailable,
+	})
 }

@@ -235,6 +235,10 @@ func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
 	case period.YearLayout:
 		e = e.AddDate(1, 0, -1)
 	}
+	if s.After(e) {
+		return TimeRange{}, fmt.Errorf("%w: start %s is after end %s", service.ErrInvalidRange,
+			s.Format(period.DayLayout), e.Format(period.DayLayout))
+	}
 	return TimeRange{Start: s, End: e}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 )
@@ -59,4 +60,19 @@ func TestLogger(t *testing.T) {
 	}))
 	fail.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/b", nil))
 	assert.Contains(t, logs.String(), `"level":"warn"`)
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	rec := httptest.NewRecorder()
+	SecurityHeaders(http.NotFoundHandler()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
+	assert.Empty(t, rec.Header().Get("X-Frame-Options"), "framing stays allowed (dashboards)")
+}
+
+func TestLogger_IncludesRequestID(t *testing.T) {
+	var logs bytes.Buffer
+	h := middleware.RequestID(Logger(zerolog.New(&logs))(http.NotFoundHandler()))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+	assert.Regexp(t, `"request_id":"[^"]+"`, logs.String())
 }

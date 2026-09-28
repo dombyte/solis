@@ -29,6 +29,7 @@ func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 	fe, docs := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(fe, "index.html"), "INDEX")
 	writeFile(t, filepath.Join(fe, "assets", "app.js"), "JS")
+	writeFile(t, filepath.Join(fe, "assets", ".env"), "SECRET")
 	writeFile(t, filepath.Join(fe, "robots.txt"), "ROBOTS")
 	writeFile(t, filepath.Join(fe, "favicon.svg"), "<svg/>")
 	writeFile(t, filepath.Join(docs, "index.html"), "DOCS")
@@ -60,7 +61,10 @@ func TestRoutes(t *testing.T) {
 	rec := get(r, "/")
 	assert.Equal(t, "INDEX", rec.Body.String())
 	assert.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
-	assert.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+	// No CORS (review HTTP-M2); security headers on every response (HTTP-L10).
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.Equal(t, "no-referrer", rec.Header().Get("Referrer-Policy"))
 
 	rec = get(r, "/assets/app.js")
 	assert.Equal(t, "JS", rec.Body.String())
@@ -76,12 +80,28 @@ func TestRoutes(t *testing.T) {
 	assert.Equal(t, http.StatusMovedPermanently, get(r, "/docs").Code)
 	assert.Equal(t, "DOCS", get(r, "/docs/").Body.String())
 
+	// A cross-origin preflight is no longer answered with an allow.
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodOptions, "/api/keys", nil))
-	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	assert.Empty(t, rec.Header().Get("Access-Control-Allow-Origin"))
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/nowhere", nil))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// Static folders never list directories or serve dotfiles (review HTTP-L5); a directory
+// with an index.html (/docs/) is still served.
+func TestRoutes_StaticDirsDoNotList(t *testing.T) {
+	_, r := router(t)
+	assert.Equal(t, "INDEX", get(r, "/assets").Body.String(), "SPA route, not a listing")
+	for _, p := range []string{"/assets/", "/data/", "/assets/.env", "/docs/.git/config"} {
+		rec := get(r, p)
+		assert.Equal(t, http.StatusNotFound, rec.Code, p)
+		assert.NotContains(t, rec.Body.String(), "app.js", p)
+	}
+	assert.Equal(t, "JS", get(r, "/assets/app.js").Body.String())
+	assert.Equal(t, "DOCS", get(r, "/docs/").Body.String())
 }
 
 func TestRoutes_WithoutDistFolders(t *testing.T) {

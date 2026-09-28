@@ -30,6 +30,10 @@ type Rule struct {
 	Status int
 }
 
+// StatusClientClosedRequest is the non-standard 499 used when the client went away before
+// the response (nginx convention); nobody receives it, it only keeps the logs honest.
+const StatusClientClosedRequest = 499
+
 // ErrorMapper maps errors to HTTP status codes via errors.Is over sentinel errors.
 type ErrorMapper struct {
 	rules []Rule
@@ -44,6 +48,7 @@ func DefaultRules() []Rule {
 		{service.ErrWrongKind, http.StatusBadRequest},
 		{service.ErrInvalidRange, http.StatusBadRequest},
 		{context.DeadlineExceeded, http.StatusGatewayTimeout},
+		{context.Canceled, StatusClientClosedRequest},
 	}
 }
 
@@ -67,7 +72,10 @@ func (m *ErrorMapper) Status(err error) int {
 func (m *ErrorMapper) Write(w http.ResponseWriter, err error) {
 	status := m.Status(err)
 	msg := err.Error()
-	if status >= http.StatusInternalServerError {
+	if status == StatusClientClosedRequest { // the client left: not a server error
+		m.log.Debug().Err(err).Msg("client closed request")
+		msg = "client closed request"
+	} else if status >= http.StatusInternalServerError {
 		m.log.Error().Err(err).Int("status", status).Msg("request failed")
 		msg = http.StatusText(status)
 	}

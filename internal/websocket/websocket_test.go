@@ -253,6 +253,12 @@ func TestHubStopClosesClientsAndRestartingHub503(t *testing.T) {
 	resp, err := http.Get(e.srv.URL)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	// Same JSON error body as the REST API (review HTTP-L9).
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "websocket hub restarting", body["message"])
+	assert.InDelta(t, 503, body["code"], 0)
 	_ = resp.Body.Close()
 
 	assert.ErrorIs(t, e.hub.Register(&Client{}), ErrHubStopped)

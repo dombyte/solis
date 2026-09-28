@@ -46,6 +46,18 @@ func writeInternalError(w http.ResponseWriter) {
 	})
 }
 
+// SecurityHeaders sets the headers every response gets: no MIME sniffing and no
+// referrer leaking the monitor's LAN URL. Framing is deliberately allowed: the dashboard
+// is commonly embedded as an iframe (e.g. a Home Assistant panel).
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Logger logs one line per request at debug level (errors at warn).
 func Logger(log zerolog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -57,7 +69,8 @@ func Logger(log zerolog.Logger) func(http.Handler) http.Handler {
 			if ww.Status() >= http.StatusInternalServerError {
 				ev = log.Warn()
 			}
-			ev.Str("method", r.Method).Str("path", r.URL.Path).Int("status", ww.Status()).
+			ev.Str("request_id", middleware.GetReqID(r.Context())).
+				Str("method", r.Method).Str("path", r.URL.Path).Int("status", ww.Status()).
 				Dur("duration", time.Since(start)).Msg("http request")
 		})
 	}
