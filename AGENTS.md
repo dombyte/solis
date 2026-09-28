@@ -63,7 +63,7 @@ internal/
   database/              manager: migrations (incl. V3 meta table), backups, retention cleanup
   websocket/             subscription protocol, per-client diff, same-origin upgrader
   service/               ReadService for HTTP (cache + ReadStore + health snapshot)
-  http/{httphandler,middleware,routes,server}/
+  http/{httphandler,middleware,router,server}/
   maintenance/   *new*   CLI jobs (backfill): flock, backup, recompute, report
   logging/, util/        zerolog constructor (no global logger); math, Clock, Slot[T],
                          DependencyError/RequireAll
@@ -94,7 +94,7 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 - Return consistent error responses
 - **Do NOT** contain business logic
 
-#### Routes Package (`internal/http/routes/`)
+#### Router Package (`internal/http/router/`)
 - Define all HTTP routes using Chi router
 - Group related routes together
 - Centralize route definitions
@@ -192,7 +192,7 @@ Each package has one clear purpose. Each file has one clear responsibility.
 ### 2. Dependency Direction
 Dependencies flow downward:
 ```
-routes → httphandler → service → models
+router → httphandler → service → models
 ```
 HTTP layer depends on service layer, not vice versa.
 
@@ -292,8 +292,8 @@ at full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ### Packages
 - Lowercase, singular or compound (Arch_Plan), e.g. `eventbus`, `httphandler`
-- `handlers` → `httphandler` and `utils` → `util` were renamed (Plan.md A3); `routes` keeps its
-  name for now. Do not create new plural package names
+- `handlers` → `httphandler`, `routes` → `router` and `utils` → `util` were renamed (Plan.md A3);
+  do not create new plural package names
 - Directory depth: max 3 levels **below `internal/`** (e.g. `internal/http/httphandler/mocks`)
 
 ### Files
@@ -442,7 +442,7 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 ```
 
 ### Route Management
-Centralize route definitions in `routes.go`
+Centralize route definitions in `internal/http/router/router.go`
 
 ```go
 func SetupRoutes(deps HandlerDeps) *chi.Mux {

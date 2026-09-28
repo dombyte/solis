@@ -1,5 +1,5 @@
-// Package routes defines the HTTP route configuration for the Solis monitor API.
-package routes
+// Package router defines the HTTP route configuration for the Solis monitor API.
+package router
 
 import (
 	"net/http"

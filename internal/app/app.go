@@ -22,7 +22,7 @@ import (
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/http/httphandler"
-	"github.com/dombyte/solis/internal/http/routes"
+	"github.com/dombyte/solis/internal/http/router"
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/maintenance"
@@ -171,14 +171,14 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 		Registry: a.reg, Decoder: a.decoder, Log: logging.Component(root, "service"),
 	})
 	httpLog := logging.Component(root, "http")
-	router := routes.SetupRoutes(routes.Deps{
+	mux := router.SetupRoutes(router.Deps{
 		Handlers: httphandler.HandlerDeps{
 			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
 			Clock: a.clock, Timeout: a.cfg.App.Timeout,
 		},
 		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,
 	})
-	a.http = server.New(serverSettings(a.cfg.App), router, httpLog)
+	a.http = server.New(serverSettings(a.cfg.App), mux, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
 	a.sup.Watch("eventbus", a.busProbe)
 	a.sup.Watch("http", a.http.Probe)
