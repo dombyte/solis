@@ -1,10 +1,7 @@
 // Package migrations provides database migration types and implementations.
 package migrations
 
-import (
-	"database/sql"
-	"errors"
-)
+import "database/sql"
 
 // Migration represents a database schema migration that can be applied or reverted.
 type Migration interface {
@@ -18,16 +15,9 @@ type Migration interface {
 	// This should be implemented as idempotent (safe to run multiple times).
 	Up(tx *sql.Tx) error
 
-	// Down reverts the migration (optional for development/debugging).
-	// Can return ErrNotImplemented if down migration is not supported.
+	// Down reverts the migration (development/debugging only).
 	Down(tx *sql.Tx) error
 }
-
-// ErrNotImplemented is returned when a down migration is not implemented.
-var ErrNotImplemented = errors.New("down migration not implemented")
-
-// MigrationFunc is a function type that implements the Up method of Migration.
-type MigrationFunc func(tx *sql.Tx) error
 
 // SchemaVersionTableSQL is the SQL to create the schema version tracking table.
 const SchemaVersionTableSQL = `

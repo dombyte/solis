@@ -36,8 +36,6 @@ type Manager struct {
 func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.Clock,
 	log zerolog.Logger) *Manager {
 	registry := NewMigrationRegistry()
-	registry.Register(migrations.GetV1Migration())
-	registry.Register(migrations.GetV2Migration())
 	registry.Register(migrations.GetV3Migration())
 	return &Manager{
 		cfg: cfg, backup: backup, registry: registry,
@@ -71,10 +69,7 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		return nil
 	}
 	m.log.Debug().Int("current_version", current).Msg("database migrations pending")
-	if exists {
-		m.backupBeforeMigration()
-	}
-	if err := m.migrate(db, current); err != nil {
+	if err := m.migrate(db, current, exists); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, "PRAGMA wal_checkpoint(FULL);"); err != nil {
@@ -97,13 +92,13 @@ func openMigrationDB(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (m *Manager) migrate(db *sql.DB, current int) error {
-	if current == 0 {
-		m.log.Info().Msg("legacy database detected, marking as V1")
-		if err := m.executor.MarkLegacyAsV1(db); err != nil {
-			return fmt.Errorf("database: mark legacy database as V1: %w", err)
-		}
-		current = 1
+// migrate backs up an existing database, then applies the pending migrations.
+func (m *Manager) migrate(db *sql.DB, current int, exists bool) error {
+	if err := checkCompatible(db, current); err != nil {
+		return err
+	}
+	if exists {
+		m.backupBeforeMigration()
 	}
 	n, err := m.executor.ApplyPendingMigrations(db, current)
 	if err != nil {
@@ -111,6 +106,25 @@ func (m *Manager) migrate(db *sql.DB, current int) error {
 	}
 	m.log.Info().Int("applied", n).Msg("migrations applied")
 	return nil
+}
+
+// checkCompatible rejects databases older than MinCompatibleVersion. Version 0 is only
+// accepted when the database holds no data tables yet (a fresh instance).
+func checkCompatible(db *sql.DB, current int) error {
+	if current >= MinCompatibleVersion {
+		return nil
+	}
+	if current == 0 {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+			WHERE type = 'table' AND name = 'daily_values'`).Scan(&n); err != nil {
+			return fmt.Errorf("database: check data tables: %w", err)
+		}
+		if n == 0 {
+			return nil
+		}
+	}
+	return &SchemaTooOldError{Version: current}
 }
 
 func (m *Manager) backupBeforeMigration() {

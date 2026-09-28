@@ -141,3 +141,48 @@ func (v1Stub) Version() int        { return 1 }
 func (v1Stub) Description() string { return "stub" }
 func (v1Stub) Up(*sql.Tx) error    { return nil }
 func (v1Stub) Down(*sql.Tx) error  { return nil }
+
+func execSQL(t *testing.T, path string, stmts ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	for _, s := range stmts {
+		_, err := db.Exec(s)
+		require.NoError(t, err)
+	}
+}
+
+func TestPrepare_V2DatabaseIsMigrated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "solis.db")
+	execSQL(t, path, SchemaVersionTableSQL,
+		`INSERT INTO schema_version (version, success) VALUES (1, 1), (2, 1)`,
+		`CREATE TABLE daily_values (id INTEGER PRIMARY KEY, date DATE)`)
+	m := newManager(t, path, clocktest.New(time.Now()))
+	require.NoError(t, m.Prepare(context.Background()))
+	assert.Equal(t, CurrentSchemaVersion, schemaVersion(t, path))
+	assert.True(t, hasTable(t, path, "meta"))
+}
+
+func TestPrepare_TooOldDatabaseIsRejected(t *testing.T) {
+	tests := map[string][]string{
+		"schema v1": {SchemaVersionTableSQL,
+			`INSERT INTO schema_version (version, success) VALUES (1, 1)`},
+		"pre-migration data": {`CREATE TABLE daily_values (id INTEGER PRIMARY KEY)`},
+	}
+	for name, stmts := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "solis.db")
+			execSQL(t, path, stmts...)
+			err := newManager(t, path, clocktest.New(time.Now())).Prepare(context.Background())
+			require.ErrorIs(t, err, ErrSchemaTooOld)
+			var tooOld *SchemaTooOldError
+			require.ErrorAs(t, err, &tooOld)
+			assert.Contains(t, err.Error(), "v2 release")
+			assert.False(t, hasTable(t, path, "meta"), "nothing migrated")
+			backups, err := ListBackups(path)
+			require.NoError(t, err)
+			assert.Empty(t, backups, "no backup for a rejected database")
+		})
+	}
+}

@@ -31,7 +31,7 @@ func (e *MigrationExecutor) GetCurrentVersion(db *sql.DB) (int, error) {
 	}
 
 	if count == 0 {
-		// schema_version table doesn't exist - this is a legacy database
+		// no schema_version table: a fresh or pre-migration-system database
 		return 0, nil
 	}
 
@@ -54,10 +54,6 @@ func (e *MigrationExecutor) GetPendingMigrations(currentVersion int) []Migration
 
 // recordMigrationSQL marks a migration version as applied.
 const recordMigrationSQL = `INSERT OR REPLACE INTO schema_version
-	(version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
-
-// markLegacySQL records a legacy database as V1 unless a V1 row already exists.
-const markLegacySQL = `INSERT OR IGNORE INTO schema_version
 	(version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
 
 // ApplyMigration applies a single migration and records it in one transaction.
@@ -119,23 +115,4 @@ func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion in
 	}
 
 	return appliedCount, nil
-}
-
-// EnsureSchemaVersionTable ensures the schema_version table exists.
-// This is a helper for legacy databases that don't have the table yet.
-func (e *MigrationExecutor) EnsureSchemaVersionTable(db *sql.DB) error {
-	_, err := db.Exec(SchemaVersionTableSQL)
-	return err
-}
-
-// MarkLegacyAsV1 marks a legacy database (without schema_version table) as V1.
-// This is used when migrating from a pre-migration-system database.
-func (e *MigrationExecutor) MarkLegacyAsV1(db *sql.DB) error {
-	// First ensure schema_version table exists
-	if err := e.EnsureSchemaVersionTable(db); err != nil {
-		return err
-	}
-
-	_, err := db.Exec(markLegacySQL, 1, "Legacy database - marked as V1")
-	return err
 }
