@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
+import { parseISO } from 'date-fns';
 import { api } from '../api/client';
 import { getSourceById, apiDataObjects } from '../config/data';
 import type { Period, HistoryDataPoint, ChartData, ChartDataset } from '../../types';
@@ -7,7 +8,9 @@ import type { Period, HistoryDataPoint, ChartData, ChartDataset } from '../../ty
  * Get timestamp label based on period
  */
 function getTimestampLabel(ts: string, period: Period): string {
-  const date = new Date(ts);
+  // parseISO reads "2026-09-01" / "2026-09" as local time; new Date() would read them as
+  // UTC midnight and show the previous day/month west of UTC.
+  const date = parseISO(ts);
   
   switch (period) {
     case 'daily':
@@ -59,6 +62,7 @@ export function useHistory(): UseHistoryResult {
       const timestampToLabel: Map<string, string> = new Map();
       const datasetDataMap: Map<string, Map<string, number>> = new Map();
       const datasets: ChartDataset[] = [];
+      const failed: string[] = [];
 
       // Fetch data for each source
       for (const source of sources) {
@@ -77,6 +81,7 @@ export function useHistory(): UseHistoryResult {
         } catch (err) {
           if (signal.aborted) return;
           console.error(`Failed to fetch history for ${source}:`, err);
+          failed.push(dataObj?.name ?? source);
           continue;
         }
 
@@ -109,6 +114,17 @@ export function useHistory(): UseHistoryResult {
       }
 
       if (signal.aborted) return;
+
+      // A failed source must not look like "no data": all failed -> error; some failed
+      // -> chart the rest and say which ones are missing.
+      if (failed.length === sources.length) {
+        setError(`Failed to load history (${failed.join(', ')})`);
+        setData(null);
+        return;
+      }
+      if (failed.length > 0) {
+        setError(`Some series failed to load: ${failed.join(', ')}`);
+      }
 
       // Build final chart data
       if (datasets.length > 0) {

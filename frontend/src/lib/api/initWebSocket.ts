@@ -31,7 +31,15 @@ export function initWebSocket(): void {
 
   websocketClient.onMessage(handleMessage);
   websocketClient.onConnect(() => useRegisterStore.getState().setConnected(true));
-  websocketClient.onDisconnect(() => useRegisterStore.getState().setConnected(false));
+  // Live values are only trustworthy while connected: clear them on disconnect so the
+  // dashboard shows "no data" (grayed) instead of frozen numbers, and so a reconnect
+  // shows exactly what the server's snapshot contains (keys the server no longer has
+  // stay empty instead of keeping their pre-disconnect value).
+  websocketClient.onDisconnect(() => {
+    const store = useRegisterStore.getState();
+    store.setConnected(false);
+    store.clearValues();
+  });
 
   // Connect WebSocket immediately
   websocketClient.connect();

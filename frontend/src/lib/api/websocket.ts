@@ -2,6 +2,20 @@ import type { WebSocketMessage } from '../../types';
 
 type MessageListener = (message: WebSocketMessage) => void;
 
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+const RECONNECT_JITTER = 0.2;
+
+/**
+ * Delay before reconnect attempt `attempt` (1-based): exponential from 1 s, capped at
+ * 30 s, with ±20 % jitter so many open dashboards do not reconnect in lockstep after a
+ * server restart. `random` is injectable for checks (defaults to Math.random).
+ */
+function reconnectDelay(attempt: number, random: () => number = Math.random): number {
+  const exp = Math.min(RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1), RECONNECT_MAX_MS);
+  return Math.round(exp * (1 + (random() * 2 - 1) * RECONNECT_JITTER));
+}
+
 /**
  * Subscription client for the v3 WebSocket protocol (subscribe/unsubscribe/ping ->
  * snapshot/update/error). Keys are ref-counted across every caller of `subscribe()` so
@@ -11,9 +25,7 @@ type MessageListener = (message: WebSocketMessage) => void;
 class SolisWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
-  private reconnectInterval = 2000;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private shouldReconnect = true;
@@ -44,14 +56,18 @@ class SolisWebSocket {
       this.url = '/ws';
     }
 
-    // A client that exhausted its reconnect attempts (see scheduleReconnect) would
-    // otherwise stay disconnected forever even after the network recovers.
+    // Reconnecting never gives up (see scheduleReconnect); these events only skip the
+    // current backoff wait when the network returns or the tab becomes visible again.
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', this.handleOnline);
+      window.addEventListener('online', this.reconnectNow);
+      window.addEventListener('focus', this.reconnectNow);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.reconnectNow();
+      });
     }
   }
 
-  private handleOnline = (): void => {
+  private reconnectNow = (): void => {
     this.reconnectAttempts = 0;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
@@ -128,14 +144,15 @@ class SolisWebSocket {
     }
   }
 
+  /**
+   * Schedules the next attempt with capped exponential backoff. It never gives up: the
+   * backend exits and is restarted by its container runtime when self-healing fails,
+   * which can take longer than any fixed attempt budget.
+   */
   private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.warn('Max reconnection attempts reached');
-      return;
-    }
-
+    if (this.reconnectTimer) return;
     this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectInterval * this.reconnectAttempts, 30000);
+    const delay = reconnectDelay(this.reconnectAttempts);
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -143,20 +160,6 @@ class SolisWebSocket {
         this.connect();
       }
     }, delay);
-  }
-
-  disconnect(): void {
-    this.shouldReconnect = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-      this.connected = false;
-    }
-    this.shouldReconnect = true;
   }
 
   isConnected(): boolean {

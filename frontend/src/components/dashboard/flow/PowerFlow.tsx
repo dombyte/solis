@@ -27,9 +27,10 @@ export function PowerFlow(): React.ReactElement {
   const registerMetadataByKey = useRegisterStore(state => state.registerMetadataByKey);
   const isLoading = useRegisterStore(state => state.isLoading);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
+  const isConnected = useRegisterStore(state => state.isConnected);
 
-  // Determine if data is stale (no updates or still loading)
-  const stale = isLoading || lastUpdated === null;
+  // Stale while loading, disconnected (values are cleared) or before the first frame.
+  const stale = isLoading || !isConnected || lastUpdated === null;
 
   // Build the view model
   const viewModel = buildFlowViewModel(registerValues, registerMetadataByKey, stale);

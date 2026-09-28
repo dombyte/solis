@@ -12,6 +12,7 @@ import { historyDataGroups } from '../lib/config/groups';
 import { Menu, RefreshCw } from 'lucide-react';
 import type { Period } from '../types';
 import type { DateRange } from 'react-day-picker';
+import { format } from 'date-fns';
 
 export function History(): React.ReactElement {
   const isMobile = useMobile();
@@ -113,8 +114,9 @@ export function History(): React.ReactElement {
         setStartDate(`${range.from.getFullYear()}-${String(range.from.getMonth() + 1).padStart(2, '0')}`);
         setEndDate(`${range.to.getFullYear()}-${String(range.to.getMonth() + 1).padStart(2, '0')}`);
       } else {
-        setStartDate(range.from.toISOString().split('T')[0]);
-        setEndDate(range.to.toISOString().split('T')[0]);
+        // Local calendar day: toISOString() would shift to the previous day east of UTC.
+        setStartDate(format(range.from, 'yyyy-MM-dd'));
+        setEndDate(format(range.to, 'yyyy-MM-dd'));
       }
     }
   }, [period]);

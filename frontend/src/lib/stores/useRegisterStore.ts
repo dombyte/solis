@@ -21,6 +21,7 @@ interface RegisterStoreState {
   initialize: () => Promise<void>;
   applyWsValues: (values: Record<string, WsValueDTO>, ts?: string, removed?: string[]) => void;
   setConnected: (connected: boolean) => void;
+  clearValues: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   
@@ -228,6 +229,17 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
   },
 
   setConnected: (connected) => set({ isConnected: connected }),
+
+  clearValues: () => {
+    const { registerMetadata, lastUpdated, registerValues } = get();
+    const empty = Array.from(registerValues.values()).every(v => v.value === null);
+    if (empty && lastUpdated === null) return; // repeated reconnect failures: no re-render
+    const values = new Map<string, RegisterValue>();
+    registerMetadata.forEach(reg => {
+      values.set(reg.id, { key: reg.key, id: reg.id, value: null, unit: reg.unit });
+    });
+    set({ registerValues: values, lastUpdated: null });
+  },
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),
 
