@@ -207,15 +207,15 @@ func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 }
 
 // onEvent marks the state dirty and arms one coalescing flush.
-func (ls *loopState) onEvent(e eventbus.Event) {
-	if e.Kind == eventbus.ValuesUpdated && !ls.dirty {
-		ls.dirty = true
-		ls.flush.Reset(FlushDelay)
+func (l *loopState) onEvent(e eventbus.Event) {
+	if e.Kind == eventbus.ValuesUpdated && !l.dirty {
+		l.dirty = true
+		l.flush.Reset(FlushDelay)
 	}
 }
 
-func (ls *loopState) closeAll() {
-	for c := range ls.clients {
+func (l *loopState) closeAll() {
+	for c := range l.clients {
 		c.close()
 	}
 }
@@ -282,22 +282,22 @@ func (h *Hub) flush(clients map[*Client]*clientState) {
 }
 
 // diff returns the changed and removed subscribed keys and records them as pushed.
-func (st *clientState) diff(current map[string]*solis.Value) UpdateMessage {
+func (c *clientState) diff(current map[string]*solis.Value) UpdateMessage {
 	upd := UpdateMessage{Values: map[string]ValueDTO{}}
-	for k := range st.subs {
+	for k := range c.subs {
 		v, ok := current[k]
 		if !ok {
-			if _, seen := st.last[k]; seen {
-				delete(st.last, k)
+			if _, seen := c.last[k]; seen {
+				delete(c.last, k)
 				upd.Removed = append(upd.Removed, k)
 			}
 			continue
 		}
 		s := stateOf(v)
-		if prev, seen := st.last[k]; seen && prev.equal(s) {
+		if prev, seen := c.last[k]; seen && prev.equal(s) {
 			continue
 		}
-		st.last[k] = s
+		c.last[k] = s
 		upd.Values[k] = updateDTO(v)
 	}
 	sort.Strings(upd.Removed)
