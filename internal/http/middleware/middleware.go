@@ -21,12 +21,12 @@ func Recover(log zerolog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if p := recover(); p != nil {
 					if p == http.ErrAbortHandler { //nolint:errorlint // sentinel panic value
-						panic(p)
+						panic(p) //nolint:forbidigo // re-raise net/http's abort sentinel
 					}
 					log.Error().Interface("panic", p).Str("path", r.URL.Path).
 						Msg("panic in HTTP handler")
 					if ww.Status() != 0 {
-						panic(http.ErrAbortHandler)
+						panic(http.ErrAbortHandler) //nolint:forbidigo // net/http abort contract
 					}
 					writeInternalError(ww)
 				}

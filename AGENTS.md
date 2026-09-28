@@ -17,17 +17,14 @@ dashboard (REST + WebSocket) from the same Go binary.
   to the v3 design and lists the open confirmations (A1–A7).
 
 ## Tools
-go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -ignore "(?:.*_test\.go|.*test.*\.go|frontend)" .
-go run github.com/securego/gosec/v2/cmd/gosec@v2.23.0 ./...
-go run github.com/gordonklaus/ineffassign@latest ./...
-go run golang.org/x/tools/cmd/deadcode@latest -test ./...   # -test: test helpers (clocktest) count as used
-go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+```bash
+./scripts/pre-commit.sh                    # runs everything below except mockery (make check)
 golangci-lint fmt --config .golangci.yml   # gofumpt + goimports (local prefix github.com/dombyte/solis)
-golangci-lint run --config .golangci.yml
+golangci-lint run --config .golangci.yml   # incl. gocyclo, gosec, staticcheck, ineffassign,
+                                           # misspell, govet, lll, gochecknoglobals, forbidigo
+go run golang.org/x/tools/cmd/deadcode@latest -test ./...   # unused exported code
 go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.yaml
-go run github.com/client9/misspell/cmd/misspell@latest -w . -j 200
-go fmt ./...
-go vet ./...
+```
 
 ---
 

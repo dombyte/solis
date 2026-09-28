@@ -46,7 +46,17 @@ linters:
     # Code structure
     - lll
 
+    # Arch_Plan: zero global state, no panic at runtime
+    - gochecknoglobals
+    - forbidigo
+
   settings:
+    # Arch_Plan panic policy: never at runtime (recover-and-rethrow needs a nolint reason)
+    forbidigo:
+      forbid:
+        - pattern: ^panic$
+          msg: "Arch_Plan: no panic at runtime; return an error"
+
     # Line length linter - hard limit of 100 chars per Global Plan
     lll:
       line-length: 100
@@ -137,7 +147,7 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters: [revive, dupl, errcheck, gosec, lll]
+      - linters: [revive, dupl, errcheck, gosec, lll, gochecknoglobals, forbidigo]
         path: _test\.go
       - linters: [rowserrcheck, sqlclosecheck, bodyclose]
         path: _test\.go
