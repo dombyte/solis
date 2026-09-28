@@ -68,6 +68,9 @@ func (c *Cache) Merge(domain string, values map[string]*solis.Value, at time.Tim
 	c.mu.Lock()
 	keys := c.put(domain, values, at)
 	c.mu.Unlock()
+	if len(keys) == 0 {
+		return // nothing written: no event (consumers would re-read for nothing)
+	}
 	c.publish(domain, keys, at)
 	c.log.Debug().Str("domain", domain).Int("keys", len(keys)).Msg("cache merge")
 }

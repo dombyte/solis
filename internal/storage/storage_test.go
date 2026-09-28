@@ -614,3 +614,15 @@ func TestNew_Errors(t *testing.T) {
 	_, err := New(ctx, testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
 	assert.Error(t, err, "a directory is not a database")
 }
+
+// The real SQLite driver reports an expired request context as context.DeadlineExceeded,
+// which the HTTP error mapper turns into 504 (review HTTP-L3: this was only tested
+// against a mock).
+func TestReadStore_ExpiredContextIsDeadlineExceeded(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := s.GetDailyHistory(expired, "pv_energy_daily", day("2026-08-01"), day("2026-08-05"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

@@ -205,15 +205,15 @@ paths:
                     key: "solis_status"
                     name: "Solis Status"
                     history:
-                      - timestamp: "2026-08-04T09:21:55+02:00"
+                      - timestamp: "2026-08-04T07:21:55.000Z"
                         status_decoded:
                           name: "Generating"
                           description: "Initializing / Generating"
-                      - timestamp: "2026-07-31T11:27:45.783344473+02:00"
+                      - timestamp: "2026-07-31T09:27:45.783Z"
                         status_decoded:
                           name: "Generating"
                           description: "Initializing / Generating"
-                      - timestamp: "2026-07-31T11:27:35.182599087+02:00"
+                      - timestamp: "2026-07-31T09:27:35.182Z"
                         status_decoded:
                           name: "StandbySynch"
                           description: "Standby synchronize"
@@ -268,7 +268,7 @@ paths:
                 no_history:
                   value:
                     error: "Bad Request"
-                    message: "historical queries not supported for pv_energy_total - only periodic registers"
+                    message: "unsupported for register: pv_energy_total (historical queries (start/end) are only supported for daily, monthly and yearly registers)"
                     code: 400
                 bad_range:
                   value:
@@ -528,8 +528,8 @@ components:
         timestamp:
           type: string
           format: date-time
-          description: When this status was recorded
-          example: "2026-08-04T09:21:55+02:00"
+          description: When this status was recorded (UTC, millisecond precision)
+          example: "2026-08-04T07:21:55.000Z"
         status_decoded:
           type: object
           description: Decoded status information - for solis_status is a map with name and description, for bitmask faults is an array of active fault names
@@ -772,7 +772,7 @@ components:
         message:
           type: string
           description: Error message
-          example: "historical queries not supported for pv_energy_total - only periodic registers"
+          example: "unsupported for register: pv_energy_total (historical queries (start/end) are only supported for daily, monthly and yearly registers)"
         code:
           type: integer
           description: HTTP status code

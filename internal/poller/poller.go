@@ -248,6 +248,24 @@ func (p *Poller) seed(ctx context.Context, now time.Time) error {
 	for k, v := range s.Status {
 		p.lastStatus[k] = v
 	}
+	p.seedLastDaily(s.Daily, now)
 	p.seeded = true
 	return nil
+}
+
+// seedLastDaily restores the last accepted value of every daily key from its open day's
+// stored row, so a value discarded right after a restart (a dip, a held post-midnight
+// value) keeps the key in the cache instead of dropping it (review ACQ-L1).
+func (p *Poller) seedLastDaily(rows map[string]map[string]float64, now time.Time) {
+	for _, k := range p.d.Registry.DailyKeys() {
+		v, ok := rows[p.attr.OpenDay(k)][k]
+		reg, known := p.d.Registry.ByKey(k)
+		if !ok || !known {
+			continue
+		}
+		p.lastDaily[k] = &solis.Value{
+			Key: k, Name: reg.Name, DecodedValue: v, RawValue: v / reg.Scale,
+			Unit: reg.Unit, Timestamp: now,
+		}
+	}
 }

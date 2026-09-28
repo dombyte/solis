@@ -576,7 +576,11 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 - Only changed, subscribed keys are pushed (diff by value/status per client); pushes are coalesced
   (~75 ms) so poller + aggregator events close together become one frame.
 - Unknown keys never drop the connection. `ping` from the client is accepted and ignored.
-- Upgrader is same-origin only. No history over WebSocket — history is REST only.
+- Upgrader is same-origin only (Origin host must equal the Host header; the scheme is not
+  compared). This is a LAN app without authentication: it does not defend against DNS
+  rebinding, and REST has no CORS. Do not expose it to the internet without a reverse proxy
+  that authenticates. No history over WebSocket — history is REST only.
+- Limits: at most 64 clients (the 65th is closed with 1013), at most 256 keys per frame.
 - New UI-driven registers need no new endpoint/message: define the register in `solis`, clients subscribe.
 
 ---
@@ -782,6 +786,9 @@ func TestService_ReadRegister(t *testing.T) {
 ---
 
 ## Security
+
+- **Platforms:** releases target linux and darwin. The server needs `flock` (unix); on
+  other platforms `maintenance.AcquireShared` fails and the server does not start.
 
 ### Input Validation
 - Validate all inputs from users, config files, network

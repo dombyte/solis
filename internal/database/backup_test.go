@@ -158,6 +158,9 @@ func TestCreateBackup_WALSourceLeavesNoSidecars(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "only the backup file itself")
 	assert.Equal(t, filepath.Base(path), entries[0].Name())
+	st, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), st.Mode().Perm(), "owner-only like the database")
 
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	require.NoError(t, err)

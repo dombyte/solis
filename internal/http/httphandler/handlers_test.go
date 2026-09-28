@@ -101,106 +101,74 @@ func TestKeys(t *testing.T) {
 	assert.Contains(t, infos[1]["description"], "start/end")
 }
 
-func TestData_CurrentValue(t *testing.T) {
+// The handler only renders what the service decided (review HTTP-L11 moved the rules
+// into service.Data): each result kind has its JSON shape, values rounded to 2 decimals.
+func TestData_RendersEachResultKind(t *testing.T) {
 	svc, r := setup(t)
-	svc.EXPECT().Register("grid_power").Return(reg("grid_power", solis.StoreNone), nil).Once()
-	svc.EXPECT().Current("grid_power").Return(&solis.Value{
-		Key: "grid_power", Name: "Grid Power",
-		Unit: "W", DecodedValue: 0, RawValue: 0, Timestamp: t0,
-	}, nil).Once()
+	svc.EXPECT().Data(mock.Anything, mock.MatchedBy(func(q service.DataQuery) bool {
+		return q.Key == "grid_power"
+	})).Return(service.DataResult{Current: &solis.Value{
+		Key: "grid_power", Name: "Grid Power", Unit: "W", Timestamp: t0,
+	}}, nil).Once()
 	code, body := do(t, r, "/api/data/grid_power")
 	assert.Equal(t, http.StatusOK, code)
 	assert.Contains(t, body, "value", "zero is present, not omitted")
 	assert.Equal(t, t0.Format(time.RFC3339), body["timestamp"])
-}
 
-func TestData_HistoryByStore(t *testing.T) {
-	svc, r := setup(t)
-	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
-	svc.EXPECT().Register("pv_energy_daily").Return(reg("pv_energy_daily", solis.StoreDaily), nil)
-	svc.EXPECT().DailyHistory(mock.Anything, "pv_energy_daily", start, end).
-		Return([]*history.DailyDataPoint{{Date: "2026-08-01", Value: 1.234}}, nil).Once()
+	svc.EXPECT().Data(mock.Anything, mock.MatchedBy(func(q service.DataQuery) bool {
+		return q.Key == "pv_energy_total"
+	})).Return(service.DataResult{
+		Register: reg("pv_energy_total", solis.StoreTotal),
+		Total:    &history.TotalDataPoint{Value: 5230.456, RawValue: 5230.456, Timestamp: "t"},
+	}, nil).Once()
+	code, body = do(t, r, "/api/data/pv_energy_total")
+	assert.Equal(t, http.StatusOK, code)
+	assert.InDelta(t, 5230.46, body["value"], 1e-9)
+	assert.Equal(t, "pv_energy_total", body["key"])
+
+	svc.EXPECT().Data(mock.Anything, mock.MatchedBy(func(q service.DataQuery) bool {
+		return q.Key == "grid_fault_1"
+	})).Return(service.DataResult{Status: &service.StatusHistory{
+		Key: "grid_fault_1", History: []service.StatusEntry{},
+	}}, nil).Once()
+	code, body = do(t, r, "/api/data/grid_fault_1")
+	assert.Equal(t, http.StatusOK, code)
+	assert.Equal(t, "grid_fault_1", body["key"])
+
+	svc.EXPECT().Data(mock.Anything, mock.MatchedBy(func(q service.DataQuery) bool {
+		return q.Key == "pv_energy_daily" && q.Start == "2026-08-01" && q.End == "2026-08-03" &&
+			q.Now.Equal(t0)
+	})).Return(service.DataResult{
+		Rows: []*history.DailyDataPoint{{Date: "2026-08-01", Value: 1.234}},
+	}, nil).Once()
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 		"/api/data/pv_energy_daily?start=2026-08-01&end=2026-08-03", nil))
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.JSONEq(t, `[{"date":"2026-08-01","value":1.23,"raw_value":0}]`, rec.Body.String())
-
-	svc.EXPECT().Register("pv_energy_monthly").Return(reg("pv_energy_monthly",
-		solis.StoreMonthly), nil)
-	svc.EXPECT().MonthlyHistory(mock.Anything, "pv_energy_monthly", mock.Anything, t0).
-		Return(nil, nil).Once()
-	code, _ := do(t, r, "/api/data/pv_energy_monthly?start=2026-01")
-	assert.Equal(t, http.StatusOK, code)
-
-	svc.EXPECT().Register("pv_energy_yearly").Return(reg("pv_energy_yearly", solis.StoreYearly),
-		nil)
-	svc.EXPECT().YearlyHistory(mock.Anything, "pv_energy_yearly", t0.Add(-defaultHistoryWindow),
-		time.Date(2027, 12, 31, 0, 0, 0, 0, time.UTC)).Return(nil, nil).Once()
-	code, _ = do(t, r, "/api/data/pv_energy_yearly?end=2027")
-	assert.Equal(t, http.StatusOK, code)
-
-	// Without params a periodic key returns its current value.
-	svc.EXPECT().Current("pv_energy_daily").Return(&solis.Value{Key: "pv_energy_daily"}, nil).Once()
-	code, _ = do(t, r, "/api/data/pv_energy_daily")
-	assert.Equal(t, http.StatusOK, code)
-}
-
-func TestData_TotalAndStatus(t *testing.T) {
-	svc, r := setup(t)
-	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
-	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&history.TotalDataPoint{
-		Value: 5230.456, RawValue: 5230.456, Timestamp: "t",
-	}, nil).Once()
-	code, body := do(t, r, "/api/data/pv_energy_total")
-	assert.Equal(t, http.StatusOK, code)
-	assert.InDelta(t, 5230.46, body["value"], 1e-9)
-
-	// A total has one lifetime value: range parameters are rejected, not ignored.
-	code, body = do(t, r, "/api/data/pv_energy_total?start=garbage")
-	assert.Equal(t, http.StatusBadRequest, code)
-	assert.Contains(t, body["message"], "historical queries not supported")
-
-	svc.EXPECT().Register("grid_fault_1").Return(reg("grid_fault_1", solis.StoreStatus), nil)
-	svc.EXPECT().StatusHistory(mock.Anything, "grid_fault_1").Return(service.StatusHistory{
-		Key: "grid_fault_1", History: []service.StatusEntry{},
-	}, nil).Once()
-	code, body = do(t, r, "/api/data/grid_fault_1")
-	assert.Equal(t, http.StatusOK, code)
-	assert.Equal(t, "grid_fault_1", body["key"])
 }
 
 func TestData_Errors(t *testing.T) {
 	svc, r := setup(t)
-	svc.EXPECT().Register("nope").Return(solis.Register{},
-		&service.KeyError{Key: "nope", Err: service.ErrUnknownKey}).Once()
-	code, body := do(t, r, "/api/data/nope")
-	assert.Equal(t, http.StatusNotFound, code)
-	assert.Equal(t, "Not Found", body["error"])
-	assert.InDelta(t, 404.0, body["code"], 0)
-
-	svc.EXPECT().Register("grid_power").Return(reg("grid_power", solis.StoreNone), nil)
-	code, body = do(t, r, "/api/data/grid_power?start=2026-08-01")
-	assert.Equal(t, http.StatusBadRequest, code)
-	assert.Contains(t, body["message"], "historical queries not supported")
-
-	svc.EXPECT().Register("pv_energy_daily").Return(reg("pv_energy_daily", solis.StoreDaily), nil)
-	code, body = do(t, r, "/api/data/pv_energy_daily?start=yesterday")
-	assert.Equal(t, http.StatusBadRequest, code)
-	assert.Contains(t, body["message"], "invalid time range")
-
-	svc.EXPECT().Current("grid_power").Return(nil, errors.New("sqlite: disk I/O at /data/x.db")).Once()
-	code, body = do(t, r, "/api/data/grid_power")
-	assert.Equal(t, http.StatusInternalServerError, code)
-	assert.Equal(t, "Internal Server Error", body["message"], "internals never exposed")
-
-	svc.EXPECT().Current("grid_power").Return(nil, &service.KeyError{
-		Key: "grid_power",
-		Err: service.ErrNoData,
-	}).Once()
-	code, _ = do(t, r, "/api/data/grid_power")
-	assert.Equal(t, http.StatusNotFound, code)
+	for key, tt := range map[string]struct {
+		err  error
+		code int
+		msg  string
+	}{
+		"nope":       {&service.KeyError{Key: "nope", Err: service.ErrUnknownKey}, 404, "nope"},
+		"grid_power": {&service.KeyError{Key: "grid_power", Err: service.ErrWrongKind, Detail: "x"}, 400, "unsupported"},
+		"pv_daily":   {fmt.Errorf("%w: \"yesterday\"", service.ErrInvalidRange), 400, "invalid time range"},
+		"no_value":   {&service.KeyError{Key: "no_value", Err: service.ErrNoData}, 404, "no data"},
+		"broken":     {errors.New("sqlite: disk I/O at /data/x.db"), 500, "Internal Server Error"},
+	} {
+		svc.EXPECT().Data(mock.Anything, mock.MatchedBy(func(q service.DataQuery) bool {
+			return q.Key == key
+		})).Return(service.DataResult{}, tt.err).Once()
+		code, body := do(t, r, "/api/data/"+key)
+		assert.Equal(t, tt.code, code, key)
+		assert.Contains(t, body["message"], tt.msg, key)
+		assert.InDelta(t, float64(tt.code), body["code"], 0, key)
+	}
 }
 
 func TestErrorMapper(t *testing.T) {
@@ -229,45 +197,17 @@ func TestErrorMapper_ClientClosedIsNotLoggedAsError(t *testing.T) {
 	assert.NotContains(t, rec.Body.String(), "disk I/O")
 }
 
-func TestParseTimeRange(t *testing.T) {
-	tr, err := ParseTimeRange("", "", t0)
-	require.NoError(t, err)
-	assert.Equal(t, t0.Add(-defaultHistoryWindow), tr.Start)
-	assert.Equal(t, t0, tr.End)
-	_, err = ParseTimeRange("2026-08-01", "bad", t0)
-	assert.ErrorIs(t, err, service.ErrInvalidRange)
-	// start after end is rejected instead of silently returning [] (review HTTP-L4).
-	_, err = ParseTimeRange("2026-08-05", "2026-08-01", t0)
-	assert.ErrorIs(t, err, service.ErrInvalidRange)
-	assert.ErrorContains(t, err, "start 2026-08-05 is after end 2026-08-01")
-
-	// Month/year ends are inclusive of the whole period.
-	tests := []struct{ start, end, wantStart, wantEnd string }{
-		{"2026", "2026", "2026-01-01", "2026-12-31"},
-		{"2026-02", "2026-02", "2026-02-01", "2026-02-28"},
-		{"2024-02", "2024-02", "2024-02-01", "2024-02-29"},
-		{"2026-08-01", "2026-08-03", "2026-08-01", "2026-08-03"},
-	}
-	for _, tt := range tests {
-		tr, err := ParseTimeRange(tt.start, tt.end, t0)
-		require.NoError(t, err)
-		assert.Equal(t, tt.wantStart, tr.Start.Format(time.DateOnly), tt.start)
-		assert.Equal(t, tt.wantEnd, tr.End.Format(time.DateOnly), tt.end)
-	}
-}
-
 func TestData_StorageTimeout(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
 	deps := HandlerDeps{
 		Service: svc, Errors: NewErrorMapper(zerolog.Nop()),
 		Clock: clocktest.New(t0), Timeout: time.Second,
 	}
-	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
-	svc.EXPECT().Total(mock.Anything, "pv_energy_total").RunAndReturn(
-		func(ctx context.Context, _ string) (*history.TotalDataPoint, error) {
+	svc.EXPECT().Data(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ service.DataQuery) (service.DataResult, error) {
 			_, ok := ctx.Deadline()
 			assert.True(t, ok, "storage reads carry app.timeout")
-			return &history.TotalDataPoint{}, nil
+			return service.DataResult{Total: &history.TotalDataPoint{}}, nil
 		}).Once()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/data/pv_energy_total", nil)

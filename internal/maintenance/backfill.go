@@ -11,8 +11,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/rs/zerolog"
-
 	"github.com/dombyte/solis/internal/aggregation"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
@@ -89,7 +87,6 @@ type Env struct {
 	Registry  Registry
 	Now       time.Time
 	Out       io.Writer
-	Log       zerolog.Logger
 }
 
 // RunBackfill locks the database, takes a verified backup, recomputes monthly and yearly

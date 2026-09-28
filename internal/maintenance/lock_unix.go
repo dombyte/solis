@@ -21,7 +21,14 @@ type Lock struct {
 }
 
 // LockPath returns the lock file path for a database path.
-func LockPath(dbPath string) string { return dbPath + ".lock" }
+func LockPath(dbPath string) string {
+	// Resolve a symlinked database so the server and a job lock the same file, next to
+	// the real database (a missing file keeps the given path).
+	if resolved, err := filepath.EvalSymlinks(dbPath); err == nil {
+		dbPath = resolved
+	}
+	return dbPath + ".lock"
+}
 
 // AcquireShared takes the shared lock held by a running server; it fails with ErrLocked
 // while a maintenance job holds the exclusive lock.

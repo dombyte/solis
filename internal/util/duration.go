@@ -56,10 +56,23 @@ func splitDurationToken(s string) (num, unit, tail string) {
 
 func isNumberByte(b byte) bool { return b >= '0' && b <= '9' || b == '.' }
 
+// longUnit returns the length of the extra units d, w and y.
+func longUnit(unit string) (time.Duration, bool) {
+	switch unit {
+	case "d":
+		return Day, true
+	case "w":
+		return Week, true
+	case "y":
+		return Year, true
+	default:
+		return 0, false
+	}
+}
+
 // durationToken converts one "<number><unit>" pair.
 func durationToken(num, unit string) (time.Duration, error) {
-	long := map[string]time.Duration{"d": Day, "w": Week, "y": Year}
-	if base, ok := long[unit]; ok {
+	if base, ok := longUnit(unit); ok {
 		n, err := strconv.ParseFloat(num, 64)
 		if err != nil {
 			return 0, err

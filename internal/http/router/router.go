@@ -36,7 +36,7 @@ type Deps struct {
 
 // backendPrefixes never fall through to the SPA.
 func backendPrefixes() []string {
-	return []string{"/api/", "/health", "/ws", "/docs"}
+	return []string{"/api", "/health", "/ws", "/docs"}
 }
 
 // staticFiles are the root-level frontend files with their content types.
@@ -145,7 +145,7 @@ func serveFile(path, contentType string) http.Handler {
 // spaFallback serves existing files under dir and index.html for client-side routes.
 func spaFallback(dir, index string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || hasPrefix(r.URL.Path, backendPrefixes()) {
+		if r.Method != http.MethodGet || isBackendPath(r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
@@ -158,6 +158,17 @@ func spaFallback(dir, index string) http.HandlerFunc {
 		}
 		http.ServeFile(w, r, index)
 	}
+}
+
+// isBackendPath reports whether path is a backend root or below it. Whole segments only:
+// a plain prefix match on "/health" would also swallow SPA routes like /healthz.
+func isBackendPath(path string) bool {
+	for _, root := range backendPrefixes() {
+		if path == root || strings.HasPrefix(path, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func hasPrefix(path string, prefixes []string) bool {
@@ -182,7 +193,7 @@ func cacheHeaders(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-cache, max-age=0")
 		case hasPrefix(p, []string{"/favicon", "/vite.svg", "/pwa-", "/apple-touch", "/maskable"}):
 			w.Header().Set("Cache-Control", "public, max-age=86400")
-		case !hasPrefix(p, backendPrefixes()):
+		case !isBackendPath(p):
 			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)

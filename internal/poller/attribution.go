@@ -35,11 +35,6 @@ type Attribution struct {
 	Warn string
 }
 
-// inWindow reports whether now lies inside a rollover window (pure rule).
-func inWindow(r period.Rollover, now time.Time) (period.Window, bool) {
-	return r.WindowAt(now)
-}
-
 // isReset reports whether cur is a counter reset relative to prev (pure rule).
 func isReset(prev, cur float64) bool {
 	return cur < ResetThreshold*prev
@@ -50,6 +45,7 @@ type keyState struct {
 	openDay string
 	base    float64 // last accepted value (comparison base)
 	hasBase bool
+	forced  bool // the open day was reached by a forced close, not a seen reset
 }
 
 // DayAttributor owns day attribution and rollover detection for all daily keys. Each key
@@ -76,7 +72,7 @@ func NewDayAttributor(roll period.Rollover, keys []string) *DayAttributor {
 // a window, the window's new day.
 func (d *DayAttributor) SeedDays(now time.Time) []string {
 	days := []string{d.roll.LastEnded(now).Opening}
-	if w, ok := inWindow(d.roll, now); ok && w.Opening != days[0] {
+	if w, ok := d.roll.WindowAt(now); ok && w.Opening != days[0] {
 		days = append(days, w.Opening)
 	}
 	return days
@@ -115,7 +111,7 @@ func (d *DayAttributor) seedKey(k string, st *keyState, now time.Time,
 	if v, ok := rows[expected][k]; ok {
 		st.base, st.hasBase = v, true
 	}
-	w, in := inWindow(d.roll, now)
+	w, in := d.roll.WindowAt(now)
 	_, advanced := rows[w.Opening][k]
 	if in && (advanced || closed >= expected) {
 		st.openDay = w.Opening
@@ -139,7 +135,7 @@ func (d *DayAttributor) ForceClose(now time.Time) (map[string]string, error) {
 			continue
 		}
 		out[k] = closedThrough
-		*st = keyState{openDay: expected}
+		*st = keyState{openDay: expected, forced: true}
 	}
 	return out, nil
 }
@@ -151,7 +147,7 @@ func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribut
 	if !ok {
 		return Attribution{Decision: Discard, Warn: "unknown daily key " + key}
 	}
-	w, in := inWindow(d.roll, now)
+	w, in := d.roll.WindowAt(now)
 	if a, blind := d.blindReset(st, v, w, in, now); blind {
 		return a
 	}
@@ -162,9 +158,7 @@ func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribut
 	if in {
 		return d.decreaseInWindow(key, st, v, w)
 	}
-	return Attribution{Decision: Discard, Warn: fmt.Sprintf(
-		"%s decreased %.2f -> %.2f outside the rollover window; ignored until it "+
-			"exceeds the stored max", key, st.base, v)}
+	return st.decreaseOutsideWindow(key, v)
 }
 
 // blindReset handles a key on the closing day that cannot see the reset itself: with no
@@ -188,6 +182,25 @@ func (d *DayAttributor) blindReset(st *keyState, v float64, w period.Window, in 
 	default:
 		return Attribution{Decision: Discard}, true
 	}
+}
+
+// decreaseOutsideWindow discards a decrease outside the window. A reset-sized drop on a
+// day reached only by a forced close means the inverter reset after the window ended
+// (review ACQ-M2): the day's row already holds yesterday's counter and cannot shrink, so
+// this is reported once with the cause instead of the generic warning.
+func (k *keyState) decreaseOutsideWindow(key string, v float64) Attribution {
+	if k.forced && isReset(k.base, v) {
+		k.forced = false // warn once per key and day
+		return Attribution{Decision: Discard, Warn: fmt.Sprintf(
+			"%s reset (%.2f -> %.2f) after its day was force-closed at the end of the "+
+				"rollover window: the inverter clock or rollover.time is probably off; "+
+				"%s's row holds yesterday's energy until the counter exceeds %.2f again "+
+				"(fix with `solis backfill` after correcting the time)",
+			key, k.base, v, k.openDay, k.base)}
+	}
+	return Attribution{Decision: Discard, Warn: fmt.Sprintf(
+		"%s decreased %.2f -> %.2f outside the rollover window; ignored until it "+
+			"exceeds the stored max", key, k.base, v)}
 }
 
 // decreaseInWindow handles a decrease inside window w: a substantial decrease on the

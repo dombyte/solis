@@ -329,8 +329,26 @@ func TestPureRules(t *testing.T) {
 	assert.False(t, isReset(100, 10))
 	assert.False(t, isReset(0, 0))
 	loc := berlin(t)
-	_, ok := inWindow(rollover(t, "23:59"), time.Date(2026, 8, 5, 23, 0, 0, 0, loc))
+	_, ok := rollover(t, "23:59").WindowAt(time.Date(2026, 8, 5, 23, 0, 0, 0, loc))
 	assert.True(t, ok)
-	_, ok = inWindow(rollover(t, "23:59"), time.Date(2026, 8, 5, 12, 0, 0, 0, loc))
+	_, ok = rollover(t, "23:59").WindowAt(time.Date(2026, 8, 5, 12, 0, 0, 0, loc))
 	assert.False(t, ok)
+}
+
+// An inverter whose clock is off resets after the window's forced close: the new day's
+// row already holds yesterday's counter. This cannot be undone, but it is reported once
+// with its cause instead of a generic "decreased" warning (review ACQ-M2).
+func TestAttribute_LateResetAfterForcedCloseIsExplained(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "pv", 30, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-06 01:00", "pv", 30, WriteCurrent, "2026-08-06", "", false}, // forced
+	})
+	now := time.Date(2026, 8, 6, 1, 10, 0, 0, loc)
+	got := d.Attribute("pv", 0.1, now)
+	assert.Equal(t, Discard, got.Decision)
+	assert.Contains(t, got.Warn, "after its day was force-closed")
+	got = d.Attribute("pv", 0.2, now.Add(time.Minute))
+	assert.Contains(t, got.Warn, "outside the rollover window", "explained only once")
 }

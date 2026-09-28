@@ -114,3 +114,14 @@ func TestRoutes_WithoutDistFolders(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, get(r, "/").Code)
 	assert.Equal(t, http.StatusNotFound, get(r, "/ws").Code)
 }
+
+// Backend roots match whole path segments only: /healthz is an SPA route, /api/x and
+// /docs/ are backend paths (review nit).
+func TestIsBackendPath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"/health": true, "/healthz": false, "/api/keys": true, "/api": true, "/apix": false,
+		"/ws": true, "/docs/": true, "/documents": false, "/history": false,
+	} {
+		assert.Equal(t, want, isBackendPath(p), p)
+	}
+}

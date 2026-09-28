@@ -332,6 +332,21 @@ func TestPoll_DisconnectedStillClosesDays(t *testing.T) {
 	assert.Zero(t, e.polls.Load(), "no cache replacement without a read")
 }
 
+// After a restart the first daily value may be discarded (a dip): the key must stay in the
+// cache with the stored value of its open day instead of disappearing (review ACQ-L1).
+func TestPoll_RestartDipKeepsStoredValueInCache(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	require.NoError(t, e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300},
+	}}))
+	e.dev.set(33035, 200) // 20.0 kWh: below the stored 30 -> discarded
+	e.start()
+	e.waitPolls(1)
+	v := e.cache.Get("pv_energy_daily")
+	require.NotNil(t, v, "key kept in the cache")
+	assert.InDelta(t, 30.0, v.DecodedValue, 1e-9)
+}
+
 func TestPoll_MidDayDipKeepsCachedMax(t *testing.T) {
 	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	e.dev.set(33035, 100)

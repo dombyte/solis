@@ -303,6 +303,9 @@ func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientS
 			Type: TypeError, Code: CodeUnknownKeys,
 			Message: "unknown keys ignored", Keys: unknown,
 		})
+		if _, ok := clients[c]; !ok {
+			return // dropped for a full buffer: no second attempt, no second log line
+		}
 	}
 	snap := SnapshotMessage{Type: TypeSnapshot, Values: map[string]ValueDTO{}}
 	for k, v := range h.d.Cache.GetMultiple(added) {

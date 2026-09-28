@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -69,7 +70,6 @@ func (f *fixture) open(t *testing.T) *storage.Storage {
 func (f *fixture) env(t *testing.T, backup func(context.Context) (string, error)) Env {
 	return Env{
 		DBPath: f.path, Backup: backup, Registry: f.reg, Now: now, Out: &f.out,
-		Log: zerolog.Nop(),
 		OpenStore: func(context.Context) (Store, func() error, error) {
 			st := f.open(t)
 			return st, st.Close, nil
@@ -347,4 +347,17 @@ func TestPurgedHistoryError_Message(t *testing.T) {
 	err := error(&PurgedHistoryError{PurgedBefore: "2025-01-01"})
 	assert.ErrorIs(t, err, ErrPurgedHistory)
 	assert.Contains(t, err.Error(), "daily rows before 2025-01-01 were removed")
+}
+
+// A symlinked database locks next to its real file, so the server and a job using the
+// link or the target always contend for the same lock (review nit).
+func TestLockPath_ResolvesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.db")
+	require.NoError(t, os.WriteFile(target, nil, 0o600))
+	link := filepath.Join(dir, "link.db")
+	require.NoError(t, os.Symlink(target, link))
+	assert.Equal(t, LockPath(target), LockPath(link))
+	missing := filepath.Join(dir, "missing.db")
+	assert.Equal(t, missing+".lock", LockPath(missing))
 }

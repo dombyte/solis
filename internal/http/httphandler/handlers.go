@@ -9,30 +9,16 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/history"
-	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/util"
 )
 
-// defaultHistoryWindow is the default history range when start is omitted.
-const defaultHistoryWindow = 30 * 24 * time.Hour
-
 // ReadService is what the handlers need from the service layer.
 type ReadService interface {
 	Health() health.Snapshot
 	Keys() []solis.Register
-	Register(key string) (solis.Register, error)
-	Current(key string) (*solis.Value, error)
-	DailyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*history.DailyDataPoint, error)
-	MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*history.MonthlyDataPoint, error)
-	YearlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*history.YearlyDataPoint, error)
-	Total(ctx context.Context, key string) (*history.TotalDataPoint, error)
-	StatusHistory(ctx context.Context, key string) (service.StatusHistory, error)
+	Data(ctx context.Context, q service.DataQuery) (service.DataResult, error)
 }
 
 // HandlerDeps are the handler dependencies.
@@ -76,7 +62,7 @@ func GetKeysHandler(deps HandlerDeps) http.Handler {
 		infos := make([]RegisterInfo, 0, len(regs))
 		for _, r := range regs {
 			desc := fmt.Sprintf("%s (%s)", r.Name, r.Unit)
-			if historyCapable(r.Store) { // totals are periodic but take no range (400)
+			if service.HistoryCapable(r.Store) { // totals are periodic but take no range (400)
 				desc += " - Use with start/end query parameters for historical data"
 			}
 			infos = append(infos, RegisterInfo{
@@ -89,36 +75,42 @@ func GetKeysHandler(deps HandlerDeps) http.Handler {
 	})
 }
 
-// GetDataHandler serves /api/data/{key}: no params = latest cached value; start/end on
-// daily/monthly/yearly keys = history; total keys = lifetime value; status keys = decoded
-// change history.
+// GetDataHandler serves /api/data/{key}. The service decides what a key returns
+// (current value, history rows, lifetime total or status history); the handler only
+// bounds the read and renders JSON.
 func GetDataHandler(deps HandlerDeps) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := chi.URLParam(r, "key")
-		reg, err := deps.Service.Register(key)
-		if err != nil {
-			deps.Errors.Write(w, err)
-			return
-		}
 		q := r.URL.Query()
-		hasRange := q.Get("start") != "" || q.Get("end") != ""
-		if hasRange && !historyCapable(reg.Store) {
-			WriteError(w, http.StatusBadRequest, fmt.Sprintf(
-				"historical queries not supported for %s - only periodic registers", key))
-			return
-		}
 		ctx, cancel := deps.readContext(r.Context())
 		defer cancel()
-		body, err := dispatch(ctx, deps, dataRequest{
-			reg: reg, hasRange: hasRange,
-			start: q.Get("start"), end: q.Get("end"),
+		res, err := deps.Service.Data(ctx, service.DataQuery{
+			Key: chi.URLParam(r, "key"), Start: q.Get("start"), End: q.Get("end"),
+			Now: deps.Clock.Now(),
 		})
 		if err != nil {
 			deps.Errors.Write(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusOK, body)
+		WriteJSON(w, http.StatusOK, render(res))
 	})
+}
+
+// render turns a data result into its JSON body.
+func render(res service.DataResult) any {
+	switch {
+	case res.Current != nil:
+		return NewDataResponse(res.Current)
+	case res.Total != nil:
+		return DataResponse{
+			Key: res.Register.Key, Name: res.Register.Name, Unit: res.Register.Unit,
+			Value: round(res.Total.Value), RawValue: round(res.Total.RawValue),
+			Timestamp: res.Total.Timestamp,
+		}
+	case res.Status != nil:
+		return res.Status
+	default:
+		return res.Rows
+	}
 }
 
 // readContext derives the storage deadline of one request.
@@ -127,64 +119,6 @@ func (d HandlerDeps) readContext(ctx context.Context) (context.Context, context.
 		return context.WithCancel(ctx)
 	}
 	return context.WithTimeout(ctx, d.Timeout)
-}
-
-// historyCapable reports whether start/end apply; totals have a single lifetime value.
-func historyCapable(s solis.Store) bool {
-	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly
-}
-
-// dataRequest is one parsed /api/data request.
-type dataRequest struct {
-	reg        solis.Register
-	hasRange   bool
-	start, end string
-}
-
-// dispatch selects the read by register store (enum switch).
-func dispatch(ctx context.Context, deps HandlerDeps, req dataRequest) (any, error) {
-	switch {
-	case req.reg.Store == solis.StoreTotal:
-		return total(ctx, deps, req.reg)
-	case req.reg.Store == solis.StoreStatus:
-		return deps.Service.StatusHistory(ctx, req.reg.Key)
-	case req.hasRange:
-		return periodHistory(ctx, deps, req.reg, req.start, req.end)
-	default:
-		v, err := deps.Service.Current(req.reg.Key)
-		if err != nil {
-			return nil, err
-		}
-		return NewDataResponse(v), nil
-	}
-}
-
-func periodHistory(ctx context.Context, deps HandlerDeps, reg solis.Register, start, end string) (
-	any, error,
-) {
-	tr, err := ParseTimeRange(start, end, deps.Clock.Now())
-	if err != nil {
-		return nil, err
-	}
-	switch reg.Store {
-	case solis.StoreMonthly:
-		return deps.Service.MonthlyHistory(ctx, reg.Key, tr.Start, tr.End)
-	case solis.StoreYearly:
-		return deps.Service.YearlyHistory(ctx, reg.Key, tr.Start, tr.End)
-	default:
-		return deps.Service.DailyHistory(ctx, reg.Key, tr.Start, tr.End)
-	}
-}
-
-func total(ctx context.Context, deps HandlerDeps, reg solis.Register) (any, error) {
-	dp, err := deps.Service.Total(ctx, reg.Key)
-	if err != nil {
-		return nil, err
-	}
-	return DataResponse{
-		Key: reg.Key, Name: reg.Name, Unit: reg.Unit,
-		Value: round(dp.Value), RawValue: round(dp.RawValue), Timestamp: dp.Timestamp,
-	}, nil
 }
 
 // DataResponse is a single current or total value (values rounded to two decimals).
@@ -209,49 +143,4 @@ func NewDataResponse(v *solis.Value) DataResponse {
 
 func round(f float64) util.Float64With2Decimals {
 	return util.Float64With2Decimals(util.RoundTo2DecimalPlaces(f))
-}
-
-// TimeRange is a parsed history range.
-type TimeRange struct {
-	Start time.Time
-	End   time.Time
-}
-
-// ParseTimeRange parses start/end as YYYY-MM-DD, YYYY-MM or YYYY; start defaults to 30
-// days before now and end to now. A month or year end is inclusive: it expands to the
-// last day of that period (end=2026 covers all of 2026).
-func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
-	s, _, err := parseTime(start, now.Add(-defaultHistoryWindow))
-	if err != nil {
-		return TimeRange{}, err
-	}
-	e, layout, err := parseTime(end, now)
-	if err != nil {
-		return TimeRange{}, err
-	}
-	switch layout {
-	case period.MonthLayout:
-		e = e.AddDate(0, 1, -1)
-	case period.YearLayout:
-		e = e.AddDate(1, 0, -1)
-	}
-	if s.After(e) {
-		return TimeRange{}, fmt.Errorf("%w: start %s is after end %s", service.ErrInvalidRange,
-			s.Format(period.DayLayout), e.Format(period.DayLayout))
-	}
-	return TimeRange{Start: s, End: e}, nil
-}
-
-// parseTime returns the parsed time and the matching layout ("" for the default).
-func parseTime(s string, def time.Time) (time.Time, string, error) {
-	if s == "" {
-		return def, "", nil
-	}
-	for _, layout := range []string{period.DayLayout, period.MonthLayout, period.YearLayout} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, layout, nil
-		}
-	}
-	return time.Time{}, "", fmt.Errorf("%w: %q (want YYYY-MM-DD, YYYY-MM or YYYY)",
-		service.ErrInvalidRange, s)
 }

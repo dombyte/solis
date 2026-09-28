@@ -91,7 +91,7 @@ combined (`1y6w`, `1d12h`).
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `interval` | duration | 30s | Base interval between poll cycles; also drives the aggregator's debounce (4×) and heartbeat (5×) |
-| `block_attempts` | int | 3 | Retry attempts per block if a read fails |
+| `block_attempts` | int | 3 | Retries per block after a failed read (3 = up to 4 reads) |
 | `block_retry_delay` | duration | 1s | Delay between retry attempts for the same block |
 | `block_interval` | duration | 0s | Delay between successive block reads |
 | `poll_timeout` | duration | 30s | Max duration for a full poll cycle before aborting; must be below 3× `interval` (the health supervisor's grace) |

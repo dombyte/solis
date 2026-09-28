@@ -14,7 +14,7 @@ poller:
   # Base interval between poll cycles (at least 1s). Also drives the aggregator and the
   # health graces.
   interval: 5s
-  # Retries per register block if a read fails
+  # Retries per register block after a failed read (2 = up to 3 reads)
   block_attempts: 2
   # Delay between retries of the same block
   block_retry_delay: 1s

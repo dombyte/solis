@@ -6,14 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/dombyte/solis/internal/app"
-	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/maintenance"
-	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/util"
 )
 
 // runBackfill parses `backfill --years N` and runs the job; exit code 0/1.
@@ -40,33 +39,12 @@ func backfill(years int, stdout, stderr io.Writer) error {
 		return err
 	}
 	log := logging.Component(logging.New(stderr, cfg.App.Debug, true), "maintenance")
-	reg, err := solis.NewRegistry()
+	env, err := app.CreateBackfillEnv(cfg, stdout, log)
 	if err != nil {
 		return err
 	}
-	clock := util.NewRealClock()
-	st := &cfg.Storage
-	backupCfg := &database.BackupConfig{Enabled: true, MaxBackups: st.MaxBackups}
-	return maintenance.RunBackfill(context.Background(), maintenance.Env{
-		DBPath: st.Path,
-		Backup: func(ctx context.Context) (string, error) {
-			path, err := database.WriteBackup(ctx, st.Path, clock.Now(), log)
-			if err == nil { // rotate like the server does, so repeated jobs don't pile up
-				err = database.CleanupBackups(st.Path, st.MaxBackups, log)
-			}
-			return path, err
-		},
-		OpenStore: func(ctx context.Context) (maintenance.Store, func() error, error) {
-			mgr := database.NewManager(app.DatabaseSettings(*st), backupCfg, clock, log)
-			if err := mgr.Prepare(ctx); err != nil {
-				return nil, nil, err
-			}
-			s, err := storage.New(ctx, app.StorageSettings(*st), reg, clock, log)
-			if err != nil {
-				return nil, nil, err
-			}
-			return s, s.Close, nil
-		},
-		Registry: reg, Now: clock.Now(), Out: stdout, Log: log,
-	}, years)
+	// Ctrl-C/SIGTERM cancels the job; its single transaction then rolls back.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return maintenance.RunBackfill(ctx, env, years)
 }

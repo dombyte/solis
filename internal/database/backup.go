@@ -44,6 +44,9 @@ const backupStampLayout = "20060102_150405"
 // older, so rotation might delete the newest one.
 const utcStampSuffix = "Z"
 
+// backupFilePerm is the permission of backup files (owner read/write only).
+const backupFilePerm = 0o600
+
 // backupDirPerm is the permission of created backup directories (owner rwx, group rx).
 const backupDirPerm = 0o750
 
@@ -146,6 +149,10 @@ func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
 	}
 	if err := useRollbackJournal(ctx, destPath); err != nil {
 		return err
+	}
+	// A backup holds the same data as the database: owner-only, whatever the umask.
+	if err := os.Chmod(destPath, backupFilePerm); err != nil {
+		return fmt.Errorf("restrict backup permissions: %w", err)
 	}
 	return verifyBackupFile(ctx, destPath, log)
 }

@@ -83,7 +83,7 @@ func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, no
 	w, cacheVals := p.attribute(values, now)
 	w.Status = p.statusChanges(values, now)
 	w.Close = p.closes()
-	if err := p.write(ctx, w); err != nil {
+	if err := p.write(ctx, w, now); err != nil {
 		return err
 	}
 	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, cacheVals, now)
@@ -102,7 +102,7 @@ func (p *Poller) closeDisconnected(ctx context.Context, now time.Time) {
 	if len(w.Close) == 0 {
 		return
 	}
-	if err := p.write(ctx, w); err != nil {
+	if err := p.write(ctx, w, now); err != nil {
 		p.d.Log.Error().Err(err).Str("tag", "storage_failure").Msg("storing day closes failed")
 	}
 }
@@ -129,7 +129,7 @@ func (p *Poller) closes() []storage.DayClose {
 }
 
 // write stores w in one transaction and updates the loop state after the commit.
-func (p *Poller) write(ctx context.Context, w storage.PollWrite) error {
+func (p *Poller) write(ctx context.Context, w storage.PollWrite, now time.Time) error {
 	sctx, cancel := p.storageContext(ctx)
 	defer cancel()
 	if err := p.d.Store.WritePoll(sctx, w); err != nil && !storage.IsRejection(err) {
@@ -137,7 +137,7 @@ func (p *Poller) write(ctx context.Context, w storage.PollWrite) error {
 	} else if err != nil {
 		p.d.Log.Warn().Err(err).Msg("storage rejected late or foreign writes")
 	}
-	p.committed(w)
+	p.committed(w, now)
 	return nil
 }
 
@@ -195,7 +195,7 @@ func (p *Poller) statusChanges(values map[string]*solis.Value, now time.Time) []
 
 // committed updates loop state after a successful write and emits PeriodClosed once per
 // closed day (on the first closing key or the forced close).
-func (p *Poller) committed(w storage.PollWrite) {
+func (p *Poller) committed(w storage.PollWrite, now time.Time) {
 	for _, s := range w.Status {
 		p.lastStatus[s.Key] = s.Raw
 	}
@@ -207,7 +207,7 @@ func (p *Poller) committed(w storage.PollWrite) {
 		p.markEmitted(c.Day)
 		p.d.Bus.Publish(eventbus.Event{
 			Kind: eventbus.PeriodClosed, Day: c.Day,
-			At: p.d.Clock.Now(),
+			At: now, // the poll's captured instant, not a mid-run clock read
 		})
 		p.d.Log.Info().Str("day", c.Day).Msg("period closed")
 	}
