@@ -31,8 +31,10 @@ starts a fresh process. A clean `SIGTERM`/`SIGINT` shutdown exits 0 and is bound
 
 ## Configuration
 
-Copy `config.yaml` and adjust settings. All options can be overridden via environment variables
-using the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502`).
+Copy [`example/config.yaml`](example/config.yaml) to `config.yaml` (next to the binary or
+`docker-compose.yaml`) and adjust it. All options can be overridden via environment variables
+using the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502`). Invalid values
+fail startup with a clear message instead of being silently misread.
 
 The inverter's local timezone comes from the `TZ` environment variable (`time.Local`), never
 from the config file.
@@ -81,24 +83,26 @@ storage:
 |--------|------|---------|-------------|
 | `debug` | string | INFO | Log level: DEBUG, INFO, WARN, ERROR, FATAL (anything else fails startup) |
 | `port` | int | 8080 | HTTP server port |
-| `timeout` | duration | 30s | Request timeout and deadline of every storage call (must be > 0) |
+| `timeout` | duration | 30s | Request timeout and deadline of every storage call (at least 1s) |
 
 Durations accept Go units (`s`, `m`, `h`) plus `d` (24h), `w` (7d) and `y` (365d), also
-combined (`1y6w`, `1d12h`).
+combined (`1y6w`, `1d12h`). A unit is required: a bare number such as `timeout: 30` is
+rejected (it would otherwise mean 30 nanoseconds).
 
 ### Poller Settings
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `interval` | duration | 30s | Base interval between poll cycles; also drives the aggregator's debounce (4×) and heartbeat (5×) |
+| `interval` | duration | 30s | Base interval between poll cycles (at least 1s); also drives the aggregator's debounce (4×) and heartbeat (5×) |
 | `block_attempts` | int | 3 | Retries per block after a failed read (3 = up to 4 reads) |
-| `block_retry_delay` | duration | 1s | Delay between retry attempts for the same block |
-| `block_interval` | duration | 0s | Delay between successive block reads |
-| `poll_timeout` | duration | 30s | Max duration for a full poll cycle before aborting; must be below 3× `interval` (the health supervisor's grace) |
+| `block_retry_delay` | duration | 1s | Delay between retry attempts for the same block (≥ 0) |
+| `block_interval` | duration | 0s | Delay between successive block reads (≥ 0) |
+| `poll_timeout` | duration | 30s | Max duration for a full poll cycle before aborting; `poll_timeout + modbus.timeout` must be below 3× `interval` (the health supervisor's grace — a read in flight can overrun `poll_timeout` by up to `modbus.timeout`) |
 
-Only transport failures drop the Modbus connection. Exception replies (e.g. illegal address,
-device busy) and, on RTU, CRC errors, short frames and timeouts keep it open, so the block is
-retried up to `block_attempts` times.
+Transport failures drop the Modbus connection and reconnect. Exception replies (e.g. illegal
+address, device busy) keep it open, so the block is retried up to `block_attempts` times. On
+RTU, CRC errors, short frames and timeouts also keep it open, but 5 in a row (a pulled cable,
+a hung comms board) reopen the serial port, and the Modbus component shows `recovering`.
 
 ### Modbus Settings
 
@@ -131,10 +135,14 @@ The Modbus client never fails construction on an unreachable device: it starts i
 | `wal_mode` | bool | true | Enable Write-Ahead Logging |
 | `synchronous` | string | NORMAL | Sync mode: OFF, NORMAL, FULL, EXTRA |
 | `temp_store` | string | MEMORY | Temp storage: DEFAULT, FILE, MEMORY |
-| `enable_backup` | bool | true | Enable periodic database backups |
+| `enable_backup` | bool | true | Enable periodic online backups (a backup before schema migrations is always taken) |
 | `max_backups` | int | 3 | Maximum backup files to keep (0 = unlimited) |
 | `backup_interval` | duration | 24h | Interval for periodic online backups |
 | `cleanup_interval` | duration | 24h | Interval for retention cleanup |
+
+Backups are written to `backups/` next to the database (e.g. `data/backups/solis.db.20260928_120000_000Z.backup`),
+owner-only (`0600`), verified with `PRAGMA integrity_check`, and rotated per database. To
+restore one, stop the app, copy it over `solis.db` and delete `solis.db-wal` and `solis.db-shm`.
 
 Retention never corrupts computed values: cleanup deletes daily, monthly and yearly rows
 older than `daily_retention` only up to the start of the first period that can still be
@@ -223,6 +231,12 @@ GET /api/data/{total_key}                                      # lifetime value 
 GET /api/data/{status_key}                                     # decoded change history
 ```
 
+`start`/`end` accept `YYYY-MM-DD`, `YYYY-MM` or `YYYY`; a month or year end covers the whole
+period, `start` defaults to 30 days ago and `end` to today. A malformed range, `start` after `end`,
+or a range on a key without history (live, total and status keys) is answered with `400`; an
+unknown key, or a key without a value yet, with `404`. Errors use one JSON shape:
+`{"error": "Bad Request", "message": "…", "code": 400}`.
+
 Values are stored at full precision; rounding to 2 decimals happens only in the JSON response.
 There is no `?direct=true` mode — only the poller talks to the inverter, so all reads come from
 the cache or SQLite.
@@ -246,7 +260,17 @@ changed, subscribed values are pushed (diffed per client), coalesced into one fr
 them instead of showing a stale value.
 
 `ping` from the client is accepted and ignored. Unknown keys never drop the connection. History
-stays on REST — there is no history over WebSocket.
+stays on REST — there is no history over WebSocket. At most 64 clients are accepted (the next
+one is closed with code 1013, "try again later") and at most 256 keys per message.
+
+## Security
+
+Solis Monitor is meant for a trusted LAN: there is no authentication. The REST API sends no
+CORS headers (other websites cannot read it through a visitor's browser), the WebSocket only
+accepts same-origin connections, and responses carry `X-Content-Type-Options: nosniff` and
+`Referrer-Policy: no-referrer`. Framing is allowed so the dashboard can be embedded (e.g. a
+Home Assistant iframe). Do not expose it to the internet without an authenticating reverse
+proxy.
 
 ## Aggregator
 
@@ -266,13 +290,15 @@ against the database and exits `0`/`1`; it never starts the HTTP server, poller 
 ```bash
 solis backfill --years 2           # recompute monthly + yearly for the current year + 2 closed years
 solis backfill --years 2 --force   # same, also overwriting periods without complete daily history
+solis version                      # print the build version, commit and date
 ```
 
 The job refuses to run while the server holds its lock on the database, always takes a
 backup first and verifies it with `PRAGMA integrity_check` (aborting with no writes on backup
 failure), and refreshes the total baseline for any closed year it touches. Once retention
 cleanup has deleted daily rows, closed years can no longer be recomputed: the job then
-refuses `--years N > 0` instead of overwriting history with partial sums.
+refuses `--years N > 0` instead of overwriting history with partial sums. All changes run in
+one transaction: an error or Ctrl-C rolls everything back.
 
 By default the job keeps what it cannot fully recompute: months and years that start before
 the oldest daily row (e.g. inverter-reported history from before logging began) are skipped
@@ -280,6 +306,11 @@ and listed in the report, and the total baseline only covers years since the v3 
 `--force` overrides both: those periods are overwritten with the sums of the rows that exist
 (possibly partial or zero), and the baseline is rebuilt from all daily rows, pre-cutover
 years included. Periods removed by retention are still refused.
+
+The report lists one line per recomputed value (`old -> new`, `n/a` when there was no row),
+one `skipped` line per protected period, and a summary. "Lower" values usually mean days
+without daily rows; small increases usually mean the old value was a rounded inverter
+figure.
 
 ## Running
 
@@ -290,7 +321,7 @@ Templates live in [`example/`](example/):
 | File | Use |
 |---|---|
 | `example/docker-compose.yaml` | Modbus TCP (data logger or RS485-to-TCP gateway) |
-| `example/docker-compose.rtu.yaml` | Serial RS485 adapter (Modbus RTU, `devices` + `group_add`) |
+| `example/docker-compose.rtu.yaml` | Serial RS485 adapter (Modbus RTU, passes the device in) |
 | `example/config.yaml` | Commented configuration with all settings |
 
 ```bash
@@ -310,14 +341,16 @@ docker compose -f docker-compose.dev.yaml up --build
 ```bash
 go run ./cmd
 # or
-go build -o solis ./cmd && ./solis
+make build && ./solis
 ```
+
+Releases target linux and darwin (the database lock uses `flock`).
 
 ## Development
 
 ```bash
 make build            # go build with version info (`./solis version`)
-make check            # the full pre-commit suite: lint, tests, deadcode, govulncheck, frontend
+make check            # check-only pre-commit suite: format, lint, race tests, deadcode, govulncheck
 go test -race ./...
 ```
 
@@ -329,7 +362,8 @@ misspell, vet) and the project's architecture/testing conventions.
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev                                          # proxies /api and /ws to localhost:8080
+npm run typecheck && npm run lint && npm run knip    # the frontend checks CI runs
 ```
 
 ## License
