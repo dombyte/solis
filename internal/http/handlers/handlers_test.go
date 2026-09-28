@@ -17,10 +17,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/http/handlers/mocks"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
@@ -113,7 +113,7 @@ func TestData_HistoryByStore(t *testing.T) {
 	end := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
 	svc.EXPECT().Register("pv_energy_daily").Return(reg("pv_energy_daily", solis.StoreDaily), nil)
 	svc.EXPECT().DailyHistory(mock.Anything, "pv_energy_daily", start, end).
-		Return([]*storage.DailyDataPoint{{Date: "2026-08-01", Value: 1.234}}, nil).Once()
+		Return([]*history.DailyDataPoint{{Date: "2026-08-01", Value: 1.234}}, nil).Once()
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
 		"/api/data/pv_energy_daily?start=2026-08-01&end=2026-08-03", nil))
@@ -143,7 +143,7 @@ func TestData_HistoryByStore(t *testing.T) {
 func TestData_TotalAndStatus(t *testing.T) {
 	svc, r := setup(t)
 	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
-	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&storage.TotalDataPoint{
+	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&history.TotalDataPoint{
 		Value: 5230.456, RawValue: 5230.456, Timestamp: "t"}, nil).Once()
 	code, body := do(t, r, "/api/data/pv_energy_total")
 	assert.Equal(t, http.StatusOK, code)
@@ -237,10 +237,10 @@ func TestData_StorageTimeout(t *testing.T) {
 		Clock: clocktest.New(t0), Timeout: time.Second}
 	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
 	svc.EXPECT().Total(mock.Anything, "pv_energy_total").RunAndReturn(
-		func(ctx context.Context, _ string) (*storage.TotalDataPoint, error) {
+		func(ctx context.Context, _ string) (*history.TotalDataPoint, error) {
 			_, ok := ctx.Deadline()
 			assert.True(t, ok, "storage reads carry app.timeout")
-			return &storage.TotalDataPoint{}, nil
+			return &history.TotalDataPoint{}, nil
 		}).Once()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/data/pv_energy_total", nil)

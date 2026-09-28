@@ -9,10 +9,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/utils"
 )
 
@@ -26,12 +26,12 @@ type ReadService interface {
 	Register(key string) (solis.Register, error)
 	Current(key string) (*solis.Value, error)
 	DailyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*storage.DailyDataPoint, error)
+		[]*history.DailyDataPoint, error)
 	MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*storage.MonthlyDataPoint, error)
+		[]*history.MonthlyDataPoint, error)
 	YearlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*storage.YearlyDataPoint, error)
-	Total(ctx context.Context, key string) (*storage.TotalDataPoint, error)
+		[]*history.YearlyDataPoint, error)
+	Total(ctx context.Context, key string) (*history.TotalDataPoint, error)
 	StatusHistory(ctx context.Context, key string) (service.StatusHistory, error)
 }
 
@@ -145,7 +145,7 @@ func dispatch(ctx context.Context, deps HandlerDeps, req dataRequest) (any, erro
 	case req.reg.Store == solis.StoreStatus:
 		return deps.Service.StatusHistory(ctx, req.reg.Key)
 	case req.hasRange:
-		return history(ctx, deps, req.reg, req.start, req.end)
+		return periodHistory(ctx, deps, req.reg, req.start, req.end)
 	default:
 		v, err := deps.Service.Current(req.reg.Key)
 		if err != nil {
@@ -155,7 +155,7 @@ func dispatch(ctx context.Context, deps HandlerDeps, req dataRequest) (any, erro
 	}
 }
 
-func history(ctx context.Context, deps HandlerDeps, reg solis.Register, start, end string) (
+func periodHistory(ctx context.Context, deps HandlerDeps, reg solis.Register, start, end string) (
 	any, error) {
 	tr, err := ParseTimeRange(start, end, deps.Clock.Now())
 	if err != nil {

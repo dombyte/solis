@@ -1,4 +1,6 @@
-package storage
+// Package history holds the read-model rows of the history tables (daily, monthly,
+// yearly, total, status) shared by storage, the read service and the HTTP handlers.
+package history
 
 import (
 	"encoding/json"
@@ -44,6 +46,7 @@ type TotalDataPoint struct {
 	Timestamp string  `json:"timestamp"`
 }
 
+// roundedPoint is the JSON shape of a period point with values rounded to 2 decimals.
 type roundedPoint struct {
 	Date      string                     `json:"date,omitempty"`
 	Month     string                     `json:"month,omitempty"`

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dombyte/solis/internal/database/migrations"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 )
 
@@ -72,14 +73,14 @@ func statusTimestamp(t time.Time) string {
 // Over the row cap the newest maxErrorRows changes are kept. CAST drops the DATETIME
 // decltype so the driver returns the stored text instead of reformatting it.
 func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*ErrorDataPoint, error) {
+	[]*history.ErrorDataPoint, error) {
 	out, err := scanRows(ctx, s.db, query{what: "error history",
 		sql: `SELECT CAST(timestamp AS TEXT), raw_value, string_value FROM error_data
 		WHERE register_key = ? AND timestamp >= ? AND timestamp <= ?
 		ORDER BY timestamp DESC LIMIT ?`,
 		args: []any{key, statusTimestamp(start), statusTimestamp(end), maxErrorRows}},
-		func(r *sql.Rows) (*ErrorDataPoint, error) {
-			var dp ErrorDataPoint
+		func(r *sql.Rows) (*history.ErrorDataPoint, error) {
+			var dp history.ErrorDataPoint
 			var str sql.NullString
 			err := r.Scan(&dp.Timestamp, &dp.RawValue, &str)
 			dp.StringValue = str.String
@@ -92,47 +93,48 @@ func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end ti
 // GetDailyHistory returns the daily rows of key between the start and end days.
 // substr() drops the DATE decltype so the driver returns the raw YYYY-MM-DD key.
 func (s *Storage) GetDailyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*DailyDataPoint, error) {
+	[]*history.DailyDataPoint, error) {
 	return scanRows(ctx, s.db, rangeQuery("daily history",
 		`SELECT substr(date, 1, 10), value, raw_value FROM daily_values
 		WHERE register_key = ? AND date >= ? AND date <= ? ORDER BY date LIMIT ?`,
 		bounds{key, start, end, period.DayLayout, maxPeriodRows}),
-		func(r *sql.Rows) (*DailyDataPoint, error) {
-			var dp DailyDataPoint
+		func(r *sql.Rows) (*history.DailyDataPoint, error) {
+			var dp history.DailyDataPoint
 			return &dp, r.Scan(&dp.Date, &dp.Value, &dp.RawValue)
 		})
 }
 
 // GetMonthlyHistory returns the monthly rows of key between the start and end months.
 func (s *Storage) GetMonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*MonthlyDataPoint, error) {
+	[]*history.MonthlyDataPoint, error) {
 	return scanRows(ctx, s.db, rangeQuery("monthly history",
 		`SELECT month, value, raw_value FROM monthly_values
 		WHERE register_key = ? AND month >= ? AND month <= ? ORDER BY month LIMIT ?`,
 		bounds{key, start, end, period.MonthLayout, maxPeriodRows}),
-		func(r *sql.Rows) (*MonthlyDataPoint, error) {
-			var dp MonthlyDataPoint
+		func(r *sql.Rows) (*history.MonthlyDataPoint, error) {
+			var dp history.MonthlyDataPoint
 			return &dp, r.Scan(&dp.Month, &dp.Value, &dp.RawValue)
 		})
 }
 
 // GetYearlyHistory returns the yearly rows of key between the start and end years.
 func (s *Storage) GetYearlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*YearlyDataPoint, error) {
+	[]*history.YearlyDataPoint, error) {
 	return scanRows(ctx, s.db, rangeQuery("yearly history",
 		`SELECT year, value, raw_value FROM yearly_values
 		WHERE register_key = ? AND year >= ? AND year <= ? ORDER BY year LIMIT ?`,
 		bounds{key, start, end, period.YearLayout, maxYearRows}),
-		func(r *sql.Rows) (*YearlyDataPoint, error) {
-			var dp YearlyDataPoint
+		func(r *sql.Rows) (*history.YearlyDataPoint, error) {
+			var dp history.YearlyDataPoint
 			return &dp, r.Scan(&dp.Year, &dp.Value, &dp.RawValue)
 		})
 }
 
 // GetTotalHistory returns the stored total of key, or nil when none exists. The
 // timestamp is returned as stored (CAST drops the DATETIME decltype).
-func (s *Storage) GetTotalHistory(ctx context.Context, key string) (*TotalDataPoint, error) {
-	var dp TotalDataPoint
+func (s *Storage) GetTotalHistory(ctx context.Context, key string) (
+	*history.TotalDataPoint, error) {
+	var dp history.TotalDataPoint
 	err := s.db.QueryRowContext(ctx, `SELECT value, raw_value, CAST(timestamp AS TEXT)
 		FROM total_values
 		WHERE register_key = ?`, key).Scan(&dp.Value, &dp.RawValue, &dp.Timestamp)

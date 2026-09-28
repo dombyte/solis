@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
@@ -144,8 +145,8 @@ func (s *ReadService) requireStore(key string, want solis.Store) error {
 // historyFunc reads the rows of key between start and end from one history table.
 type historyFunc[T any] func(ctx context.Context, key string, start, end time.Time) (T, error)
 
-// history wraps get with the register-kind check for want and debug logging.
-func history[T any](s *ReadService, want solis.Store, get historyFunc[T]) historyFunc[T] {
+// readHistory wraps get with the register-kind check for want and debug logging.
+func readHistory[T any](s *ReadService, want solis.Store, get historyFunc[T]) historyFunc[T] {
 	return func(ctx context.Context, key string, start, end time.Time) (T, error) {
 		if err := s.requireStore(key, want); err != nil {
 			var zero T
@@ -159,24 +160,24 @@ func history[T any](s *ReadService, want solis.Store, get historyFunc[T]) histor
 
 // DailyHistory returns daily rows of a daily key.
 func (s *ReadService) DailyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.DailyDataPoint, error) {
-	return history(s, solis.StoreDaily, s.d.Store.GetDailyHistory)(ctx, key, start, end)
+	[]*history.DailyDataPoint, error) {
+	return readHistory(s, solis.StoreDaily, s.d.Store.GetDailyHistory)(ctx, key, start, end)
 }
 
 // MonthlyHistory returns monthly rows of a monthly key.
 func (s *ReadService) MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.MonthlyDataPoint, error) {
-	return history(s, solis.StoreMonthly, s.d.Store.GetMonthlyHistory)(ctx, key, start, end)
+	[]*history.MonthlyDataPoint, error) {
+	return readHistory(s, solis.StoreMonthly, s.d.Store.GetMonthlyHistory)(ctx, key, start, end)
 }
 
 // YearlyHistory returns yearly rows of a yearly key.
 func (s *ReadService) YearlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.YearlyDataPoint, error) {
-	return history(s, solis.StoreYearly, s.d.Store.GetYearlyHistory)(ctx, key, start, end)
+	[]*history.YearlyDataPoint, error) {
+	return readHistory(s, solis.StoreYearly, s.d.Store.GetYearlyHistory)(ctx, key, start, end)
 }
 
 // Total returns the stored lifetime value of a total key.
-func (s *ReadService) Total(ctx context.Context, key string) (*storage.TotalDataPoint, error) {
+func (s *ReadService) Total(ctx context.Context, key string) (*history.TotalDataPoint, error) {
 	if err := s.requireStore(key, solis.StoreTotal); err != nil {
 		return nil, err
 	}
@@ -236,7 +237,7 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 
 // lastIs reports whether the newest stored change already records the cached state
 // (the usual case: the poller stores every change), so it is not listed twice.
-func lastIs(points []*storage.ErrorDataPoint, v *solis.Value) bool {
+func lastIs(points []*history.ErrorDataPoint, v *solis.Value) bool {
 	return len(points) > 0 && points[len(points)-1].RawValue == v.RawValue
 }
 

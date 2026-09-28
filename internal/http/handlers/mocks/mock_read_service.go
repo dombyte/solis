@@ -7,13 +7,13 @@ import (
 
 	health "github.com/dombyte/solis/internal/health"
 
+	history "github.com/dombyte/solis/internal/history"
+
 	mock "github.com/stretchr/testify/mock"
 
 	service "github.com/dombyte/solis/internal/service"
 
 	solis "github.com/dombyte/solis/internal/solis"
-
-	storage "github.com/dombyte/solis/internal/storage"
 
 	time "time"
 )
@@ -90,23 +90,23 @@ func (_c *MockReadService_Current_Call) RunAndReturn(run func(string) (*solis.Va
 }
 
 // DailyHistory provides a mock function with given fields: ctx, key, start, end
-func (_m *MockReadService) DailyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*storage.DailyDataPoint, error) {
+func (_m *MockReadService) DailyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*history.DailyDataPoint, error) {
 	ret := _m.Called(ctx, key, start, end)
 
 	if len(ret) == 0 {
 		panic("no return value specified for DailyHistory")
 	}
 
-	var r0 []*storage.DailyDataPoint
+	var r0 []*history.DailyDataPoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*storage.DailyDataPoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*history.DailyDataPoint, error)); ok {
 		return rf(ctx, key, start, end)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*storage.DailyDataPoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*history.DailyDataPoint); ok {
 		r0 = rf(ctx, key, start, end)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*storage.DailyDataPoint)
+			r0 = ret.Get(0).([]*history.DailyDataPoint)
 		}
 	}
 
@@ -140,12 +140,12 @@ func (_c *MockReadService_DailyHistory_Call) Run(run func(ctx context.Context, k
 	return _c
 }
 
-func (_c *MockReadService_DailyHistory_Call) Return(_a0 []*storage.DailyDataPoint, _a1 error) *MockReadService_DailyHistory_Call {
+func (_c *MockReadService_DailyHistory_Call) Return(_a0 []*history.DailyDataPoint, _a1 error) *MockReadService_DailyHistory_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockReadService_DailyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*storage.DailyDataPoint, error)) *MockReadService_DailyHistory_Call {
+func (_c *MockReadService_DailyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*history.DailyDataPoint, error)) *MockReadService_DailyHistory_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -243,23 +243,23 @@ func (_c *MockReadService_Keys_Call) RunAndReturn(run func() []solis.Register) *
 }
 
 // MonthlyHistory provides a mock function with given fields: ctx, key, start, end
-func (_m *MockReadService) MonthlyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*storage.MonthlyDataPoint, error) {
+func (_m *MockReadService) MonthlyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*history.MonthlyDataPoint, error) {
 	ret := _m.Called(ctx, key, start, end)
 
 	if len(ret) == 0 {
 		panic("no return value specified for MonthlyHistory")
 	}
 
-	var r0 []*storage.MonthlyDataPoint
+	var r0 []*history.MonthlyDataPoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*storage.MonthlyDataPoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*history.MonthlyDataPoint, error)); ok {
 		return rf(ctx, key, start, end)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*storage.MonthlyDataPoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*history.MonthlyDataPoint); ok {
 		r0 = rf(ctx, key, start, end)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*storage.MonthlyDataPoint)
+			r0 = ret.Get(0).([]*history.MonthlyDataPoint)
 		}
 	}
 
@@ -293,12 +293,12 @@ func (_c *MockReadService_MonthlyHistory_Call) Run(run func(ctx context.Context,
 	return _c
 }
 
-func (_c *MockReadService_MonthlyHistory_Call) Return(_a0 []*storage.MonthlyDataPoint, _a1 error) *MockReadService_MonthlyHistory_Call {
+func (_c *MockReadService_MonthlyHistory_Call) Return(_a0 []*history.MonthlyDataPoint, _a1 error) *MockReadService_MonthlyHistory_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockReadService_MonthlyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*storage.MonthlyDataPoint, error)) *MockReadService_MonthlyHistory_Call {
+func (_c *MockReadService_MonthlyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*history.MonthlyDataPoint, error)) *MockReadService_MonthlyHistory_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -417,23 +417,23 @@ func (_c *MockReadService_StatusHistory_Call) RunAndReturn(run func(context.Cont
 }
 
 // Total provides a mock function with given fields: ctx, key
-func (_m *MockReadService) Total(ctx context.Context, key string) (*storage.TotalDataPoint, error) {
+func (_m *MockReadService) Total(ctx context.Context, key string) (*history.TotalDataPoint, error) {
 	ret := _m.Called(ctx, key)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Total")
 	}
 
-	var r0 *storage.TotalDataPoint
+	var r0 *history.TotalDataPoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (*storage.TotalDataPoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*history.TotalDataPoint, error)); ok {
 		return rf(ctx, key)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) *storage.TotalDataPoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) *history.TotalDataPoint); ok {
 		r0 = rf(ctx, key)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*storage.TotalDataPoint)
+			r0 = ret.Get(0).(*history.TotalDataPoint)
 		}
 	}
 
@@ -465,34 +465,34 @@ func (_c *MockReadService_Total_Call) Run(run func(ctx context.Context, key stri
 	return _c
 }
 
-func (_c *MockReadService_Total_Call) Return(_a0 *storage.TotalDataPoint, _a1 error) *MockReadService_Total_Call {
+func (_c *MockReadService_Total_Call) Return(_a0 *history.TotalDataPoint, _a1 error) *MockReadService_Total_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockReadService_Total_Call) RunAndReturn(run func(context.Context, string) (*storage.TotalDataPoint, error)) *MockReadService_Total_Call {
+func (_c *MockReadService_Total_Call) RunAndReturn(run func(context.Context, string) (*history.TotalDataPoint, error)) *MockReadService_Total_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // YearlyHistory provides a mock function with given fields: ctx, key, start, end
-func (_m *MockReadService) YearlyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*storage.YearlyDataPoint, error) {
+func (_m *MockReadService) YearlyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*history.YearlyDataPoint, error) {
 	ret := _m.Called(ctx, key, start, end)
 
 	if len(ret) == 0 {
 		panic("no return value specified for YearlyHistory")
 	}
 
-	var r0 []*storage.YearlyDataPoint
+	var r0 []*history.YearlyDataPoint
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*storage.YearlyDataPoint, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) ([]*history.YearlyDataPoint, error)); ok {
 		return rf(ctx, key, start, end)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*storage.YearlyDataPoint); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, time.Time, time.Time) []*history.YearlyDataPoint); ok {
 		r0 = rf(ctx, key, start, end)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*storage.YearlyDataPoint)
+			r0 = ret.Get(0).([]*history.YearlyDataPoint)
 		}
 	}
 
@@ -526,12 +526,12 @@ func (_c *MockReadService_YearlyHistory_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *MockReadService_YearlyHistory_Call) Return(_a0 []*storage.YearlyDataPoint, _a1 error) *MockReadService_YearlyHistory_Call {
+func (_c *MockReadService_YearlyHistory_Call) Return(_a0 []*history.YearlyDataPoint, _a1 error) *MockReadService_YearlyHistory_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockReadService_YearlyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*storage.YearlyDataPoint, error)) *MockReadService_YearlyHistory_Call {
+func (_c *MockReadService_YearlyHistory_Call) RunAndReturn(run func(context.Context, string, time.Time, time.Time) ([]*history.YearlyDataPoint, error)) *MockReadService_YearlyHistory_Call {
 	_c.Call.Return(run)
 	return _c
 }
