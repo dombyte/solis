@@ -11,9 +11,8 @@ import (
 	"github.com/rs/zerolog"
 	_ "modernc.org/sqlite" // SQLite driver
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database/migrations"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Cleaner runs retention cleanup (implemented by storage).
@@ -21,23 +20,30 @@ type Cleaner interface {
 	CleanupAll(ctx context.Context) error
 }
 
+// Settings are the database file and the retention cleanup schedule.
+type Settings struct {
+	// Path is the SQLite database file.
+	Path string
+	// CleanupInterval is the retention cleanup interval (<= 0 disables it).
+	CleanupInterval time.Duration
+}
+
 // Manager owns the database lifecycle outside the storage connection: pre-migration
 // backups, schema migrations, periodic online backups and retention cleanup scheduling.
 type Manager struct {
-	cfg      *config.StorageSettings
+	cfg      Settings
 	backup   *BackupConfig
 	registry *MigrationRegistry
 	executor *MigrationExecutor
-	clock    utils.Clock
+	clock    util.Clock
 	log      zerolog.Logger
 }
 
 // NewManager creates a manager with all migrations registered.
-func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.Clock,
-	log zerolog.Logger) *Manager {
+func NewManager(cfg Settings, backup *BackupConfig, clock util.Clock,
+	log zerolog.Logger,
+) *Manager {
 	registry := NewMigrationRegistry()
-	registry.Register(migrations.GetV1Migration())
-	registry.Register(migrations.GetV2Migration())
 	registry.Register(migrations.GetV3Migration())
 	return &Manager{
 		cfg: cfg, backup: backup, registry: registry,
@@ -62,7 +68,7 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		}
 	}()
 
-	current, err := m.executor.GetCurrentVersion(db)
+	current, err := m.executor.GetCurrentVersion(ctx, db)
 	if err != nil {
 		return fmt.Errorf("database: current schema version: %w", err)
 	}
@@ -71,10 +77,7 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		return nil
 	}
 	m.log.Debug().Int("current_version", current).Msg("database migrations pending")
-	if exists {
-		m.backupBeforeMigration()
-	}
-	if err := m.migrate(db, current); err != nil {
+	if err := m.migrate(ctx, db, current, exists); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, "PRAGMA wal_checkpoint(FULL);"); err != nil {
@@ -97,15 +100,15 @@ func openMigrationDB(ctx context.Context, path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func (m *Manager) migrate(db *sql.DB, current int) error {
-	if current == 0 {
-		m.log.Info().Msg("legacy database detected, marking as V1")
-		if err := m.executor.MarkLegacyAsV1(db); err != nil {
-			return fmt.Errorf("database: mark legacy database as V1: %w", err)
-		}
-		current = 1
+// migrate backs up an existing database, then applies the pending migrations.
+func (m *Manager) migrate(ctx context.Context, db *sql.DB, current int, exists bool) error {
+	if err := checkCompatible(ctx, db, current); err != nil {
+		return err
 	}
-	n, err := m.executor.ApplyPendingMigrations(db, current)
+	if exists {
+		m.backupBeforeMigration(ctx)
+	}
+	n, err := m.executor.ApplyPendingMigrations(ctx, db, current)
 	if err != nil {
 		return fmt.Errorf("database: migration failed: %w", err)
 	}
@@ -113,8 +116,27 @@ func (m *Manager) migrate(db *sql.DB, current int) error {
 	return nil
 }
 
-func (m *Manager) backupBeforeMigration() {
-	path, err := CreateBackup(m.cfg.Path, m.backup, m.clock.Now(), m.log)
+// checkCompatible rejects databases older than MinCompatibleVersion. Version 0 is only
+// accepted when the database holds no data tables yet (a fresh instance).
+func checkCompatible(ctx context.Context, db *sql.DB, current int) error {
+	if current >= MinCompatibleVersion {
+		return nil
+	}
+	if current == 0 {
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
+			WHERE type = 'table' AND name = 'daily_values'`).Scan(&n); err != nil {
+			return fmt.Errorf("database: check data tables: %w", err)
+		}
+		if n == 0 {
+			return nil
+		}
+	}
+	return &SchemaTooOldError{Version: current}
+}
+
+func (m *Manager) backupBeforeMigration(ctx context.Context) {
+	path, err := CreateBackup(ctx, m.cfg.Path, m.backup, m.clock.Now(), m.log)
 	if err != nil {
 		m.log.Error().Err(err).Msg("pre-migration backup failed, proceeding without backup")
 		return
@@ -138,7 +160,7 @@ func (m *Manager) RunPeriodicBackups(ctx context.Context) {
 		return
 	}
 	m.every(ctx, m.backup.BackupInterval, false, func() {
-		if path, err := CreateBackup(m.cfg.Path, m.backup, m.clock.Now(), m.log); err != nil {
+		if path, err := CreateBackup(ctx, m.cfg.Path, m.backup, m.clock.Now(), m.log); err != nil {
 			m.log.Error().Err(err).Msg("online backup failed")
 		} else {
 			m.log.Info().Str("file", path).Msg("online backup created")

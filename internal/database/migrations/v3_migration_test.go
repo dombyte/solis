@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -15,8 +16,10 @@ func TestNormalizeStatusTimestamp(t *testing.T) {
 		in, want string
 		ok       bool
 	}{
-		{"2026-09-27 20:58:18.612840635 +0200 CEST m=+0.000546397",
-			"2026-09-27T18:58:18.612Z", true},
+		{
+			"2026-09-27 20:58:18.612840635 +0200 CEST m=+0.000546397",
+			"2026-09-27T18:58:18.612Z", true,
+		},
 		{"2026-10-25 02:30:00 +0100 CET", "2026-10-25T01:30:00.000Z", true},
 		{"2026-10-25 02:30:00 +0200 CEST", "2026-10-25T00:30:00.000Z", true},
 		{"2024-01-15T10:30:00Z", "2024-01-15T10:30:00.000Z", true},
@@ -41,7 +44,7 @@ func TestV3Migration_Up(t *testing.T) {
 	m := GetV3Migration()
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	require.NoError(t, m.Up(tx), "no error_data table only creates meta")
+	require.NoError(t, m.Up(context.Background(), tx), "no error_data table only creates meta")
 	require.NoError(t, tx.Commit())
 
 	_, err = db.Exec(`CREATE TABLE error_data (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +58,7 @@ func TestV3Migration_Up(t *testing.T) {
 
 	tx, err = db.Begin()
 	require.NoError(t, err)
-	require.NoError(t, m.Up(tx))
+	require.NoError(t, m.Up(context.Background(), tx))
 	require.NoError(t, tx.Commit())
 
 	rows, err := db.Query(`SELECT CAST(timestamp AS TEXT) FROM error_data ORDER BY id`)

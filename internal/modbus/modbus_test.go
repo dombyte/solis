@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 // device serves input register i as value i.
@@ -25,6 +25,7 @@ func (d *device) HandleCoils(*sv.CoilsRequest) ([]bool, error) { return nil, sv.
 func (d *device) HandleDiscreteInputs(*sv.DiscreteInputsRequest) ([]bool, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
 func (d *device) HandleHoldingRegisters(*sv.HoldingRegistersRequest) ([]uint16, error) {
 	return nil, sv.ErrIllegalFunction
 }
@@ -64,15 +65,19 @@ func startDevice(t *testing.T, port int) *sv.ModbusServer {
 }
 
 func settings(port int) Settings {
-	return Settings{Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
-		Timeout: 500 * time.Millisecond}
+	return Settings{
+		Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
+		Timeout: 500 * time.Millisecond,
+	}
 }
 
 func TestSettingsValidate(t *testing.T) {
 	assert.NoError(t, settings(502).Validate())
 	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}.Validate())
-	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
-		Parity: "e"}.Validate())
+	assert.NoError(t, Settings{
+		Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+		Parity: "e",
+	}.Validate())
 	for _, s := range []Settings{
 		{},
 		{Address: "tcp://h:502", Timeout: 0},
@@ -83,7 +88,7 @@ func TestSettingsValidate(t *testing.T) {
 	} {
 		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings)
 	}
-	_, err := New(Settings{}, utils.NewRealClock(), zerolog.Nop())
+	_, err := New(Settings{}, util.NewRealClock(), zerolog.Nop())
 	assert.ErrorIs(t, err, ErrInvalidSettings)
 }
 
@@ -106,7 +111,7 @@ func TestParity(t *testing.T) {
 
 func TestConnect_RTUMissingDevice(t *testing.T) {
 	c, err := New(Settings{Address: "rtu:///dev/nonexistent-solis-test", Timeout: time.Second},
-		utils.NewRealClock(), zerolog.Nop())
+		util.NewRealClock(), zerolog.Nop())
 	require.NoError(t, err)
 	err = c.connect()
 	require.Error(t, err)
@@ -114,7 +119,7 @@ func TestConnect_RTUMissingDevice(t *testing.T) {
 }
 
 func TestNew_DoesNotConnect(t *testing.T) {
-	c, err := New(settings(freePort(t)), utils.NewRealClock(), zerolog.Nop())
+	c, err := New(settings(freePort(t)), util.NewRealClock(), zerolog.Nop())
 	require.NoError(t, err)
 	assert.False(t, c.IsConnected())
 	_, err = c.ReadRegisters(context.Background(), 1, 1)
@@ -209,7 +214,7 @@ func TestReadRegisters_ExceptionKeepsConnection(t *testing.T) {
 	port := freePort(t)
 	srv := startDevice(t, port)
 	defer func() { _ = srv.Stop() }()
-	c, err := New(settings(port), utils.NewRealClock(), zerolog.Nop())
+	c, err := New(settings(port), util.NewRealClock(), zerolog.Nop())
 	require.NoError(t, err)
 	require.NoError(t, c.connect())
 	defer func() { _ = c.Close() }()

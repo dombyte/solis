@@ -52,7 +52,8 @@ func runSteps(t *testing.T, d *DayAttributor, loc *time.Location, steps []step) 
 }
 
 func seeded(t *testing.T, roll string, keys []string, now time.Time,
-	rows map[string]map[string]float64) *DayAttributor {
+	rows map[string]map[string]float64,
+) *DayAttributor {
 	t.Helper()
 	d := NewDayAttributor(rollover(t, roll), keys)
 	d.Seed(now, rows, nil)
@@ -148,22 +149,31 @@ func TestAttribute_DSTNights(t *testing.T) {
 		seed  time.Time
 		steps []step
 	}{
-		{"spring forward, rollover 02:30 in the skipped hour", "02:30",
-			time.Date(2026, 3, 28, 20, 0, 0, 0, loc), []step{
+		{
+			"spring forward, rollover 02:30 in the skipped hour", "02:30",
+			time.Date(2026, 3, 28, 20, 0, 0, 0, loc),
+			[]step{
 				{"2026-03-29 00:30", "pv", 9, WriteCurrent, "2026-03-28", "", false},
 				{"2026-03-29 03:15", "pv", 0.1, WriteNewDay, "2026-03-29", "2026-03-28", false},
-			}},
-		{"fall back night, rollover 23:59", "23:59",
-			time.Date(2026, 10, 24, 20, 0, 0, 0, loc), []step{
+			},
+		},
+		{
+			"fall back night, rollover 23:59", "23:59",
+			time.Date(2026, 10, 24, 20, 0, 0, 0, loc),
+			[]step{
 				{"2026-10-24 23:00", "pv", 9, WriteCurrent, "2026-10-24", "", false},
 				{"2026-10-25 00:10", "pv", 0, WriteNewDay, "2026-10-25", "2026-10-24", false},
 				{"2026-10-25 02:30", "pv", 0.5, WriteCurrent, "2026-10-25", "", false},
-			}},
-		{"fall back, rollover 02:30 in the repeated hour", "02:30",
-			time.Date(2026, 10, 24, 20, 0, 0, 0, loc), []step{
+			},
+		},
+		{
+			"fall back, rollover 02:30 in the repeated hour", "02:30",
+			time.Date(2026, 10, 24, 20, 0, 0, 0, loc),
+			[]step{
 				{"2026-10-25 01:00", "pv", 9, WriteCurrent, "2026-10-24", "", false},
 				{"2026-10-25 02:40", "pv", 0.1, WriteNewDay, "2026-10-25", "2026-10-24", false},
-			}},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

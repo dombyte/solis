@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func TestCreateBackup(t *testing.T) {
 	newSQLiteDB(t, dbPath)
 	cfg := &BackupConfig{Enabled: true, MaxBackups: 3, BackupInterval: 24 * time.Hour}
 
-	backupPath, err := CreateBackup(dbPath, cfg, time.Now(), zerolog.Nop())
+	backupPath, err := CreateBackup(context.Background(), dbPath, cfg, time.Now(), zerolog.Nop())
 	require.NoError(t, err)
 	st, err := os.Stat(backupPath)
 	require.NoError(t, err)
@@ -83,14 +84,14 @@ func TestCreateBackup(t *testing.T) {
 	assert.Equal(t, "test data", name)
 
 	cfg.Enabled = false
-	backupPath, err = CreateBackup(dbPath, cfg, time.Now(), zerolog.Nop())
+	backupPath, err = CreateBackup(context.Background(), dbPath, cfg, time.Now(), zerolog.Nop())
 	require.NoError(t, err)
 	assert.Empty(t, backupPath, "disabled backup is a no-op")
 }
 
 func TestCreateBackup_MissingSource(t *testing.T) {
 	cfg := &BackupConfig{Enabled: true}
-	_, err := CreateBackup(filepath.Join(t.TempDir(), "missing.db"), cfg, time.Now(),
+	_, err := CreateBackup(context.Background(), filepath.Join(t.TempDir(), "missing.db"), cfg, time.Now(),
 		zerolog.Nop())
 	assert.Error(t, err)
 }
@@ -98,12 +99,12 @@ func TestCreateBackup_MissingSource(t *testing.T) {
 func TestVerifyBackupFile_RejectsCorruptFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "x.backup")
 	require.NoError(t, os.WriteFile(path, []byte("definitely not a sqlite database file"), 0o600))
-	require.Error(t, verifyBackupFile(path, zerolog.Nop()))
+	require.Error(t, verifyBackupFile(context.Background(), path, zerolog.Nop()))
 	_, err := os.Stat(path)
 	assert.True(t, os.IsNotExist(err), "an unverifiable backup is removed")
 
 	require.NoError(t, os.WriteFile(path, nil, 0o600))
-	assert.ErrorContains(t, verifyBackupFile(path, zerolog.Nop()), "empty")
+	assert.ErrorContains(t, verifyBackupFile(context.Background(), path, zerolog.Nop()), "empty")
 }
 
 func TestBackupFilename_MillisecondsRoundTrip(t *testing.T) {

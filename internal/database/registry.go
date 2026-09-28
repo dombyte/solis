@@ -12,12 +12,6 @@ import (
 // Migration is an alias for migrations.Migration for convenience.
 type Migration = migrations.Migration
 
-// ErrNotImplemented is an alias for migrations.ErrNotImplemented.
-var ErrNotImplemented = migrations.ErrNotImplemented
-
-// MigrationFunc is an alias for migrations.MigrationFunc.
-type MigrationFunc = migrations.MigrationFunc
-
 // MigrationRegistry manages a collection of migrations and tracks the current schema version.
 type MigrationRegistry struct {
 	mu         sync.RWMutex
@@ -70,9 +64,10 @@ const (
 	// Increment this constant when adding new migrations.
 	CurrentSchemaVersion = 3
 
-	// MinCompatibleVersion is the minimum schema version that this application version can work with.
-	// If a database has a version lower than this, migration will be required.
-	MinCompatibleVersion = 1
+	// MinCompatibleVersion is the oldest schema this version can migrate. The V1/V2
+	// migrations were removed in v3, so older databases must be upgraded with a v2
+	// release first.
+	MinCompatibleVersion = 2
 )
 
 // SchemaVersionTableSQL is an alias for migrations.SchemaVersionTableSQL.

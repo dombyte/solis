@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,8 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/dombyte/solis/internal/period"
 )
 
 func validConfig() AppConfig {
@@ -33,46 +32,19 @@ func TestValidate(t *testing.T) {
 		want   string
 	}{
 		{"valid", func(*AppConfig) {}, ""},
-		{"modbus rtu valid", func(c *AppConfig) {
-			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}
-		}, ""},
-		{"modbus scheme", func(c *AppConfig) { c.Modbus.Address = "udp://h:502" },
-			"must be tcp://host:port or rtu://<device>"},
-		{"modbus no scheme", func(c *AppConfig) { c.Modbus.Address = "h:502" },
-			"must be tcp://host:port or rtu://<device>"},
-		{"modbus host", func(c *AppConfig) { c.Modbus.Address = "tcp://:502" },
-			"host:port required"},
-		{"modbus port", func(c *AppConfig) { c.Modbus.Address = "tcp://h:70000" },
-			"tcp port \"70000\" must be 1-65535"},
-		{"modbus timeout", func(c *AppConfig) { c.Modbus.Timeout = 0 },
-			"timeout 0s must be positive"},
-		{"modbus parity", func(c *AppConfig) {
-			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
-				Parity: "X"}
-		}, "invalid parity"},
-		{"modbus data bits", func(c *AppConfig) {
-			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
-				DataBits: 9}
-		}, "data_bits 9"},
-		{"modbus stop bits", func(c *AppConfig) {
-			c.Modbus = ModbusSettings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
-				StopBits: 3}
-		}, "stop_bits 3"},
 		{"app debug", func(c *AppConfig) { c.App.Debug = "DEBG" }, "invalid debug level"},
 		{"app debug lower", func(c *AppConfig) { c.App.Debug = "warn" }, ""},
 		{"app timeout", func(c *AppConfig) { c.App.Timeout = 0 }, "app timeout"},
-		{"poll timeout vs grace", func(c *AppConfig) { c.Poller.PollTimeout = 15 * time.Second },
-			"poll_timeout 15s must be below 3 x poller.interval"},
 		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
 		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be positive"},
 		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
 		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poll_timeout"},
-		{"rollover 12h", func(c *AppConfig) { c.Rollover.Time = "11:59 PM" }, "invalid rollover"},
-		{"rollover 24:00", func(c *AppConfig) { c.Rollover.Time = "24:00" }, "invalid rollover"},
 		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
 		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "error_retention"},
-		{"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
-			"daily_retention"},
+		{
+			"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
+			"daily_retention",
+		},
 		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "synchronous"},
 		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "temp_store"},
 		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "max_backups"},
@@ -93,15 +65,29 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestRolloverParsed(t *testing.T) {
-	r := RolloverSettings{Time: "23:59"}
-	p, err := r.Parsed()
-	require.NoError(t, err)
-	assert.Equal(t, "23:59", p.String())
-
+func TestValidate_Rules(t *testing.T) {
+	errRule := errors.New("rule failed")
+	var seen *AppConfig
 	cfg := validConfig()
-	cfg.Rollover.Time = "9:05"
-	assert.ErrorIs(t, cfg.Validate(), period.ErrInvalidRollover)
+	pass := func(c *AppConfig) error { seen = c; return nil }
+	require.NoError(t, cfg.Validate(pass))
+	assert.Same(t, &cfg, seen, "rules get the config being validated")
+
+	err := cfg.Validate(pass, func(*AppConfig) error { return errRule })
+	require.ErrorIs(t, err, ErrInvalidConfig)
+	assert.ErrorIs(t, err, errRule)
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve)
+	assert.Equal(t, "rule", ve.Section)
+}
+
+func TestValidate_NamesSection(t *testing.T) {
+	cfg := validConfig()
+	cfg.Poller.Interval = 0
+	var ve *ValidationError
+	require.ErrorAs(t, cfg.Validate(), &ve)
+	assert.Equal(t, "poller", ve.Section)
+	assert.EqualError(t, ve, "invalid config: poller: poller interval must be positive")
 }
 
 func writeConfig(t *testing.T, content string) string {
@@ -207,6 +193,11 @@ func TestLoadConfig_Errors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read config file")
 
-	_, err = LoadConfig(writeConfig(t, "rollover:\n  time: 11:59 PM\n"))
+	_, err = LoadConfig(writeConfig(t, "app:\n  port: 0\n"))
 	assert.ErrorIs(t, err, ErrInvalidConfig)
+
+	errRule := errors.New("rule failed")
+	_, err = LoadConfig(writeConfig(t, "app:\n  port: 8080\n"),
+		func(*AppConfig) error { return errRule })
+	assert.ErrorIs(t, err, errRule)
 }

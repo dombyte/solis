@@ -12,13 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 const interval = 10 * time.Second // sweep 5s, healthy 30s, start 50s, recovering 100s
 
 var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
 
+// fakeComp is a stateful Component fake (beats, start gate, stop order) driven by the
+// supervisor goroutines; an expectation mock (mocks.MockComponent) cannot model that.
 type fakeComp struct {
 	name     string
 	state    atomic.Int32
@@ -42,6 +44,7 @@ func (f *fakeComp) Start(context.Context) error {
 	f.started.Store(true)
 	return f.startErr
 }
+
 func (f *fakeComp) Stop() error {
 	if !f.started.Load() {
 		f.stopEarly.Store(true)
@@ -74,8 +77,10 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	clk := clocktest.New(t0)
-	return &harness{t: t, clk: clk, sup: New(context.Background(), interval, clk, zerolog.Nop()),
-		comps: make(map[string][]*fakeComp)}
+	return &harness{
+		t: t, clk: clk, sup: New(context.Background(), interval, clk, zerolog.Nop()),
+		comps: make(map[string][]*fakeComp),
+	}
 }
 
 func (h *harness) factory(name string, mk func() *fakeComp) Factory {

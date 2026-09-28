@@ -2,6 +2,9 @@ module github.com/dombyte/solis
 
 go 1.26.3
 
+// frontend dependencies ship stray Go packages (e.g. flatted); keep them out of ./...
+ignore ./frontend/node_modules
+
 require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-viper/mapstructure/v2 v2.5.0

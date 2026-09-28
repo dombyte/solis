@@ -39,10 +39,16 @@ func TestApplyNet(t *testing.T) {
 		values Values
 		want   Values
 	}{
-		{"positive", Values{"grid_export_monthly": 12.5, "grid_import_monthly": 2.5},
-			Values{"grid_energy_monthly": 10}},
-		{"negative net", Values{"grid_export_monthly": 1, "grid_import_monthly": 4.1},
-			Values{"grid_energy_monthly": -3.1}},
+		{
+			"positive",
+			Values{"grid_export_monthly": 12.5, "grid_import_monthly": 2.5},
+			Values{"grid_energy_monthly": 10},
+		},
+		{
+			"negative net",
+			Values{"grid_export_monthly": 1, "grid_import_monthly": 4.1},
+			Values{"grid_energy_monthly": -3.1},
+		},
 		{"missing import", Values{"grid_export_monthly": 1}, Values{}},
 		{"empty", Values{}, Values{}},
 	}
@@ -99,12 +105,18 @@ func TestBuildPlan_OpenPeriodsOnly(t *testing.T) {
 		ClosedThrough: "2026-08-04",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, []Job{{Level: period.Daily, Key: "2026-08-05", From: "2026-08-05",
-		To: "2026-08-05"}}, p.Days)
-	assert.Equal(t, []Job{{Level: period.Monthly, Key: "2026-08", From: "2026-08-01",
-		To: "2026-08-05"}}, p.Months)
-	assert.Equal(t, []Job{{Level: period.Yearly, Key: "2026", From: "2026-01-01",
-		To: "2026-08-05"}}, p.Years)
+	assert.Equal(t, []Job{{
+		Level: period.Daily, Key: "2026-08-05", From: "2026-08-05",
+		To: "2026-08-05",
+	}}, p.Days)
+	assert.Equal(t, []Job{{
+		Level: period.Monthly, Key: "2026-08", From: "2026-08-01",
+		To: "2026-08-05",
+	}}, p.Months)
+	assert.Equal(t, []Job{{
+		Level: period.Yearly, Key: "2026", From: "2026-01-01",
+		To: "2026-08-05",
+	}}, p.Years)
 }
 
 func TestBuildPlan_MonthAndYearClose(t *testing.T) {
@@ -115,8 +127,10 @@ func TestBuildPlan_MonthAndYearClose(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, p.Months, 2)
-	assert.Equal(t, Job{Level: period.Monthly, Key: "2026-12", From: "2026-12-01",
-		To: "2026-12-31", Freeze: true}, p.Months[0])
+	assert.Equal(t, Job{
+		Level: period.Monthly, Key: "2026-12", From: "2026-12-01",
+		To: "2026-12-31", Freeze: true,
+	}, p.Months[0])
 	assert.False(t, p.Months[1].Freeze)
 	require.Len(t, p.Years, 2)
 	assert.True(t, p.Years[0].Freeze)

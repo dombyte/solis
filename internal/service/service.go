@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
@@ -141,38 +142,45 @@ func (s *ReadService) requireStore(key string, want solis.Store) error {
 	return nil
 }
 
+// historyFunc reads the rows of key between start and end from one history table.
+type historyFunc[T any] func(ctx context.Context, key string, start, end time.Time) (T, error)
+
+// readHistory wraps get with the register-kind check for want and debug logging.
+func readHistory[T any](s *ReadService, want solis.Store, get historyFunc[T]) historyFunc[T] {
+	return func(ctx context.Context, key string, start, end time.Time) (T, error) {
+		if err := s.requireStore(key, want); err != nil {
+			var zero T
+			return zero, err
+		}
+		s.d.Log.Debug().Str("key", key).Stringer("store", want).Time("start", start).
+			Time("end", end).Msg("getting history")
+		return get(ctx, key, start, end)
+	}
+}
+
 // DailyHistory returns daily rows of a daily key.
 func (s *ReadService) DailyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.DailyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreDaily); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting daily history")
-	return s.d.Store.GetDailyHistory(ctx, key, start, end)
+	[]*history.DailyDataPoint, error,
+) {
+	return readHistory(s, solis.StoreDaily, s.d.Store.GetDailyHistory)(ctx, key, start, end)
 }
 
 // MonthlyHistory returns monthly rows of a monthly key.
 func (s *ReadService) MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.MonthlyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreMonthly); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting monthly history")
-	return s.d.Store.GetMonthlyHistory(ctx, key, start, end)
+	[]*history.MonthlyDataPoint, error,
+) {
+	return readHistory(s, solis.StoreMonthly, s.d.Store.GetMonthlyHistory)(ctx, key, start, end)
 }
 
 // YearlyHistory returns yearly rows of a yearly key.
 func (s *ReadService) YearlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*storage.YearlyDataPoint, error) {
-	if err := s.requireStore(key, solis.StoreYearly); err != nil {
-		return nil, err
-	}
-	s.d.Log.Debug().Str("key", key).Str("start", start.Format(time.RFC3339)).Str("end", end.Format(time.RFC3339)).Msg("getting yearly history")
-	return s.d.Store.GetYearlyHistory(ctx, key, start, end)
+	[]*history.YearlyDataPoint, error,
+) {
+	return readHistory(s, solis.StoreYearly, s.d.Store.GetYearlyHistory)(ctx, key, start, end)
 }
 
 // Total returns the stored lifetime value of a total key.
-func (s *ReadService) Total(ctx context.Context, key string) (*storage.TotalDataPoint, error) {
+func (s *ReadService) Total(ctx context.Context, key string) (*history.TotalDataPoint, error) {
 	if err := s.requireStore(key, solis.StoreTotal); err != nil {
 		return nil, err
 	}
@@ -215,13 +223,16 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 	}
 	// Cleared states (no active bits) are kept: "fault cleared" is history too.
 	for _, p := range points {
-		out.History = append(out.History, StatusEntry{Timestamp: p.Timestamp,
-			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue))})
+		out.History = append(out.History, StatusEntry{
+			Timestamp:     p.Timestamp,
+			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue)),
+		})
 	}
 	if v := s.d.Cache.Get(key); v != nil && v.StatusDecoded != nil && !lastIs(points, v) {
 		out.History = append(out.History, StatusEntry{
 			Timestamp:     v.Timestamp.UTC().Format(period.TimestampLayout),
-			StatusDecoded: v.StatusDecoded})
+			StatusDecoded: v.StatusDecoded,
+		})
 	}
 	// Both sources use period.TimestampLayout, so string order is time order.
 	sort.SliceStable(out.History, func(i, j int) bool {
@@ -232,7 +243,7 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 
 // lastIs reports whether the newest stored change already records the cached state
 // (the usual case: the poller stores every change), so it is not listed twice.
-func lastIs(points []*storage.ErrorDataPoint, v *solis.Value) bool {
+func lastIs(points []*history.ErrorDataPoint, v *solis.Value) bool {
 	return len(points) > 0 && points[len(points)-1].RawValue == v.RawValue
 }
 

@@ -21,8 +21,8 @@ import (
 	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/http/handlers"
-	"github.com/dombyte/solis/internal/http/routes"
+	"github.com/dombyte/solis/internal/http/httphandler"
+	"github.com/dombyte/solis/internal/http/router"
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/maintenance"
@@ -31,7 +31,7 @@ import (
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 	"github.com/dombyte/solis/internal/websocket"
 )
 
@@ -42,7 +42,7 @@ const probeTimeout = 2 * time.Second
 type App struct {
 	cfg   *config.AppConfig
 	log   zerolog.Logger
-	clock utils.Clock
+	clock util.Clock
 
 	lock    *maintenance.Lock
 	reg     *solis.Registry
@@ -59,7 +59,7 @@ type App struct {
 // shuts down gracefully. It returns nil on a clean shutdown and the wrapped
 // health.ErrHealthFatal (or a startup error) otherwise, so main() restarts the app.
 func Run(ctx context.Context, cfg *config.AppConfig, root zerolog.Logger) (err error) {
-	a := &App{cfg: cfg, log: logging.Component(root, "app"), clock: utils.NewRealClock()}
+	a := &App{cfg: cfg, log: logging.Component(root, "app"), clock: util.NewRealClock()}
 	defer func() { err = errors.Join(err, a.close()) }()
 	if err := a.build(ctx, root); err != nil {
 		return err
@@ -92,14 +92,18 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 	}
 	a.log.Debug().Msg("registry created")
 	st := &a.cfg.Storage
-	a.dbm = database.NewManager(st, &database.BackupConfig{Enabled: st.EnableBackup,
-		MaxBackups: st.MaxBackups, BackupInterval: st.BackupInterval}, a.clock,
+	a.dbm = database.NewManager(DatabaseSettings(*st), &database.BackupConfig{
+		Enabled:    st.EnableBackup,
+		MaxBackups: st.MaxBackups, BackupInterval: st.BackupInterval,
+	}, a.clock,
 		logging.Component(root, "database"))
 	if err := a.dbm.Prepare(ctx); err != nil {
 		return fmt.Errorf("app: prepare database: %w", err)
 	}
 	a.log.Debug().Msg("database prepared")
-	if a.store, err = storage.New(st, a.reg, a.clock, logging.Component(root, "storage")); err != nil {
+	a.store, err = storage.New(ctx, StorageSettings(*st), a.reg, a.clock,
+		logging.Component(root, "storage"))
+	if err != nil {
 		return err
 	}
 	a.log.Debug().Msg("storage created")
@@ -132,39 +136,49 @@ const (
 )
 
 func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
-	roll, err := a.cfg.Rollover.Parsed()
+	roll, err := period.ParseRollover(a.cfg.Rollover.Time)
 	if err != nil {
 		return err
 	}
 	iv := a.cfg.Poller.Interval
 	a.sup = health.New(ctx, iv, a.clock, logging.Component(root, "health"))
-	reader := &utils.Slot[poller.Reader]{}
-	a.sup.Manage(nameModbus, CreateModbus(a.cfg.Modbus, iv, reader, a.clock,
+	reader := &util.Slot[poller.Reader]{}
+	a.sup.Manage(nameModbus, CreateModbus(modbusSettings(a.cfg.Modbus), iv, reader, a.clock,
 		logging.Component(root, nameModbus)))
-	a.sup.Manage(namePoller, CreatePoller(poller.Deps{Settings: a.cfg.Poller, Rollover: roll,
+	a.sup.Manage(namePoller, CreatePoller(poller.Deps{
+		Settings: pollerSettings(a.cfg.Poller), Rollover: roll,
 		Source: reader, Store: a.store, Cache: a.cache, Bus: a.bus, Decoder: a.decoder,
 		Registry: a.reg, Clock: a.clock, Timeout: a.cfg.App.Timeout,
-		Log: logging.Component(root, namePoller)}))
-	a.sup.Manage(nameAggregator, CreateAggregator(aggregator.Deps{Store: a.store, Cache: a.cache,
+		Log: logging.Component(root, namePoller),
+	}))
+	a.sup.Manage(nameAggregator, CreateAggregator(aggregator.Deps{
+		Store: a.store, Cache: a.cache,
 		Bus: a.bus, Registry: a.reg, Clock: a.clock, PollInterval: iv, Timeout: a.cfg.App.Timeout,
-		Log: logging.Component(root, nameAggregator)}))
+		Log: logging.Component(root, nameAggregator),
+	}))
 	return nil
 }
 
 func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
-	hubs := &utils.Slot[*websocket.Hub]{}
-	a.sup.Manage(nameHub, CreateHub(websocket.HubDeps{Bus: a.bus, Cache: a.cache, Keys: a.reg,
+	hubs := &util.Slot[*websocket.Hub]{}
+	a.sup.Manage(nameHub, CreateHub(websocket.HubDeps{
+		Bus: a.bus, Cache: a.cache, Keys: a.reg,
 		Clock: a.clock, PollInterval: a.cfg.Poller.Interval,
-		Log: logging.Component(root, nameHub)}, hubs))
-	svc := service.NewReadService(service.Deps{Store: a.store, Cache: a.cache, Health: a.sup,
-		Registry: a.reg, Decoder: a.decoder, Log: logging.Component(root, "service")})
+		Log: logging.Component(root, nameHub),
+	}, hubs))
+	svc := service.NewReadService(service.Deps{
+		Store: a.store, Cache: a.cache, Health: a.sup,
+		Registry: a.reg, Decoder: a.decoder, Log: logging.Component(root, "service"),
+	})
 	httpLog := logging.Component(root, "http")
-	router := routes.SetupRoutes(routes.Deps{
-		Handlers: handlers.HandlerDeps{Service: svc, Errors: handlers.NewErrorMapper(httpLog),
-			Clock: a.clock, Timeout: a.cfg.App.Timeout},
+	mux := router.SetupRoutes(router.Deps{
+		Handlers: httphandler.HandlerDeps{
+			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
+			Clock: a.clock, Timeout: a.cfg.App.Timeout,
+		},
 		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,
 	})
-	a.http = server.New(&a.cfg.App, router, httpLog)
+	a.http = server.New(serverSettings(a.cfg.App), mux, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
 	a.sup.Watch("eventbus", a.busProbe)
 	a.sup.Watch("http", a.http.Probe)

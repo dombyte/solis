@@ -46,16 +46,23 @@ packages:
       HealthSnapshotter:
       Registry:
       StatusDecoder:
-  github.com/dombyte/solis/internal/http/handlers:
+  github.com/dombyte/solis/internal/http/httphandler:
     interfaces:
       ReadService:
   github.com/dombyte/solis/internal/database:
     interfaces:
       Cleaner:
+  github.com/dombyte/solis/internal/database/migrations:
+    interfaces:
+      Migration:
+  github.com/dombyte/solis/internal/maintenance:
+    interfaces:
+      Store:
+      Registry:
   github.com/dombyte/solis/internal/solis:
     interfaces:
       Lookup:
-  github.com/dombyte/solis/internal/utils:
+  github.com/dombyte/solis/internal/util:
     interfaces:
       Clock:
       Timer:

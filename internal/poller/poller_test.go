@@ -15,14 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/cache"
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 const pollEvery = 5 * time.Second
@@ -99,9 +98,11 @@ func newEnv(t *testing.T, start time.Time) *env {
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
-	cfg := &config.StorageSettings{Path: filepath.Join(t.TempDir(), "s.db"),
-		Synchronous: "NORMAL", TempStore: "MEMORY"}
-	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
+	cfg := storage.Settings{
+		Path:        filepath.Join(t.TempDir(), "s.db"),
+		Synchronous: "NORMAL", TempStore: "MEMORY",
+	}
+	st, err := storage.New(context.Background(), cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 	bus := eventbus.New()
@@ -109,17 +110,21 @@ func newEnv(t *testing.T, start time.Time) *env {
 	require.NoError(t, err)
 	t.Cleanup(unsub)
 
-	e := &env{t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
-		events: events}
-	var src utils.Slot[Reader]
+	e := &env{
+		t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
+		events: events,
+	}
+	var src util.Slot[Reader]
 	src.Store(e.dev)
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Recovering, mock.Anything).Maybe()
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
 	roll := rollover(t, "23:59")
 	e.p, err = New(Deps{
-		Settings: config.PollerSettings{Interval: pollEvery, BlockAttempts: 1,
-			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second},
+		Settings: Settings{
+			Interval: pollEvery, BlockAttempts: 1,
+			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second,
+		},
 		Rollover: roll, Source: &src, Store: st, Cache: countingCache{e.cache, &e.polls},
 		Bus: bus, Decoder: solis.NewDecoder(reg, zerolog.Nop()), Registry: reg, Clock: clk,
 		Timeout: time.Second, Reporter: rep, Log: zerolog.Nop(),
@@ -273,7 +278,8 @@ func TestPoll_MidnightRolloverEmitsPeriodClosed(t *testing.T) {
 
 	// A late write for the closed day is rejected by storage (not by the poller).
 	err := e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
-		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 99}}})
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 99},
+	}})
 	assert.ErrorIs(t, err, storage.ErrPeriodClosed)
 
 	// At window end the remaining keys are force-closed.
@@ -287,7 +293,8 @@ func TestPoll_MidnightRolloverEmitsPeriodClosed(t *testing.T) {
 func TestPoll_ColdStartSeedsFromStorage(t *testing.T) {
 	e := newEnv(t, time.Date(2026, 8, 6, 0, 10, 0, 0, time.Local))
 	require.NoError(t, e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
-		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300}}}))
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300},
+	}}))
 	e.dev.set(33035, 2) // 0.2 after the inverter reset
 	e.start()
 	e.waitPolls(1)
@@ -317,6 +324,7 @@ func TestPoll_SeedFailureIsRecovering(t *testing.T) {
 func TestNewAndStop(t *testing.T) {
 	_, err := New(Deps{})
 	assert.ErrorIs(t, err, ErrMissingDependency)
+	assert.EqualError(t, err, "poller: missing dependency: Source")
 	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	require.NoError(t, e.p.Stop()) // never started
 	require.NoError(t, e.p.Stop())

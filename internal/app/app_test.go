@@ -33,12 +33,15 @@ type inverter struct {
 func (d *inverter) HandleCoils(*sv.CoilsRequest) ([]bool, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
 func (d *inverter) HandleDiscreteInputs(*sv.DiscreteInputsRequest) ([]bool, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
 func (d *inverter) HandleHoldingRegisters(*sv.HoldingRegistersRequest) ([]uint16, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
 func (d *inverter) HandleInputRegisters(req *sv.InputRegistersRequest) ([]uint16, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -60,15 +63,21 @@ func freePort(t *testing.T) int {
 func testConfig(t *testing.T, modbusPort, httpPort int) *config.AppConfig {
 	return &config.AppConfig{
 		App: config.AppSettings{Debug: "ERROR", Port: httpPort, Timeout: 5 * time.Second},
-		Poller: config.PollerSettings{Interval: 300 * time.Millisecond, BlockAttempts: 1,
-			BlockRetryDelay: 10 * time.Millisecond, PollTimeout: 2 * time.Second},
-		Modbus: config.ModbusSettings{Address: "tcp://127.0.0.1:" + strconv.Itoa(modbusPort),
-			SlaveID: 1, Timeout: time.Second},
+		Poller: config.PollerSettings{
+			Interval: 300 * time.Millisecond, BlockAttempts: 1,
+			BlockRetryDelay: 10 * time.Millisecond, PollTimeout: 2 * time.Second,
+		},
+		Modbus: config.ModbusSettings{
+			Address: "tcp://127.0.0.1:" + strconv.Itoa(modbusPort),
+			SlaveID: 1, Timeout: time.Second,
+		},
 		Rollover: config.RolloverSettings{Time: "23:59"},
-		Storage: config.StorageSettings{Path: filepath.Join(t.TempDir(), "solis.db"),
+		Storage: config.StorageSettings{
+			Path:           filepath.Join(t.TempDir(), "solis.db"),
 			DailyRetention: time.Hour * 24 * 365, ErrorRetention: time.Hour * 24 * 30,
 			WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY", EnableBackup: false,
-			CleanupInterval: time.Hour},
+			CleanupInterval: time.Hour,
+		},
 	}
 }
 
@@ -92,8 +101,10 @@ func TestEndToEnd_PollAggregateServe(t *testing.T) {
 		33171: 5,    // grid_import_daily 0.5
 	}}
 	mport := freePort(t)
-	srv, err := sv.NewServer(&sv.ServerConfiguration{URL: "tcp://127.0.0.1:" + strconv.Itoa(mport),
-		Timeout: time.Second, MaxClients: 2}, dev)
+	srv, err := sv.NewServer(&sv.ServerConfiguration{
+		URL:     "tcp://127.0.0.1:" + strconv.Itoa(mport),
+		Timeout: time.Second, MaxClients: 2,
+	}, dev)
 	require.NoError(t, err)
 	require.NoError(t, srv.Start())
 	defer func() { _ = srv.Stop() }()
@@ -146,8 +157,10 @@ func expectWSUpdate(t *testing.T, dev *inverter, hport int) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	defer func() { _ = conn.Close() }()
-	require.NoError(t, conn.WriteJSON(map[string]any{"type": "subscribe",
-		"keys": []string{"pv_total_power"}}))
+	require.NoError(t, conn.WriteJSON(map[string]any{
+		"type": "subscribe",
+		"keys": []string{"pv_total_power"},
+	}))
 	var frame map[string]any
 	require.NoError(t, conn.ReadJSON(&frame))
 	assert.Equal(t, "snapshot", frame["type"])

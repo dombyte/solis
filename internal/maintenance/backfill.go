@@ -28,6 +28,47 @@ var (
 	ErrPurgedHistory = errors.New("daily history incomplete")
 )
 
+// LockedError reports the lock file held by a running server or another job.
+type LockedError struct {
+	// Path is the lock file.
+	Path string
+}
+
+func (e *LockedError) Error() string { return fmt.Sprintf("%v: %s", ErrLocked, e.Path) }
+
+// Unwrap returns ErrLocked.
+func (e *LockedError) Unwrap() error { return ErrLocked }
+
+// ArgError reports an invalid job argument.
+type ArgError struct {
+	// Arg is the flag name, e.g. "--years".
+	Arg string
+	// Reason explains the constraint that failed.
+	Reason string
+}
+
+func (e *ArgError) Error() string {
+	return fmt.Sprintf("%v: %s %s", ErrInvalidArgs, e.Arg, e.Reason)
+}
+
+// Unwrap returns ErrInvalidArgs.
+func (e *ArgError) Unwrap() error { return ErrInvalidArgs }
+
+// PurgedHistoryError reports that retention deleted daily rows a job would need.
+type PurgedHistoryError struct {
+	// PurgedBefore is the first day that still has daily rows.
+	PurgedBefore string
+}
+
+func (e *PurgedHistoryError) Error() string {
+	return fmt.Sprintf("%v: daily rows before %s were removed by retention "+
+		"(storage.daily_retention); closed years can no longer be recomputed",
+		ErrPurgedHistory, e.PurgedBefore)
+}
+
+// Unwrap returns ErrPurgedHistory.
+func (e *PurgedHistoryError) Unwrap() error { return ErrPurgedHistory }
+
 // Store runs a backfill transaction.
 type Store interface {
 	Backfill(ctx context.Context, fn func(storage.BackfillTx) error) error
@@ -43,8 +84,8 @@ type Registry interface {
 // Env wires a backfill run. OpenStore is called only after the lock and the backup.
 type Env struct {
 	DBPath    string
-	Backup    func() (string, error)
-	OpenStore func() (Store, func() error, error)
+	Backup    func(ctx context.Context) (string, error)
+	OpenStore func(ctx context.Context) (Store, func() error, error)
 	Registry  Registry
 	Now       time.Time
 	Out       io.Writer
@@ -56,7 +97,7 @@ type Env struct {
 // when a closed year is touched) and prints the report. No backup, no write.
 func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 	if years < 0 {
-		return fmt.Errorf("%w: --years must be >= 0, got %d", ErrInvalidArgs, years)
+		return &ArgError{Arg: "--years", Reason: fmt.Sprintf("must be >= 0, got %d", years)}
 	}
 	lock, err := AcquireExclusive(env.DBPath)
 	if err != nil {
@@ -64,14 +105,14 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 	}
 	defer func() { err = errors.Join(err, lock.Release()) }()
 
-	backup, err := env.Backup()
+	backup, err := env.Backup(ctx)
 	if err != nil {
 		return fmt.Errorf("backup failed, nothing was written: %w", err)
 	}
 	if _, err := fmt.Fprintf(env.Out, "backup: %s\n", backup); err != nil {
 		return err
 	}
-	st, closeStore, err := env.OpenStore()
+	st, closeStore, err := env.OpenStore(ctx)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
@@ -92,7 +133,8 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 // Recompute rewrites monthly and yearly rows (always both) of the affected years and, if a
 // closed year is included, the total baseline. It returns the report lines.
 func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int) (
-	Report, error) {
+	Report, error,
+) {
 	var rep Report
 	if err := checkPurged(tx, now, years); err != nil {
 		return rep, err
@@ -128,15 +170,14 @@ func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
 		return err
 	}
 	if years > 0 || oldest+"-01-01" < purged {
-		return fmt.Errorf("%w: daily rows before %s were removed by retention "+
-			"(storage.daily_retention); closed years can no longer be recomputed",
-			ErrPurgedHistory, purged)
+		return &PurgedHistoryError{PurgedBefore: purged}
 	}
 	return nil
 }
 
 func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year string,
-	rep *Report) error {
+	rep *Report,
+) error {
 	months, err := monthsOf(year, now)
 	if err != nil {
 		return err
@@ -155,8 +196,10 @@ func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year 
 	if err != nil {
 		return err
 	}
-	return recomputePeriod(tx, reg, job{level: period.Yearly, key: year, from: first,
-		to: min(last, now.Day)}, rep)
+	return recomputePeriod(tx, reg, job{
+		level: period.Yearly, key: year, from: first,
+		to: min(last, now.Day),
+	}, rep)
 }
 
 // monthsOf lists the months of year up to the current month.
@@ -200,8 +243,10 @@ func recomputePeriod(tx storage.BackfillTx, reg Registry, j job, rep *Report) er
 		if err := tx.PutPeriod(l, key, p, vals[key]); err != nil {
 			return err
 		}
-		rep.add(Line{Level: l.String(), Key: key, Period: p, Old: old, HadOld: had,
-			New: vals[key], Unit: unitOf(reg, key)})
+		rep.add(Line{
+			Level: l.String(), Key: key, Period: p, Old: old, HadOld: had,
+			New: vals[key], Unit: unitOf(reg, key),
+		})
 	}
 	return nil
 }
@@ -224,8 +269,10 @@ func refreshBaseline(tx storage.BackfillTx, reg Registry, rep *Report) error {
 	next := aggregation.ApplyEdges(edges, sums)
 	for _, key := range sortedKeys(next) {
 		o, had := old[key]
-		rep.add(Line{Level: "total", Key: key, Period: "baseline", Old: o, HadOld: had,
-			New: next[key], Unit: unitOf(reg, key)})
+		rep.add(Line{
+			Level: "total", Key: key, Period: "baseline", Old: o, HadOld: had,
+			New: next[key], Unit: unitOf(reg, key),
+		})
 	}
 	return tx.PutBaseline(next)
 }

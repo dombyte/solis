@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 )
@@ -40,13 +41,14 @@ type AggregatorStore interface {
 // ReadStore is the read-only view used by the HTTP service.
 type ReadStore interface {
 	GetDailyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*DailyDataPoint, error)
+		[]*history.DailyDataPoint, error)
 	GetMonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*MonthlyDataPoint, error)
+		[]*history.MonthlyDataPoint, error)
 	GetYearlyHistory(ctx context.Context, key string, start, end time.Time) (
-		[]*YearlyDataPoint, error)
-	GetTotalHistory(ctx context.Context, key string) (*TotalDataPoint, error)
-	GetErrorHistory(ctx context.Context, key string, start, end time.Time) ([]*ErrorDataPoint, error)
+		[]*history.YearlyDataPoint, error)
+	GetTotalHistory(ctx context.Context, key string) (*history.TotalDataPoint, error)
+	GetErrorHistory(ctx context.Context, key string, start, end time.Time) (
+		[]*history.ErrorDataPoint, error)
 }
 
 // DailyRow is one daily max-write.

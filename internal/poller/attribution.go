@@ -82,7 +82,8 @@ func (d *DayAttributor) SeedDays(now time.Time) []string {
 // Seed initialises every key from stored rows (day -> key -> value) and the persisted
 // closed-day watermarks, so a restart inside the window compares correctly (spec §7.2).
 func (d *DayAttributor) Seed(now time.Time, rows map[string]map[string]float64,
-	closed map[string]string) {
+	closed map[string]string,
+) {
 	expected := d.roll.LastEnded(now).Opening
 	w, in := inWindow(d.roll, now)
 	for k, st := range d.keys {
@@ -139,15 +140,15 @@ func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribut
 
 // decreaseInWindow handles a decrease inside window w: a substantial decrease on the
 // closing day confirms the reset (one advance per window); anything else is discarded.
-func (st *keyState) decreaseInWindow(key string, v float64, w period.Window) Attribution {
-	if st.openDay != w.Closing {
+func (k *keyState) decreaseInWindow(key string, v float64, w period.Window) Attribution {
+	if k.openDay != w.Closing {
 		return Attribution{Decision: Discard, Warn: fmt.Sprintf(
-			"%s decreased %.2f -> %.2f after its reset in this window; ignored", key, st.base, v)}
+			"%s decreased %.2f -> %.2f after its reset in this window; ignored", key, k.base, v)}
 	}
-	if !isReset(st.base, v) {
+	if !isReset(k.base, v) {
 		return Attribution{Decision: Discard} // glitch dip inside the window
 	}
-	st.openDay, st.base = w.Opening, v
+	k.openDay, k.base = w.Opening, v
 	return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}
 }
 

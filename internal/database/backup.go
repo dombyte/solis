@@ -38,6 +38,9 @@ type BackupInfo struct {
 // "_mmm" so two backups within one second never share a file name.
 const backupStampLayout = "20060102_150405"
 
+// backupDirPerm is the permission of created backup directories (owner rwx, group rx).
+const backupDirPerm = 0o750
+
 // msPerSecond scales the millisecond suffix.
 const msPerSecond = int(time.Second / time.Millisecond)
 
@@ -82,11 +85,24 @@ func parseBackupStamp(stamp string) (time.Time, bool) {
 	if msPart == "" {
 		return t, true
 	}
-	ms, err := strconv.Atoi(strings.TrimPrefix(msPart, "_"))
-	if err != nil || !strings.HasPrefix(msPart, "_") || ms < 0 || ms >= msPerSecond {
+	ms, ok := parseBackupMillis(msPart)
+	if !ok {
 		return time.Time{}, false
 	}
 	return t.Add(time.Duration(ms) * time.Millisecond), true
+}
+
+// parseBackupMillis parses the "_mmm" millisecond suffix of a backup stamp.
+func parseBackupMillis(part string) (int, bool) {
+	digits, found := strings.CutPrefix(part, "_")
+	if !found {
+		return 0, false
+	}
+	ms, err := strconv.Atoi(digits)
+	if err != nil || ms < 0 || ms >= msPerSecond {
+		return 0, false
+	}
+	return ms, true
 }
 
 // backuper interface for accessing SQLite backup functionality.
@@ -97,8 +113,10 @@ type backuper interface {
 
 // createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API
 // and verifies the result with PRAGMA integrity_check.
-func createSQLiteBackup(sourcePath, destPath string, log zerolog.Logger) (err error) {
-	srcDB, err := openSourceDatabase(sourcePath)
+func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
+	log zerolog.Logger,
+) (err error) {
+	srcDB, err := openSourceDatabase(ctx, sourcePath)
 	if err != nil {
 		return err
 	}
@@ -106,7 +124,7 @@ func createSQLiteBackup(sourcePath, destPath string, log zerolog.Logger) (err er
 	if err := ensureDestinationDirectory(destPath); err != nil {
 		return err
 	}
-	conn, err := getDatabaseConnection(srcDB)
+	conn, err := getDatabaseConnection(ctx, srcDB)
 	if err != nil {
 		return err
 	}
@@ -114,7 +132,7 @@ func createSQLiteBackup(sourcePath, destPath string, log zerolog.Logger) (err er
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
 	}
-	return verifyBackupFile(destPath, log)
+	return verifyBackupFile(ctx, destPath, log)
 }
 
 // closeInto closes c and records its error in *err unless an earlier error is set.
@@ -125,14 +143,15 @@ func closeInto(err *error, c io.Closer, what string) {
 }
 
 // openSourceDatabase opens the source database for backup
-func openSourceDatabase(sourcePath string) (*sql.DB, error) {
+func openSourceDatabase(ctx context.Context, sourcePath string) (*sql.DB, error) {
 	srcDB, err := sql.Open("sqlite", sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open source database for backup: %w", err)
 	}
 
-	if err := srcDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping source database: %w", err)
+	if err := srcDB.PingContext(ctx); err != nil {
+		return nil, errors.Join(fmt.Errorf("failed to ping source database: %w", err),
+			srcDB.Close())
 	}
 
 	return srcDB, nil
@@ -142,7 +161,7 @@ func openSourceDatabase(sourcePath string) (*sql.DB, error) {
 func ensureDestinationDirectory(destPath string) error {
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0750); err != nil {
+		if err := os.MkdirAll(destDir, backupDirPerm); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
@@ -150,8 +169,8 @@ func ensureDestinationDirectory(destPath string) error {
 }
 
 // getDatabaseConnection gets a connection from the database
-func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
-	conn, err := db.Conn(context.Background())
+func getDatabaseConnection(ctx context.Context, db *sql.DB) (*sql.Conn, error) {
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database connection: %w", err)
 	}
@@ -190,8 +209,8 @@ func runBackup(driverConn any, destPath string) error {
 
 // verifyBackupFile opens the finished backup read-only and runs PRAGMA integrity_check;
 // a backup that is empty or not a sound SQLite database is removed and reported.
-func verifyBackupFile(destPath string, log zerolog.Logger) error {
-	err := checkBackupIntegrity(destPath)
+func verifyBackupFile(ctx context.Context, destPath string, log zerolog.Logger) error {
+	err := checkBackupIntegrity(ctx, destPath)
 	if err == nil {
 		return nil
 	}
@@ -201,7 +220,7 @@ func verifyBackupFile(destPath string, log zerolog.Logger) error {
 	return fmt.Errorf("backup verification failed: %w", err)
 }
 
-func checkBackupIntegrity(path string) (err error) {
+func checkBackupIntegrity(ctx context.Context, path string) (err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("backup file not found after creation: %w", err)
@@ -215,7 +234,7 @@ func checkBackupIntegrity(path string) (err error) {
 	}
 	defer closeInto(&err, db, "backup database")
 	var result string
-	if err := db.QueryRow("PRAGMA integrity_check").Scan(&result); err != nil {
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
 		return fmt.Errorf("integrity check: %w", err)
 	}
 	if result != "ok" {
@@ -226,8 +245,9 @@ func checkBackupIntegrity(path string) (err error) {
 
 // CreateBackup creates an integrity-checked backup copy of the database file; now names
 // the file.
-func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolog.Logger) (
-	string, error) {
+func CreateBackup(ctx context.Context, dbPath string, config *BackupConfig, now time.Time,
+	log zerolog.Logger,
+) (string, error) {
 	if !config.Enabled {
 		log.Info().Msg("Backup disabled, skipping backup creation")
 		return "", nil
@@ -238,15 +258,9 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 		return "", fmt.Errorf("database file does not exist: %s", dbPath)
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Ensure backups subdirectory exists
-	backupsDir := filepath.Join(dir, "backups")
-	if err := os.MkdirAll(backupsDir, 0750); err != nil {
+	// Ensure the backups subdirectory (and its parent) exists
+	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	if err := os.MkdirAll(backupsDir, backupDirPerm); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
 
@@ -256,7 +270,7 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 	log.Info().Str("source", dbPath).Str("destination", backupPath).Msg("creating backup")
 
 	// Create the backup using SQLite native backup API
-	if err := createSQLiteBackup(dbPath, backupPath, log); err != nil {
+	if err := createSQLiteBackup(ctx, dbPath, backupPath, log); err != nil {
 		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
 
@@ -266,7 +280,8 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).Msg("backup created successfully")
+	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).
+		Msg("backup created successfully")
 
 	return backupPath, nil
 }

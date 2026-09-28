@@ -8,7 +8,7 @@ import (
 
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 func TestStatus(t *testing.T) {

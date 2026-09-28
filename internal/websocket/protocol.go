@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Message types.
@@ -37,10 +37,10 @@ type ClientMessage struct {
 
 // ValueDTO is one key's value on the wire (rounded to two decimals).
 type ValueDTO struct {
-	Value         utils.Float64With2Decimals `json:"value"`
-	Timestamp     string                     `json:"timestamp,omitempty"`
-	Unit          string                     `json:"unit,omitempty"`
-	StatusDecoded any                        `json:"status_decoded,omitempty"`
+	Value         util.Float64With2Decimals `json:"value"`
+	Timestamp     string                    `json:"timestamp,omitempty"`
+	Unit          string                    `json:"unit,omitempty"`
+	StatusDecoded any                       `json:"status_decoded,omitempty"`
 }
 
 // SnapshotMessage answers a subscribe with the current values of the new keys.
@@ -67,7 +67,8 @@ type ErrorMessage struct {
 	Keys    []string `json:"keys,omitempty"`
 }
 
-// pushed is the per-client diff state of one key (value + status only, Plan.md D7).
+// pushed is the per-client diff state of one key: value + status only, because timestamps
+// change every poll.
 type pushed struct {
 	value  float64
 	status any
@@ -78,7 +79,7 @@ func (p pushed) equal(o pushed) bool {
 }
 
 func stateOf(v *solis.Value) pushed {
-	return pushed{value: utils.RoundTo2DecimalPlaces(v.DecodedValue), status: v.StatusDecoded}
+	return pushed{value: util.RoundTo2DecimalPlaces(v.DecodedValue), status: v.StatusDecoded}
 }
 
 // fullDTO is used in snapshots (timestamp + unit included).
@@ -92,7 +93,7 @@ func fullDTO(v *solis.Value) ValueDTO {
 // updateDTO is used in updates (value + status only).
 func updateDTO(v *solis.Value) ValueDTO {
 	return ValueDTO{
-		Value:         utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v.DecodedValue)),
+		Value:         util.Float64With2Decimals(util.RoundTo2DecimalPlaces(v.DecodedValue)),
 		StatusDecoded: v.StatusDecoded,
 	}
 }

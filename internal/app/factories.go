@@ -8,25 +8,27 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/aggregator"
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 	"github.com/dombyte/solis/internal/websocket"
 )
 
 // CreateModbus returns the factory of the restartable Modbus component. Each instance
-// publishes its client through slot so the poller never holds a stale reference (D11).
-func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
-	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger) health.Factory {
+// publishes its client through slot so the poller never holds a stale reference.
+func CreateModbus(settings modbus.Settings, interval time.Duration,
+	slot *util.Slot[poller.Reader], clock util.Clock, log zerolog.Logger,
+) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
-		c, err := modbus.New(cfg.ModbusClientSettings(), clock, log)
+		c, err := modbus.New(settings, clock, log)
 		if err != nil {
 			return nil, err
 		}
-		return &modbusComponent{Status: health.NewStatus(rep, clock), client: c, slot: slot,
-			interval: interval}, nil
+		return &modbusComponent{
+			Status: health.NewStatus(rep, clock), client: c, slot: slot,
+			interval: interval,
+		}, nil
 	}
 }
 
@@ -35,7 +37,7 @@ func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
 type modbusComponent struct {
 	*health.Status
 	client   *modbus.Client
-	slot     *utils.Slot[poller.Reader]
+	slot     *util.Slot[poller.Reader]
 	interval time.Duration
 
 	mu      sync.Mutex
@@ -107,7 +109,7 @@ func CreateAggregator(deps aggregator.Deps) health.Factory {
 
 // CreateHub returns the WebSocket hub factory; a started hub is published through slot
 // for the /ws handler and withdrawn on stop (clients reconnect to the next instance).
-func CreateHub(deps websocket.HubDeps, slot *utils.Slot[*websocket.Hub]) health.Factory {
+func CreateHub(deps websocket.HubDeps, slot *util.Slot[*websocket.Hub]) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
 		deps.Reporter = rep
 		h, err := websocket.NewHub(deps)
@@ -120,7 +122,7 @@ func CreateHub(deps websocket.HubDeps, slot *utils.Slot[*websocket.Hub]) health.
 
 type hubComponent struct {
 	*websocket.Hub
-	slot *utils.Slot[*websocket.Hub]
+	slot *util.Slot[*websocket.Hub]
 
 	mu      sync.Mutex
 	stopped bool

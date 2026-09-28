@@ -13,7 +13,7 @@ import (
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Hub timing constants.
@@ -48,7 +48,7 @@ type HubDeps struct {
 	Bus          eventbus.Subscriber
 	Cache        Snapshotter
 	Keys         KeySet
-	Clock        utils.Clock
+	Clock        util.Clock
 	PollInterval time.Duration
 	Reporter     health.Reporter
 	Log          zerolog.Logger
@@ -75,7 +75,7 @@ type Hub struct {
 type loopState struct {
 	clients map[*Client]*clientState
 	dirty   bool
-	flush   utils.Timer
+	flush   util.Timer
 }
 
 type clientState struct {
@@ -85,12 +85,15 @@ type clientState struct {
 
 // NewHub validates dependencies and returns a stopped hub.
 func NewHub(d HubDeps) (*Hub, error) {
-	required := []bool{d.Bus != nil, d.Cache != nil, d.Keys != nil, d.Clock != nil,
-		d.Reporter != nil, d.PollInterval > 0}
-	for _, ok := range required {
-		if !ok {
-			return nil, ErrMissingDependency
-		}
+	if err := util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "Bus", OK: d.Bus != nil},
+		util.Requirement{Name: "Cache", OK: d.Cache != nil},
+		util.Requirement{Name: "Keys", OK: d.Keys != nil},
+		util.Requirement{Name: "Clock", OK: d.Clock != nil},
+		util.Requirement{Name: "Reporter", OK: d.Reporter != nil},
+		util.Requirement{Name: "PollInterval", OK: d.PollInterval > 0},
+	); err != nil {
+		return nil, err
 	}
 	return &Hub{
 		Status: health.NewStatus(d.Reporter, d.Clock), d: d,
@@ -179,8 +182,10 @@ func (h *Hub) do(op func(*loopState)) bool {
 func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 	h.d.Log.Debug().Dur("interval", h.d.PollInterval).Msg("websocket hub loop started")
 	defer close(h.done)
-	ls := &loopState{clients: make(map[*Client]*clientState),
-		flush: h.d.Clock.NewTimer(time.Hour)}
+	ls := &loopState{
+		clients: make(map[*Client]*clientState),
+		flush:   h.d.Clock.NewTimer(time.Hour),
+	}
 	ls.flush.Stop()
 	defer ls.closeAll()
 	beat := h.d.Clock.NewTicker(h.d.PollInterval)
@@ -192,14 +197,8 @@ func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 		case op := <-h.ops:
 			op(ls)
 		case e := <-events:
-			kind := "unknown"
-			switch e.Kind {
-			case eventbus.ValuesUpdated:
-				kind = "ValuesUpdated"
-			case eventbus.PeriodClosed:
-				kind = "PeriodClosed"
-			}
-			h.d.Log.Debug().Str("kind", kind).Str("domain", e.Domain).Int("keys", len(e.Keys)).Msg("websocket event received")
+			h.d.Log.Debug().Stringer("kind", e.Kind).Str("domain", e.Domain).
+				Int("keys", len(e.Keys)).Msg("websocket event received")
 			ls.onEvent(e)
 			h.events.Add(1)
 		case <-ls.flush.C():
@@ -213,15 +212,15 @@ func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 }
 
 // onEvent marks the state dirty and arms one coalescing flush.
-func (ls *loopState) onEvent(e eventbus.Event) {
-	if e.Kind == eventbus.ValuesUpdated && !ls.dirty {
-		ls.dirty = true
-		ls.flush.Reset(FlushDelay)
+func (l *loopState) onEvent(e eventbus.Event) {
+	if e.Kind == eventbus.ValuesUpdated && !l.dirty {
+		l.dirty = true
+		l.flush.Reset(FlushDelay)
 	}
 }
 
-func (ls *loopState) closeAll() {
-	for c := range ls.clients {
+func (l *loopState) closeAll() {
+	for c := range l.clients {
 		c.close()
 	}
 }
@@ -242,15 +241,18 @@ func (h *Hub) handle(clients map[*Client]*clientState, c *Client, msg ClientMess
 		}
 	case TypePing:
 	default:
-		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeBadRequest,
-			Message: "unknown message type " + msg.Type})
+		h.send(clients, c, ErrorMessage{
+			Type: TypeError, Code: CodeBadRequest,
+			Message: "unknown message type " + msg.Type,
+		})
 	}
 }
 
 // subscribe adds known keys and answers with a snapshot of the newly added ones;
 // unknown keys get an error frame and never drop the connection.
 func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientState,
-	keys []string) {
+	keys []string,
+) {
 	var added, unknown []string
 	for _, k := range keys {
 		if _, ok := h.d.Keys.ByKey(k); !ok {
@@ -263,8 +265,10 @@ func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientS
 		}
 	}
 	if len(unknown) > 0 {
-		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeUnknownKeys,
-			Message: "unknown keys ignored", Keys: unknown})
+		h.send(clients, c, ErrorMessage{
+			Type: TypeError, Code: CodeUnknownKeys,
+			Message: "unknown keys ignored", Keys: unknown,
+		})
 	}
 	snap := SnapshotMessage{Type: TypeSnapshot, Values: map[string]ValueDTO{}}
 	for k, v := range h.d.Cache.GetMultiple(added) {
@@ -288,22 +292,22 @@ func (h *Hub) flush(clients map[*Client]*clientState) {
 }
 
 // diff returns the changed and removed subscribed keys and records them as pushed.
-func (st *clientState) diff(current map[string]*solis.Value) UpdateMessage {
+func (c *clientState) diff(current map[string]*solis.Value) UpdateMessage {
 	upd := UpdateMessage{Values: map[string]ValueDTO{}}
-	for k := range st.subs {
+	for k := range c.subs {
 		v, ok := current[k]
 		if !ok {
-			if _, seen := st.last[k]; seen {
-				delete(st.last, k)
+			if _, seen := c.last[k]; seen {
+				delete(c.last, k)
 				upd.Removed = append(upd.Removed, k)
 			}
 			continue
 		}
 		s := stateOf(v)
-		if prev, seen := st.last[k]; seen && prev.equal(s) {
+		if prev, seen := c.last[k]; seen && prev.equal(s) {
 			continue
 		}
-		st.last[k] = s
+		c.last[k] = s
 		upd.Values[k] = updateDTO(v)
 	}
 	sort.Strings(upd.Removed)

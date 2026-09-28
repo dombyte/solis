@@ -15,7 +15,8 @@ const writerPoller = "poller"
 // day closes. Rows violating the write domain or a closed day are skipped and reported
 // in the returned (joined) error; the rest of the poll is still committed.
 func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
-	s.log.Debug().Int("daily", len(w.Daily)).Int("status", len(w.Status)).Int("closes", len(w.Close)).Msg("write poll starting")
+	s.log.Debug().Int("daily", len(w.Daily)).Int("status", len(w.Status)).
+		Int("closes", len(w.Close)).Msg("write poll starting")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.meta.clone()
@@ -59,8 +60,10 @@ func (s *Storage) writeDaily(tx *sql.Tx, m *metaState, r DailyRow) error {
 		return err
 	}
 	if reg.Store != solis.StoreDaily || reg.Net {
-		return &WriteDomainError{Writer: writerPoller, Key: r.Key,
-			Reason: "only non-net daily registers belong to the poller"}
+		return &WriteDomainError{
+			Writer: writerPoller, Key: r.Key,
+			Reason: "only non-net daily registers belong to the poller",
+		}
 	}
 	if closed := m.closedDaily[r.Key]; r.Day <= closed {
 		return &PeriodClosedError{Level: "daily", Key: r.Key, Period: r.Day, ClosedThrough: closed}
@@ -133,7 +136,8 @@ func (s *Storage) Seed(ctx context.Context, days []string) (Seed, error) {
 
 // dailyRows loads the rows of the requested (consecutive) days in one range query.
 func (s *Storage) dailyRows(ctx context.Context, days []string) (map[string]map[string]float64,
-	error) {
+	error,
+) {
 	out := make(map[string]map[string]float64, len(days))
 	if len(days) == 0 {
 		return out, nil

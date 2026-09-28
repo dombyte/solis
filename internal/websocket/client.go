@@ -9,7 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 const (
@@ -17,8 +17,10 @@ const (
 	writeWait = 10 * time.Second
 	// pongWait is the time allowed to read the next pong.
 	pongWait = 60 * time.Second
-	// pingPeriod must be less than pongWait.
-	pingPeriod = (pongWait * 9) / 10
+	// pingPeriod must be less than pongWait (90 % of it).
+	pingPeriod = pongWait - pongWait/pingMarginDivisor
+	// pingMarginDivisor leaves a tenth of pongWait for the pong to arrive.
+	pingMarginDivisor = 10
 	// maxMessageSize bounds client frames (subscriptions are small).
 	maxMessageSize = 64 * 1024
 	// sendBuffer is the per-client outgoing queue; a full queue disconnects the client.
@@ -30,7 +32,7 @@ type Client struct {
 	hub    *Hub
 	conn   *websocket.Conn
 	send   chan []byte
-	clock  utils.Clock
+	clock  util.Clock
 	log    zerolog.Logger
 	once   sync.Once
 	closed chan struct{}
@@ -38,8 +40,10 @@ type Client struct {
 }
 
 func newClient(h *Hub, conn *websocket.Conn) *Client {
-	c := &Client{hub: h, conn: conn, send: make(chan []byte, sendBuffer), clock: h.d.Clock,
-		log: h.d.Log, closed: make(chan struct{})}
+	c := &Client{
+		hub: h, conn: conn, send: make(chan []byte, sendBuffer), clock: h.d.Clock,
+		log: h.d.Log, closed: make(chan struct{}),
+	}
 	c.touch()
 	return c
 }

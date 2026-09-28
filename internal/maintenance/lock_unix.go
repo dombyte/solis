@@ -47,7 +47,7 @@ func acquire(dbPath string, how int) (*Lock, error) {
 	if err := syscall.Flock(int(f.Fd()), how|syscall.LOCK_NB); err != nil { // #nosec G115
 		_ = f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, fmt.Errorf("%w: %s", ErrLocked, path)
+			return nil, &LockedError{Path: path}
 		}
 		return nil, fmt.Errorf("maintenance: flock %s: %w", path, err)
 	}

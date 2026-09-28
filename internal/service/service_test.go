@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/service/mocks"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
 	storagemocks "github.com/dombyte/solis/internal/storage/mocks"
 )
 
@@ -40,8 +40,10 @@ func newFixture(t *testing.T) fixture {
 		cache: mocks.NewMockCacheReader(t),
 		hlth:  mocks.NewMockHealthSnapshotter(t),
 	}
-	f.svc = NewReadService(Deps{Store: f.store, Cache: f.cache, Health: f.hlth, Registry: reg,
-		Decoder: solis.NewDecoder(reg, zerolog.Nop()), Log: zerolog.Nop()})
+	f.svc = NewReadService(Deps{
+		Store: f.store, Cache: f.cache, Health: f.hlth, Registry: reg,
+		Decoder: solis.NewDecoder(reg, zerolog.Nop()), Log: zerolog.Nop(),
+	})
 	return f
 }
 
@@ -78,7 +80,7 @@ func TestCurrent(t *testing.T) {
 
 func TestHistoryKindChecks(t *testing.T) {
 	f := newFixture(t)
-	day := []*storage.DailyDataPoint{{Date: "2026-08-05", Value: 1}}
+	day := []*history.DailyDataPoint{{Date: "2026-08-05", Value: 1}}
 	f.store.EXPECT().GetDailyHistory(ctx, "pv_energy_daily", t0, t0).Return(day, nil).Once()
 	got, err := f.svc.DailyHistory(ctx, "pv_energy_daily", t0, t0)
 	require.NoError(t, err)
@@ -101,7 +103,7 @@ func TestHistoryKindChecks(t *testing.T) {
 
 func TestTotal(t *testing.T) {
 	f := newFixture(t)
-	dp := &storage.TotalDataPoint{Value: 5}
+	dp := &history.TotalDataPoint{Value: 5}
 	f.store.EXPECT().GetTotalHistory(ctx, "pv_energy_total").Return(dp, nil).Once()
 	got, err := f.svc.Total(ctx, "pv_energy_total")
 	require.NoError(t, err)
@@ -123,12 +125,14 @@ func TestTotal(t *testing.T) {
 func TestStatusHistory(t *testing.T) {
 	f := newFixture(t)
 	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", mock.Anything, mock.Anything).
-		Return([]*storage.ErrorDataPoint{
+		Return([]*history.ErrorDataPoint{
 			{Timestamp: "2026-08-01T10:00:00Z", RawValue: 1},
 			{Timestamp: "2026-08-02T10:00:00Z", RawValue: 0},
 		}, nil).Once()
-	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{Timestamp: t0, RawValue: 2,
-		StatusDecoded: []string{"Grid overvoltage"}}).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+		Timestamp: t0, RawValue: 2,
+		StatusDecoded: []string{"Grid overvoltage"},
+	}).Once()
 
 	h, err := f.svc.StatusHistory(ctx, "grid_fault_1")
 	require.NoError(t, err)
@@ -141,10 +145,14 @@ func TestStatusHistory(t *testing.T) {
 
 	// A cached state that equals the newest stored change is not listed twice.
 	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", mock.Anything, mock.Anything).
-		Return([]*storage.ErrorDataPoint{{Timestamp: "2026-08-02T10:00:00.000Z",
-			RawValue: 1}}, nil).Once()
-	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{Timestamp: t0, RawValue: 1,
-		StatusDecoded: []string{"No grid"}}).Once()
+		Return([]*history.ErrorDataPoint{{
+			Timestamp: "2026-08-02T10:00:00.000Z",
+			RawValue:  1,
+		}}, nil).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+		Timestamp: t0, RawValue: 1,
+		StatusDecoded: []string{"No grid"},
+	}).Once()
 	h, err = f.svc.StatusHistory(ctx, "grid_fault_1")
 	require.NoError(t, err)
 	assert.Len(t, h.History, 1)

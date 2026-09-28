@@ -14,12 +14,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
 	"github.com/dombyte/solis/internal/storage/mocks"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var (
@@ -61,24 +60,24 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) open(t *testing.T) *storage.Storage {
 	t.Helper()
-	cfg := &config.StorageSettings{Path: f.path, Synchronous: "NORMAL", TempStore: "MEMORY"}
-	st, err := storage.New(cfg, f.reg, clocktest.New(now), zerolog.Nop())
+	cfg := storage.Settings{Path: f.path, Synchronous: "NORMAL", TempStore: "MEMORY"}
+	st, err := storage.New(context.Background(), cfg, f.reg, clocktest.New(now), zerolog.Nop())
 	require.NoError(t, err)
 	return st
 }
 
-func (f *fixture) env(t *testing.T, backup func() (string, error)) Env {
+func (f *fixture) env(t *testing.T, backup func(context.Context) (string, error)) Env {
 	return Env{
 		DBPath: f.path, Backup: backup, Registry: f.reg, Now: now, Out: &f.out,
 		Log: zerolog.Nop(),
-		OpenStore: func() (Store, func() error, error) {
+		OpenStore: func(context.Context) (Store, func() error, error) {
 			st := f.open(t)
 			return st, st.Close, nil
 		},
 	}
 }
 
-func okBackup() (string, error) { return "backups/solis.db.x.backup", nil }
+func okBackup(context.Context) (string, error) { return "backups/solis.db.x.backup", nil }
 
 func monthly(t *testing.T, f *fixture, key, month string) float64 {
 	t.Helper()
@@ -150,11 +149,14 @@ func TestBackfill_RefusesWhileAppRuns(t *testing.T) {
 	defer func() { _ = server.Release() }()
 
 	backupCalled := false
-	err = RunBackfill(bg, f.env(t, func() (string, error) {
+	err = RunBackfill(bg, f.env(t, func(context.Context) (string, error) {
 		backupCalled = true
-		return okBackup()
+		return okBackup(bg)
 	}), 0)
 	require.ErrorIs(t, err, ErrLocked)
+	var le *LockedError
+	require.ErrorAs(t, err, &le)
+	assert.Equal(t, LockPath(f.path), le.Path)
 	assert.False(t, backupCalled)
 
 	// Conversely the server cannot start while a job holds the exclusive lock.
@@ -170,8 +172,8 @@ func TestBackfill_RefusesWhileAppRuns(t *testing.T) {
 func TestBackfill_NoBackupNoWrite(t *testing.T) {
 	f := newFixture(t)
 	opened := false
-	env := f.env(t, func() (string, error) { return "", errors.New("disk full") })
-	env.OpenStore = func() (Store, func() error, error) {
+	env := f.env(t, func(context.Context) (string, error) { return "", errors.New("disk full") })
+	env.OpenStore = func(context.Context) (Store, func() error, error) {
 		opened = true
 		return nil, nil, errors.New("unreachable")
 	}
@@ -184,22 +186,35 @@ func TestBackfill_NoBackupNoWrite(t *testing.T) {
 
 func TestBackfill_InvalidArgsAndOpenError(t *testing.T) {
 	f := newFixture(t)
-	assert.ErrorIs(t, RunBackfill(bg, f.env(t, okBackup), -1), ErrInvalidArgs)
+	err := RunBackfill(bg, f.env(t, okBackup), -1)
+	assert.ErrorIs(t, err, ErrInvalidArgs)
+	var ae *ArgError
+	require.ErrorAs(t, err, &ae)
+	assert.Equal(t, "--years", ae.Arg)
+	assert.EqualError(t, ae, "invalid arguments: --years must be >= 0, got -1")
 	env := f.env(t, okBackup)
-	env.OpenStore = func() (Store, func() error, error) { return nil, nil, errors.New("x") }
+	env.OpenStore = func(context.Context) (Store, func() error, error) { return nil, nil, errors.New("x") }
 	assert.Error(t, RunBackfill(bg, env, 0))
 }
 
 func TestReportFormatAndCounts(t *testing.T) {
 	r := Report{Lines: []Line{
-		{Level: "monthly", Key: "pv_energy_monthly", Period: "2026-08", Old: 412.3, HadOld: true,
-			New: 409.87, Unit: "kWh"},
-		{Level: "monthly", Key: "grid_energy_monthly", Period: "2026-08", Old: -3.1, HadOld: true,
-			New: -3.42, Unit: "kWh"},
-		{Level: "yearly", Key: "pv_energy_yearly", Period: "2025", Old: 5230, HadOld: true,
-			New: 4980.22, Unit: "kWh"},
-		{Level: "yearly", Key: "grid_import_yearly", Period: "2025", Old: 1, HadOld: true,
-			New: 1.001, Unit: "kWh"},
+		{
+			Level: "monthly", Key: "pv_energy_monthly", Period: "2026-08", Old: 412.3, HadOld: true,
+			New: 409.87, Unit: "kWh",
+		},
+		{
+			Level: "monthly", Key: "grid_energy_monthly", Period: "2026-08", Old: -3.1, HadOld: true,
+			New: -3.42, Unit: "kWh",
+		},
+		{
+			Level: "yearly", Key: "pv_energy_yearly", Period: "2025", Old: 5230, HadOld: true,
+			New: 4980.22, Unit: "kWh",
+		},
+		{
+			Level: "yearly", Key: "grid_import_yearly", Period: "2025", Old: 1, HadOld: true,
+			New: 1.001, Unit: "kWh",
+		},
 	}}
 	var b bytes.Buffer
 	require.NoError(t, r.Write(&b))
@@ -234,9 +249,26 @@ func TestCheckPurged(t *testing.T) {
 			err := checkPurged(tx, now, tt.years)
 			if tt.refused {
 				assert.ErrorIs(t, err, ErrPurgedHistory)
+				var pe *PurgedHistoryError
+				require.ErrorAs(t, err, &pe)
+				assert.Equal(t, tt.purged, pe.PurgedBefore)
 				return
 			}
 			assert.NoError(t, err)
 		})
 	}
+}
+
+func TestRecompute_Errors(t *testing.T) {
+	reg := newFixture(t).reg
+
+	tx := mocks.NewMockBackfillTx(t)
+	tx.EXPECT().PurgedBefore().Return("9999-01-01")
+	_, err := Recompute(tx, reg, period.Of(now), 0)
+	assert.ErrorIs(t, err, ErrPurgedHistory)
+
+	tx = mocks.NewMockBackfillTx(t)
+	tx.EXPECT().PurgedBefore().Return("")
+	_, err = Recompute(tx, reg, period.Period{Year: "x"}, 0)
+	assert.ErrorIs(t, err, period.ErrInvalidKey)
 }

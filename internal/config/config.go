@@ -13,14 +13,30 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/modbus"
-	"github.com/dombyte/solis/internal/period"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // ErrInvalidConfig is wrapped by every validation failure.
 var ErrInvalidConfig = errors.New("invalid config")
+
+// ValidationError names the settings section (or "rule") that failed validation.
+type ValidationError struct {
+	// Section is "app", "poller", "storage" or "rule".
+	Section string
+	// Err is the underlying validation failure.
+	Err error
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("%v: %s: %v", ErrInvalidConfig, e.Section, e.Err)
+}
+
+// Unwrap exposes ErrInvalidConfig and the underlying failure to errors.Is/As.
+func (e *ValidationError) Unwrap() []error { return []error{ErrInvalidConfig, e.Err} }
+
+// Rule is an extra validation injected by the composition root for settings whose rules
+// are owned by other packages (Modbus address, rollover time, health grace).
+type Rule func(*AppConfig) error
 
 // removedKeys are settings that v3 ignores; their presence is reported as a warning.
 func removedKeys() map[string]string {
@@ -128,11 +144,18 @@ type StorageSettings struct {
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 }
 
+// Numeric defaults (string and duration defaults are self-describing in setDefaults).
+const (
+	defaultPort          = 8080
+	defaultBlockAttempts = 3
+	defaultMaxBackups    = 3
+)
+
 // setDefaults configures default values for Viper.
 func setDefaults(v *viper.Viper) {
 	defaults := map[string]any{
-		"app.debug": "INFO", "app.port": 8080, "app.timeout": "30s",
-		"poller.interval": "30s", "poller.block_attempts": 3,
+		"app.debug": "INFO", "app.port": defaultPort, "app.timeout": "30s",
+		"poller.interval": "30s", "poller.block_attempts": defaultBlockAttempts,
 		"poller.block_retry_delay": "1s", "poller.block_interval": "0s",
 		"poller.poll_timeout": "30s",
 		"modbus.address":      "tcp://192.168.1.100:502",
@@ -142,7 +165,7 @@ func setDefaults(v *viper.Viper) {
 		"storage.daily_retention": "1y", "storage.error_retention": "1y",
 		"storage.wal_mode": true, "storage.synchronous": "NORMAL",
 		"storage.temp_store":    "MEMORY",
-		"storage.enable_backup": true, "storage.max_backups": 3,
+		"storage.enable_backup": true, "storage.max_backups": defaultMaxBackups,
 		"storage.backup_interval": "24h", "storage.cleanup_interval": "24h",
 	}
 	for k, val := range defaults {
@@ -152,8 +175,9 @@ func setDefaults(v *viper.Viper) {
 
 // LoadConfig loads configuration from a YAML file and environment variables.
 // Environment variables use the SOLIS_ prefix with underscores (e.g. SOLIS_MODBUS_ADDRESS).
-// A missing file falls back to defaults; an invalid configuration is an error.
-func LoadConfig(configPath string) (*AppConfig, error) {
+// A missing file falls back to defaults; an invalid configuration (including a failed
+// rule) is an error.
+func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
 	v.SetConfigFile(configPath)
@@ -162,13 +186,9 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	setDefaults(v)
 
-	var warnings []string
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
-		warnings = append(warnings, "config file not found, using defaults")
+	warnings, err := readConfigFile(v)
+	if err != nil {
+		return nil, err
 	}
 
 	var cfg AppConfig
@@ -176,42 +196,53 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 		durationHook, mapstructure.StringToSliceHookFunc(",")))); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	for key, why := range removedKeys() {
-		if v.InConfig(key) {
-			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
-		}
-	}
-	cfg.Warnings = warnings
+	cfg.Warnings = append(warnings, removedKeyWarnings(v)...)
 
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Validate(rules...); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-// Validate validates every settings section.
-func (c *AppConfig) Validate() error {
-	validators := []interface{ Validate() error }{
-		&c.Modbus, &c.App, &c.Poller, &c.Rollover, &c.Storage,
+// readConfigFile reads the config file; a missing file is a warning, not an error.
+func readConfigFile(v *viper.Viper) ([]string, error) {
+	err := v.ReadInConfig()
+	if err == nil {
+		return nil, nil
 	}
-	for _, v := range validators {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
-		}
+	var notFound viper.ConfigFileNotFoundError
+	if !errors.As(err, &notFound) && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-	if err := c.validatePollTimeout(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
-	}
-	return nil
+	return []string{"config file not found, using defaults"}, nil
 }
 
-// validatePollTimeout keeps one poll cycle inside the supervisor's healthy grace: the
-// poller beats at cycle start and end, so a longer cycle would restart a working poller.
-func (c *AppConfig) validatePollTimeout() error {
-	grace := health.HealthyGraceFactor * c.Poller.Interval
-	if c.Poller.PollTimeout >= grace {
-		return fmt.Errorf("poll_timeout %s must be below %d x poller.interval (%s)",
-			c.Poller.PollTimeout, health.HealthyGraceFactor, grace)
+// removedKeyWarnings lists removed settings that are still present in the file.
+func removedKeyWarnings(v *viper.Viper) []string {
+	var warnings []string
+	for key, why := range removedKeys() {
+		if v.InConfig(key) {
+			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
+		}
+	}
+	return warnings
+}
+
+// Validate validates every settings section, then applies rules.
+func (c *AppConfig) Validate(rules ...Rule) error {
+	sections := []struct {
+		name string
+		v    interface{ Validate() error }
+	}{{"app", &c.App}, {"poller", &c.Poller}, {"storage", &c.Storage}}
+	for _, s := range sections {
+		if err := s.v.Validate(); err != nil {
+			return &ValidationError{Section: s.name, Err: err}
+		}
+	}
+	for _, r := range rules {
+		if err := r(c); err != nil {
+			return &ValidationError{Section: "rule", Err: err}
+		}
 	}
 	return nil
 }
@@ -222,18 +253,7 @@ func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
 	if !ok || to != reflect.TypeFor[time.Duration]() {
 		return data, nil
 	}
-	return utils.ParseDuration(s)
-}
-
-// ModbusClientSettings converts the section into the Modbus client's settings.
-func (m *ModbusSettings) ModbusClientSettings() modbus.Settings {
-	return modbus.Settings{Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
-		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits}
-}
-
-// Validate validates Modbus configuration (the client's own rules, checked at startup).
-func (m *ModbusSettings) Validate() error {
-	return m.ModbusClientSettings().Validate()
+	return util.ParseDuration(s)
 }
 
 // Validate validates App configuration.
@@ -270,17 +290,6 @@ func (p *PollerSettings) Validate() error {
 	return nil
 }
 
-// Validate validates the rollover time (strict 24-hour HH:MM, hard failure otherwise).
-func (r *RolloverSettings) Validate() error {
-	_, err := period.ParseRollover(r.Time)
-	return err
-}
-
-// Parsed returns the parsed rollover time; call only after Validate succeeded.
-func (r *RolloverSettings) Parsed() (period.Rollover, error) {
-	return period.ParseRollover(r.Time)
-}
-
 // Validate validates Storage configuration.
 func (s *StorageSettings) Validate() error {
 	if s.Path == "" {
@@ -311,7 +320,8 @@ func (s *StorageSettings) validateRetention() error {
 		name string
 		d    time.Duration
 	}{
-		{"daily_retention", s.DailyRetention}, {"error_retention", s.ErrorRetention},
+		{"daily_retention", s.DailyRetention},
+		{"error_retention", s.ErrorRetention},
 		{"cleanup_interval", s.CleanupInterval},
 	}
 	for _, d := range durations {

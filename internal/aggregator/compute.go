@@ -35,8 +35,10 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	rs := &runState{write: storage.ComputedWrite{At: now}, current: aggregation.Values{},
-		base: st.Baseline, baseYr: st.BaselineYear}
+	rs := &runState{
+		write: storage.ComputedWrite{At: now}, current: aggregation.Values{},
+		base: st.Baseline, baseYr: st.BaselineYear,
+	}
 	steps := []func(context.Context, period.Period, aggregation.Plan, *runState) error{
 		a.netDays, a.months, a.years, a.totals,
 	}
@@ -62,7 +64,8 @@ func isLag(err error) bool {
 
 // sums runs one SQL sum per daily source key.
 func (a *Aggregator) sums(ctx context.Context, sources []string, from, to string) (
-	aggregation.Values, error) {
+	aggregation.Values, error,
+) {
 	out := make(aggregation.Values, len(sources))
 	for _, k := range sources {
 		v, err := a.d.Store.SumDaily(ctx, k, from, to)
@@ -76,7 +79,8 @@ func (a *Aggregator) sums(ctx context.Context, sources []string, from, to string
 
 // netDays recomputes net daily rows (export - import of the stored daily rows).
 func (a *Aggregator) netDays(ctx context.Context, p period.Period, plan aggregation.Plan,
-	rs *runState) error {
+	rs *runState,
+) error {
 	pairs := a.d.Registry.NetPairs(period.Daily)
 	var keys []string
 	for _, n := range pairs {
@@ -94,7 +98,8 @@ func (a *Aggregator) netDays(ctx context.Context, p period.Period, plan aggregat
 
 // months recomputes every open month (and freezes the ones fully closed).
 func (a *Aggregator) months(ctx context.Context, p period.Period, plan aggregation.Plan,
-	rs *runState) error {
+	rs *runState,
+) error {
 	for _, j := range plan.Months {
 		vals, _, err := a.levelValues(ctx, period.Monthly, j)
 		if err != nil {
@@ -107,7 +112,8 @@ func (a *Aggregator) months(ctx context.Context, p period.Period, plan aggregati
 
 // years recomputes every open year; a fully closed year also folds into the baseline.
 func (a *Aggregator) years(ctx context.Context, p period.Period, plan aggregation.Plan,
-	rs *runState) error {
+	rs *runState,
+) error {
 	for _, j := range plan.Years {
 		vals, sums, err := a.levelValues(ctx, period.Yearly, j)
 		if err != nil {
@@ -125,7 +131,8 @@ func (a *Aggregator) years(ctx context.Context, p period.Period, plan aggregatio
 
 // levelValues computes a month or year: edge sums plus net values from the same sums.
 func (a *Aggregator) levelValues(ctx context.Context, l period.Level, j aggregation.Job) (
-	aggregation.Values, aggregation.Values, error) {
+	aggregation.Values, aggregation.Values, error,
+) {
 	edges := a.d.Registry.Edges(l)
 	sums, err := a.sums(ctx, aggregation.SourceKeys(edges), j.From, j.To)
 	if err != nil {
@@ -138,7 +145,8 @@ func (a *Aggregator) levelValues(ctx context.Context, l period.Level, j aggregat
 
 // totals composes baseline + daily rows since the last folded year (never closes).
 func (a *Aggregator) totals(ctx context.Context, p period.Period, _ aggregation.Plan,
-	rs *runState) error {
+	rs *runState,
+) error {
 	from := ""
 	if rs.baseYr != "" {
 		next, err := period.AddYears(rs.baseYr, 1)
@@ -161,10 +169,13 @@ func (a *Aggregator) totals(ctx context.Context, p period.Period, _ aggregation.
 // collect adds rows (and a freeze) for a job; values of the current period also go to
 // the cache.
 func (a *Aggregator) collect(rs *runState, j aggregation.Job, current string,
-	vals aggregation.Values) {
+	vals aggregation.Values,
+) {
 	for k, v := range vals {
-		rs.write.Rows = append(rs.write.Rows, storage.PeriodRow{Level: j.Level, Key: k,
-			Period: j.Key, Value: v})
+		rs.write.Rows = append(rs.write.Rows, storage.PeriodRow{
+			Level: j.Level, Key: k,
+			Period: j.Key, Value: v,
+		})
 	}
 	if j.Freeze {
 		rs.write.Freezes = append(rs.write.Freezes, storage.Freeze{Level: j.Level, Period: j.Key})
@@ -184,8 +195,10 @@ func (a *Aggregator) values(vals aggregation.Values, at time.Time) map[string]*s
 		if !ok {
 			continue
 		}
-		out[k] = &solis.Value{Key: k, Name: reg.Name, Unit: reg.Unit, Timestamp: at,
-			RawValue: v / reg.Scale, DecodedValue: v}
+		out[k] = &solis.Value{
+			Key: k, Name: reg.Name, Unit: reg.Unit, Timestamp: at,
+			RawValue: v / reg.Scale, DecodedValue: v,
+		}
 	}
 	return out
 }

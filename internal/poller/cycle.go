@@ -13,19 +13,22 @@ import (
 
 // readAll reads every planned block within PollTimeout; a partial poll is discarded.
 func (p *Poller) readAll(ctx context.Context, r Reader, at time.Time) (
-	map[string]*solis.Value, error) {
+	map[string]*solis.Value, error,
+) {
 	pctx, cancel := context.WithTimeout(ctx, p.d.Settings.PollTimeout)
 	defer cancel()
 	values := make(map[string]*solis.Value)
 	blocks := p.d.Registry.Blocks()
-	p.d.Log.Debug().Int("blocks", len(blocks)).Dur("timeout", p.d.Settings.PollTimeout).Msg("read all blocks starting")
+	p.d.Log.Debug().Int("blocks", len(blocks)).Dur("timeout", p.d.Settings.PollTimeout).
+		Msg("read all blocks starting")
 	for i, b := range blocks {
 		raw, err := p.readBlock(pctx, r, b)
 		if err != nil {
 			return nil, fmt.Errorf("block %d@%d: %w", i+1, b.Start, err)
 		}
 		p.Beat() // a slow but working cycle must not look stale to the supervisor
-		p.d.Log.Debug().Int("block", i+1).Uint16("addr", b.Start).Uint16("count", b.Count).Msg("block read")
+		p.d.Log.Debug().Int("block", i+1).Uint16("addr", b.Start).Uint16("count", b.Count).
+			Msg("block read")
 		for k, v := range p.d.Decoder.DecodeBlock(b, raw, at) {
 			values[k] = v
 		}
@@ -101,7 +104,8 @@ func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, no
 // attribute builds the daily rows and the cache view; discarded daily values keep the
 // last accepted value in the cache (the cache stays the comparison base).
 func (p *Poller) attribute(values map[string]*solis.Value, now time.Time) (
-	storage.PollWrite, map[string]*solis.Value) {
+	storage.PollWrite, map[string]*solis.Value,
+) {
 	var w storage.PollWrite
 	cacheVals := make(map[string]*solis.Value, len(values))
 	for k, v := range values {
@@ -123,8 +127,10 @@ func (p *Poller) attribute(values map[string]*solis.Value, now time.Time) (
 			}
 			continue
 		}
-		w.Daily = append(w.Daily, storage.DailyRow{Key: k, Day: a.Day, Value: v.DecodedValue,
-			Raw: v.RawValue})
+		w.Daily = append(w.Daily, storage.DailyRow{
+			Key: k, Day: a.Day, Value: v.DecodedValue,
+			Raw: v.RawValue,
+		})
 		p.lastDaily[k] = v
 		cacheVals[k] = v
 	}
@@ -159,8 +165,10 @@ func (p *Poller) committed(w storage.PollWrite) {
 			continue
 		}
 		p.markEmitted(c.Day)
-		p.d.Bus.Publish(eventbus.Event{Kind: eventbus.PeriodClosed, Day: c.Day,
-			At: p.d.Clock.Now()})
+		p.d.Bus.Publish(eventbus.Event{
+			Kind: eventbus.PeriodClosed, Day: c.Day,
+			At: p.d.Clock.Now(),
+		})
 		p.d.Log.Info().Str("day", c.Day).Msg("period closed")
 	}
 }

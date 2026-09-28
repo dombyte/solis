@@ -7,26 +7,26 @@ Solis Monitor polls a Solis hybrid inverter over Modbus (TCP or RTU), stores dai
 status/fault changes in SQLite, computes monthly/yearly/total values itself, and serves a React
 dashboard (REST + WebSocket) from the same Go binary.
 
-- **v3 is in progress.** The authoritative design is `ref/solis-monitor-v3-refactor-specification(3).md`;
-  the implementation plan, spec decisions (D1–D15) and phase order are in `Plan.md`.
+- **v3 is implemented.** The original design is `ref/solis-monitor-v3-refactor-specification(3).md`;
+  where the code deviates from it on purpose, the reason is under "Design Decisions (v3)" below.
 - The dashboard power-flow reference is `ref/solis-v3-dashboard-power-flow-diagram-prototype.tsx`
   (layout/geometry/colors/animation; emoji icons are placeholders for lucide-react).
-- Where this file and the spec disagree, the spec + `Plan.md` decisions win; update this file.
-- Cross-project Go standard: `ref/Arch_Plan.md` (DI, factories, zero global state, error
-  handling, testing, tooling). All new/changed Go code must comply; `Plan.md` §7 maps each rule
-  to the v3 design and lists the open confirmations (A1–A7).
+- This file is self-contained: every rule that applies to this repository is written here.
+  When code and this file disagree, fix one of them in the same change.
 
 ## Tools
-go run github.com/fzipp/gocyclo/cmd/gocyclo@latest -ignore "(?:.*_test\.go|.*test.*\.go|frontend)" .
-go run github.com/securego/gosec/v2/cmd/gosec@v2.23.0 ./...
-go run github.com/gordonklaus/ineffassign@latest ./...
-go run golang.org/x/tools/cmd/deadcode@latest ./...
-go run honnef.co/go/tools/cmd/staticcheck@latest ./...
-golangci-lint run --config .golangci.yml
+```bash
+./scripts/pre-commit.sh                    # runs everything below except mockery (make check)
+golangci-lint fmt --config .golangci.yml   # gofumpt + goimports (local prefix github.com/dombyte/solis)
+golangci-lint run --config .golangci.yml   # incl. gocyclo (<8), revive function-length (40),
+                                           # mnd, gosec, staticcheck, ineffassign, misspell,
+                                           # govet, lll, gochecknoglobals, forbidigo
+go run golang.org/x/tools/cmd/deadcode@latest -test ./...   # unused exported code
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...       # known vulnerabilities
 go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.yaml
-go run github.com/client9/misspell/cmd/misspell@latest -w . -j 200
-go fmt ./...
-go vet ./...
+```
+CI (`.github/workflows/checks.yml`) runs the same checks plus mock drift and the frontend
+checks; the pre-commit script is run by hand (`make check`), not installed as a git hook.
 
 ---
 
@@ -42,13 +42,13 @@ go vet ./...
 
 ## Project Structure
 
-v3 target layout (packages marked *new* are created during the v3 phases, see `Plan.md`):
+Package layout (packages marked *new* were added in v3):
 
 ```
 cmd/                     main.go (subcommand dispatch + restart loop), serve.go, backfill.go
 internal/
   app/           *new*   composition root: Create* factories, health adapters, logger wiring
-  config/                YAML/env config, Validate() methods (incl. strict rollover.time HH:MM)
+  config/                YAML/env config, structural Validate(); domain rules injected by app
   period/        *new*   Period (day/month/year keys from one captured instant), rollover window
   eventbus/      *new*   event bus (ValuesUpdated, PeriodClosed), non-blocking, per-subscriber policy
   health/        *new*   supervisor, component contract, restart budget, ErrHealthFatal, snapshot
@@ -59,12 +59,14 @@ internal/
   aggregator/            event-driven runner (debounce/heartbeat/catch-up) using aggregation
   cache/                 latest values; publishes change events; ReplaceDomain/Merge
   storage/               sole SQLite owner; PollerStore/AggregatorStore/ReadStore; closed periods
+  history/       *new*   history read-model rows (daily/monthly/yearly/total/status data points)
   database/              manager: migrations (incl. V3 meta table), backups, retention cleanup
   websocket/             subscription protocol, per-client diff, same-origin upgrader
   service/               ReadService for HTTP (cache + ReadStore + health snapshot)
-  http/{handlers,routes,server}/
+  http/{httphandler,middleware,router,server}/
   maintenance/   *new*   CLI jobs (backfill): flock, backup, recompute, report
-  logging/, utils/       zerolog constructor (no global logger); math, Clock, Slot[T]
+  logging/, util/        zerolog constructor (no global logger); math, Clock, Slot[T],
+                         DependencyError/RequireAll
   <pkg>/mocks/           mockery-generated mocks (never hand-edit)
 frontend/                React 19 + Vite + Tailwind 4 + zustand SPA
 docs/                    Swagger UI + openapi.yaml
@@ -77,19 +79,22 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 
 ### Config Package (`internal/config/`)
 - Load configuration from YAML files
-- Validate configuration on startup
-- Provide typed config structs (AppConfig, ModbusConfig, ServerConfig)
+- Validate configuration on startup: structural checks in `Validate()`; rules owned by other
+  packages (Modbus address, strict `rollover.time` HH:MM, poll timeout vs health grace) are
+  `config.Rule`s passed in by `app.ConfigRules()`
+- Provide typed config structs (AppConfig, ModbusSettings, …); config imports no domain
+  package, and `app` maps sections onto each package's own `Settings`
 
 ### HTTP Package (`internal/http/`)
 
-#### Handler Package (`internal/http/handler/`)
+#### Handler Package (`internal/http/httphandler/`)
 - Implement HTTP handlers as `func(http.Handler) http.Handler`
 - Handle request/response cycle
 - Call service layer for business logic
 - Return consistent error responses
 - **Do NOT** contain business logic
 
-#### Routes Package (`internal/http/routes/`)
+#### Router Package (`internal/http/router/`)
 - Define all HTTP routes using Chi router
 - Group related routes together
 - Centralize route definitions
@@ -121,7 +126,7 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 - Computed register definitions (daily→monthly/yearly/total maps, net export/import pairs)
 - Read-block planning from addressed registers (`PlanBlocks`)
 - Decoding (`DecodeRegister`, status/fault maps) and derived values (`DeriveValues`, e.g. `battery_power_signed`)
-- everything not Solis specific which is more generic should be in utils
+- everything not Solis specific which is more generic should be in util
 - **Do NOT** contain Modbus client logic (belongs in modbus package)
 
 ### Poller Package (`internal/poller/`)
@@ -172,7 +177,7 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 - Out-of-band CLI jobs (`solis backfill --years N`); never starts server, poller or hub
 - Exclusive flock next to the DB, verified backup before any write, per-period report
 
-### Utils Package (`internal/utils/`)
+### Util Package (`internal/util/`)
 - Common utility functions (e.g., error handling, logging helpers)
 - Data transformation utilities
 - Data type handling (Uint16, Int16, Uint32, Int32, Float32, String, Bool)
@@ -187,7 +192,7 @@ Each package has one clear purpose. Each file has one clear responsibility.
 ### 2. Dependency Direction
 Dependencies flow downward:
 ```
-routes → handlers → services → models
+router → httphandler → service → models
 ```
 HTTP layer depends on service layer, not vice versa.
 
@@ -198,12 +203,15 @@ poller     → solis, period, eventbus, health(Reporter) + own interfaces (Store
 aggregator → aggregation, solis, period, eventbus, health(Reporter) + own Store, Cache
 websocket  → eventbus, solis, health(Reporter) + own Snapshotter
 cache      → eventbus, solis
-storage    → solis, period
-modbus     → stdlib + simonvetter only (external layer: no config/health/logging-global imports)
+storage    → solis, period, history
+history    → util only (shared by storage, service, httphandler)
+config     → util only; imported only by cmd and app (every other package declares its
+             own Settings struct, mapped from config in internal/app/config_mapping.go)
+modbus     → stdlib + simonvetter + util (Clock) only (external layer: no config/health/logging)
 service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
 app        → everything (composition root)
 ```
-Forbidden: poller ↔ aggregator, cache → websocket, handlers → storage/modbus, anything → cmd/app.
+Forbidden: poller ↔ aggregator, cache → websocket, httphandler → storage/modbus, anything → cmd/app.
 
 Interfaces are declared by the consumer (except the storage interfaces in
 `storage/interfaces.go`, as the spec asks) and every interface has a mockery mock.
@@ -215,9 +223,11 @@ Avoid circular imports between packages. Use interfaces for decoupling.
 Each package exposes a clean, minimal public API. Internal details stay unexported.
 
 ### 5. Avoid Global State
-Use dependency injection instead of global variables. Zero tolerance (Arch_Plan): no
-package-level loggers, caches, upgraders or lookup maps in new/changed code — build them in a
-constructor (e.g. `solis.NewRegistry()`, `solis.NewDecoder()`) and inject them.
+Use dependency injection instead of global variables. Zero tolerance (enforced by
+`gochecknoglobals`; only `Err…` sentinels are allowed): no package-level loggers, caches,
+upgraders or lookup maps — build them in a constructor (e.g. `solis.NewRegistry()`,
+`solis.NewDecoder()`) and inject them. Dependencies are injected as interfaces declared by the
+consumer; only `internal/app` names concrete types and creates them (`Create*` factories).
 
 ### 6. Testable Components
 Design packages to be easily testable in isolation. Use interfaces for external dependencies.
@@ -232,14 +242,14 @@ Log errors with component context and the wrapped error; never log secrets.
 
 - ❌ **Don't mix middleware and handlers** in the same package
 - ❌ **Don't put business logic** in handler packages (belongs in service layer)
-- ❌ **Don't create utility functions** in domain packages (belongs in utils)
+- ❌ **Don't create utility functions** in domain packages (belongs in util)
 - ❌ **Don't duplicate data structures** across packages
 - ❌ **Don't use global variables** for configuration, dependencies, loggers or lookup tables
 - ❌ **Don't panic** - return errors explicitly
 - ❌ **Don't ignore errors** - always handle or return them
 - ❌ **Don't read Modbus from the HTTP path** - no `?direct=true`, no `PollNow`; only the poller talks to the inverter
 - ❌ **Don't let a component restart another component** - only the health supervisor restarts things
-- ❌ **Don't call `time.Now()` mid-run** in poller/aggregator logic - capture once, derive a `period.Period`, inject `utils.Clock`
+- ❌ **Don't call `time.Now()` mid-run** in poller/aggregator logic - capture once, derive a `period.Period`, inject `util.Clock`
 - ❌ **Don't write outside your write domain** (see below)
 - ❌ **Don't add config knobs for health/aggregation constants** (restart budget 3, debounce 4×, heartbeat 5×, reset threshold 10 %) - they are constants until real outage data says otherwise
 
@@ -280,12 +290,46 @@ at full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ---
 
+## Design Decisions (v3)
+
+Deliberate choices where the implementation fills a gap in, or deviates from, the v3 spec.
+
+- **`meta` table:** the only schema addition. Holds the cutover date, closed-period watermarks
+  (`closed:daily:<key>`, `closed:netdaily`, `closed:monthly`, `closed:yearly`), the total
+  baselines (`baseline:<key>`), `baseline_year` and the retention watermark `purged_before`.
+  At cutover: monthly = previous month, yearly = previous year, daily/net-daily = today − 2.
+- **Cache domains:** the poller replaces only its own keys (`ReplaceDomain`); the aggregator
+  merges its disjoint computed keys (`Merge`). Neither wipes the other.
+- **Net values:** net daily rows live in `daily_values` and are written only by the aggregator;
+  storage rejects net keys from the poller and non-net keys from the aggregator. Net values are
+  computed from the same run's export/import values, never read back from the cache.
+- **Totals are app-lifetime:** computed from daily rows plus a baseline folded in at each year
+  close; pre-cutover inverter totals are not carried over.
+- **Catch-up:** every aggregator run finalises and freezes any closed, not-yet-frozen
+  month/year; `PeriodClosed` (published once per rollover window, on the first closing key or a
+  forced close) only makes that happen sooner.
+- **Day attribution:** the "new day" after a counter reset is the day whose local midnight is
+  nearest the rollover time; per-key bases live in memory and are seeded from the DB at start.
+- **WebSocket diff:** by `value` + `status_decoded` only (timestamps change every poll); each
+  `update` frame carries one frame-level `ts`.
+- **Liveness:** every component beats from its own loop, idle or not; the Modbus reconnect loop
+  beats while waiting in backoff. Initial grace after (re)start is 5× the poll interval.
+- **Modbus wiring:** construction never fails on connectivity; the client is published through a
+  `util.Slot` so the poller always reads the current client after a restart.
+- **Derived values:** `battery_power_signed` is produced by `solis.DeriveValues` after a full
+  poll (it needs two registers).
+- **Read plan:** 3 Modbus reads (grid power at 33130 so it falls inside an existing block),
+  pinned by the block-plan golden test.
+- **Shutdown:** single-phase graceful shutdown with bounded `Stop()`; no second-signal force
+  mode.
+- **Grid power sign** (positive = export) and the battery direction values are as verified on
+  the device; if a firmware changes them, flip in `DeriveValues`, not in the UI.
+
 ## Naming Conventions
 
 ### Packages
-- Lowercase, singular or compound (Arch_Plan), e.g. `eventbus`, `httphandler`
-- Existing plural packages (`handlers/`, `routes/`, `utils/`) keep their names until a rename is
-  confirmed (Plan.md A3); do not create new plural package names
+- Lowercase, singular or compound, e.g. `eventbus`, `httphandler`, `router`, `util`; never plural
+- Directory depth: max 3 levels **below `internal/`** (e.g. `internal/http/httphandler/mocks`)
 
 ### Files
 - Lowercase, underscores for multi-word names
@@ -366,7 +410,10 @@ go vuln ./...
 - Comments for all public functions and types (Godoc style)
 - Functions ideally < 15 lines, max < 40 lines
 - Error handling: return errors explicitly, don't panic; wrap with `%w`; sentinel errors +
-  custom error types (with `Unwrap`/`Is`) per package; HTTP status via the central error mapper
+  custom error types (with `Unwrap`/`Is`) per package; HTTP status via the central error mapper;
+  constructors report nil dependencies with `util.RequireAll` (→ `util.DependencyError`)
+- Every function that does I/O takes the caller's `ctx` (no `context.Background()` below
+  `cmd`/`app`); SQL uses the `…Context` variants
 - Receivers: single letter (`s`, `p`, `c`, `h`); acronyms stdlib-style (`ID`, `URL`, `HTTP`)
 - Line length < 100, cyclomatic complexity < 8, no magic numbers (named constants)
 - Commits: short imperative subject, **no AI signatures / `Co-Authored-By` trailers**
@@ -430,7 +477,7 @@ func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 ```
 
 ### Route Management
-Centralize route definitions in `routes.go`
+Centralize route definitions in `internal/http/router/router.go`
 
 ```go
 func SetupRoutes(deps HandlerDeps) *chi.Mux {
@@ -630,7 +677,8 @@ func LoadConfig(path string) (*AppConfig, error) {
 ### Unit Tests
 - Framework: stdlib `testing` + testify (`require`/`assert`) + mockery mocks
 - Create `_test.go` files for each package
-- Aim for >90% coverage (Arch_Plan minimums by gocyclo: <5 → 60 %, 5–9 → 70 %, ≥10 → 80 %)
+- Aim for >90% coverage per package; per-function minimums by gocyclo: <5 → 60 %,
+  5–9 → 70 %, ≥10 → 80 % (`main()` is exempt)
 - Test both happy paths and error cases
 - Test edge cases (empty inputs, invalid data, etc.)
 
@@ -640,7 +688,7 @@ func LoadConfig(path string) (*AppConfig, error) {
 - Use `t.Run()` for sub-tests
 
 ### Time-Dependent Logic (v3)
-- Never sleep on wall-clock time in tests. Inject `utils.Clock` and drive a fake clock for
+- Never sleep on wall-clock time in tests. Inject `util.Clock` and drive a fake clock for
   debounce/heartbeat, supervisor graces, rollover windows and backoff.
 - Rollover/attribution and `period` tests are table-driven and include midnight, DST
   spring-forward and fall-back nights (`time.LoadLocation("Europe/Berlin")`).
@@ -797,7 +845,7 @@ When refactoring existing code:
 3. **Test thoroughly** after each move
 4. **Keep old files** until new structure is verified
 5. **Remove old files** only after confirmation
-6. **Update documentation** (Plan.md, AGENTS.md)
+6. **Update documentation** (AGENTS.md, README.md, docs/src/openapi.yaml)
 
 ---
 

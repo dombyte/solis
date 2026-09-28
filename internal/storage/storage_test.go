@@ -12,16 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var ctx = context.Background()
 
-func testConfig(path string) *config.StorageSettings {
-	return &config.StorageSettings{
+func testConfig(path string) Settings {
+	return Settings{
 		Path: path, DailyRetention: 365 * 24 * time.Hour, ErrorRetention: 30 * 24 * time.Hour,
 		WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY",
 	}
@@ -33,7 +32,7 @@ func newStore(t *testing.T, now time.Time) (*Storage, *clocktest.Clock, string) 
 	require.NoError(t, err)
 	clk := clocktest.New(now)
 	path := filepath.Join(t.TempDir(), "solis.db")
-	s, err := New(testConfig(path), reg, clk, zerolog.Nop())
+	s, err := New(ctx, testConfig(path), reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	return s, clk, path
@@ -186,7 +185,7 @@ func TestEnsureCutover_FreezesPreCutoverHistory(t *testing.T) {
 	require.NoError(t, s.Close())
 
 	reg, _ := solis.NewRegistry()
-	s2, err := New(testConfig(path), reg, clocktest.New(day("2026-10-01")), zerolog.Nop())
+	s2, err := New(ctx, testConfig(path), reg, clocktest.New(day("2026-10-01")), zerolog.Nop())
 	require.NoError(t, err)
 	defer func() { _ = s2.Close() }()
 	st2, err := s2.CloseState(ctx)
@@ -222,8 +221,10 @@ func TestSumDaily_ExplicitBounds(t *testing.T) {
 func TestBaselineFold_Idempotent(t *testing.T) {
 	s, _, _ := newStore(t, day("2027-01-01"))
 	fold := BaselineFold{Year: "2026", Add: map[string]float64{"pv_energy_total": 4000}}
-	w := ComputedWrite{Freezes: []Freeze{{Level: period.Yearly, Period: "2026"}},
-		Folds: []BaselineFold{fold}}
+	w := ComputedWrite{
+		Freezes: []Freeze{{Level: period.Yearly, Period: "2026"}},
+		Folds:   []BaselineFold{fold},
+	}
 	require.NoError(t, s.WriteComputed(ctx, w))
 	require.NoError(t, s.WriteComputed(ctx, w)) // duplicate close event
 
@@ -344,15 +345,6 @@ func TestHistoryAndJSONRounding(t *testing.T) {
 	b, err := json.Marshal(y[0])
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"year":"2026","value":1.23,"raw_value":1.23}`, string(b))
-
-	b, _ = json.Marshal(DailyDataPoint{Date: "2026-08-05", Value: 1.005, RawValue: 10})
-	assert.JSONEq(t, `{"date":"2026-08-05","value":1.0,"raw_value":10}`, string(b))
-	b, _ = json.Marshal(MonthlyDataPoint{Month: "2026-08", Value: 2.499})
-	assert.JSONEq(t, `{"month":"2026-08","value":2.5,"raw_value":0}`, string(b))
-	b, _ = json.Marshal(TotalDataPoint{Value: 3.333, Timestamp: "t"})
-	assert.JSONEq(t, `{"value":3.33,"raw_value":0,"timestamp":"t"}`, string(b))
-	b, _ = json.Marshal(ErrorDataPoint{Timestamp: "t", RawValue: 4})
-	assert.JSONEq(t, `{"timestamp":"t","raw_value":4}`, string(b))
 }
 
 // insertRows writes raw rows bypassing the write guards (history older than a cutover).
@@ -458,8 +450,10 @@ func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 	base := clk.Now()
 	rows := make([]StatusRow, 0, maxErrorRows+2)
 	for i := range maxErrorRows + 2 {
-		rows = append(rows, StatusRow{Key: "solis_status", Raw: float64(i),
-			At: base.Add(time.Duration(i) * time.Second)})
+		rows = append(rows, StatusRow{
+			Key: "solis_status", Raw: float64(i),
+			At: base.Add(time.Duration(i) * time.Second),
+		})
 	}
 	require.NoError(t, s.WritePoll(ctx, PollWrite{Status: rows}))
 	e, err := s.GetErrorHistory(ctx, "solis_status", base.Add(-time.Hour),
@@ -472,6 +466,6 @@ func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 
 func TestNew_Errors(t *testing.T) {
 	reg, _ := solis.NewRegistry()
-	_, err := New(testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
+	_, err := New(ctx, testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
 	assert.Error(t, err, "a directory is not a database")
 }

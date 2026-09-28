@@ -5,21 +5,21 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Status is the reusable half of the Component contract: an atomic heartbeat and a
 // state that is pushed to the Reporter only when it changes.
 type Status struct {
 	rep   Reporter
-	clock utils.Clock
+	clock util.Clock
 	beat  atomic.Int64 // unix nanos, 0 = never
 	mu    sync.Mutex
 	state State
 }
 
 // NewStatus returns a healthy status reporting to rep.
-func NewStatus(rep Reporter, clock utils.Clock) *Status {
+func NewStatus(rep Reporter, clock util.Clock) *Status {
 	return &Status{rep: rep, clock: clock}
 }
 

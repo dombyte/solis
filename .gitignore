@@ -3,8 +3,8 @@ coverage.out
 coverage_modbus.out
 coverage_storage.out
 coverage.html
-server
-solis
+/server
+/solis
 # Dependencies
 frontend/node_modules/
 

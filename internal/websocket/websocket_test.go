@@ -19,8 +19,8 @@ import (
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -31,7 +31,7 @@ type env struct {
 	cache *cache.Cache
 	hub   *Hub
 	srv   *httptest.Server
-	slot  *utils.Slot[*Hub]
+	slot  *util.Slot[*Hub]
 	sent  int64 // cache writes (= bus events) so far
 }
 
@@ -43,10 +43,12 @@ func newEnv(t *testing.T) *env {
 	clk := clocktest.New(t0)
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
-	hub, err := NewHub(HubDeps{Bus: bus, Cache: cache.New(eventbus.New(), zerolog.Nop()), Keys: reg,
-		Clock: clk, PollInterval: 5 * time.Second, Reporter: rep, Log: zerolog.Nop()})
+	hub, err := NewHub(HubDeps{
+		Bus: bus, Cache: cache.New(eventbus.New(), zerolog.Nop()), Keys: reg,
+		Clock: clk, PollInterval: 5 * time.Second, Reporter: rep, Log: zerolog.Nop(),
+	})
 	require.NoError(t, err)
-	e := &env{t: t, clk: clk, cache: cache.New(bus, zerolog.Nop()), hub: hub, slot: &utils.Slot[*Hub]{}}
+	e := &env{t: t, clk: clk, cache: cache.New(bus, zerolog.Nop()), hub: hub, slot: &util.Slot[*Hub]{}}
 	hub.d.Cache = e.cache // the hub reads the same cache that publishes on the bus
 	require.NoError(t, hub.Start(context.Background()))
 	t.Cleanup(func() { _ = hub.Stop() })
@@ -104,12 +106,16 @@ func values(m map[string]any) map[string]any {
 
 func TestSubscribeSnapshotUpdateUnsubscribe(t *testing.T) {
 	e := newEnv(t)
-	e.set(eventbus.DomainPoller, t0, map[string]float64{"pv_total_power": 5230.456,
-		"grid_power": -2})
+	e.set(eventbus.DomainPoller, t0, map[string]float64{
+		"pv_total_power": 5230.456,
+		"grid_power":     -2,
+	})
 	c := e.dial(nil)
 
-	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"pv_total_power",
-		"battery_soc"}})
+	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{
+		"pv_total_power",
+		"battery_soc",
+	}})
 	snap := read(t, c)
 	assert.Equal(t, TypeSnapshot, snap["type"])
 	vals := values(snap)
@@ -121,10 +127,12 @@ func TestSubscribeSnapshotUpdateUnsubscribe(t *testing.T) {
 
 	// Unchanged pv, changed unsubscribed grid: no frame. Then a pv change arrives alone.
 	e.set(eventbus.DomainPoller, t0.Add(time.Second), map[string]float64{
-		"pv_total_power": 5230.456, "grid_power": 100})
+		"pv_total_power": 5230.456, "grid_power": 100,
+	})
 	e.flush()
 	e.set(eventbus.DomainPoller, t0.Add(2*time.Second), map[string]float64{
-		"pv_total_power": 4000})
+		"pv_total_power": 4000,
+	})
 	e.flush()
 	upd := read(t, c)
 	assert.Equal(t, TypeUpdate, upd["type"])
@@ -141,23 +149,29 @@ func TestSubscribeSnapshotUpdateUnsubscribe(t *testing.T) {
 	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"grid_power"}})
 	assert.Contains(t, values(read(t, c)), "grid_power") // snapshot sync point
 	e.set(eventbus.DomainPoller, t0.Add(4*time.Second), map[string]float64{
-		"pv_total_power": 1, "grid_power": 7})
+		"pv_total_power": 1, "grid_power": 7,
+	})
 	e.flush()
 	assert.Equal(t, map[string]any{"grid_power": map[string]any{"value": 7.0}}, values(read(t, c)))
 }
 
 func TestRemovedKeyIsPushed(t *testing.T) {
 	e := newEnv(t)
-	e.set(eventbus.DomainPoller, t0, map[string]float64{"battery_power_signed": 100,
-		"grid_power": 5})
+	e.set(eventbus.DomainPoller, t0, map[string]float64{
+		"battery_power_signed": 100,
+		"grid_power":           5,
+	})
 	c := e.dial(nil)
-	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"battery_power_signed",
-		"grid_power"}})
+	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{
+		"battery_power_signed",
+		"grid_power",
+	}})
 	require.Len(t, values(read(t, c)), 2)
 
 	// The next poll no longer derives battery_power_signed: clients must drop it.
 	e.cache.ReplaceDomain(eventbus.DomainPoller, map[string]*solis.Value{
-		"grid_power": {Key: "grid_power", DecodedValue: 5, Timestamp: t0}}, t0.Add(time.Second))
+		"grid_power": {Key: "grid_power", DecodedValue: 5, Timestamp: t0},
+	}, t0.Add(time.Second))
 	e.sent++
 	e.flush()
 	upd := read(t, c)
@@ -169,8 +183,10 @@ func TestRemovedKeyIsPushed(t *testing.T) {
 func TestCoalescesPollerAndAggregatorEvents(t *testing.T) {
 	e := newEnv(t)
 	c := e.dial(nil)
-	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"pv_energy_daily",
-		"pv_energy_monthly"}})
+	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{
+		"pv_energy_daily",
+		"pv_energy_monthly",
+	}})
 	read(t, c) // empty snapshot
 	e.set(eventbus.DomainPoller, t0, map[string]float64{"pv_energy_daily": 1})
 	e.set(eventbus.DomainAggregator, t0, map[string]float64{"pv_energy_monthly": 2})
@@ -245,6 +261,7 @@ func TestHubStopClosesClientsAndRestartingHub503(t *testing.T) {
 func TestNewHubValidationAndUnstartedStop(t *testing.T) {
 	_, err := NewHub(HubDeps{})
 	assert.ErrorIs(t, err, ErrMissingDependency)
+	assert.EqualError(t, err, "websocket: missing dependency: Bus")
 	e := newEnv(t)
 	h, err := NewHub(e.hub.d)
 	require.NoError(t, err)
@@ -278,13 +295,17 @@ func TestStaleClientsAreDropped(t *testing.T) {
 }
 
 func TestDTOEncoding(t *testing.T) {
-	v := &solis.Value{DecodedValue: 1.005, Unit: "kWh", Timestamp: t0,
-		StatusDecoded: []string{"No grid"}}
+	v := &solis.Value{
+		DecodedValue: 1.005, Unit: "kWh", Timestamp: t0,
+		StatusDecoded: []string{"No grid"},
+	}
 	b, err := json.Marshal(fullDTO(v))
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"value":1.00,"unit":"kWh","timestamp":"2026-08-05T12:00:00Z",
 		"status_decoded":["No grid"]}`, string(b))
-	assert.True(t, stateOf(v).equal(stateOf(&solis.Value{DecodedValue: 1.001,
-		StatusDecoded: []string{"No grid"}})))
+	assert.True(t, stateOf(v).equal(stateOf(&solis.Value{
+		DecodedValue:  1.001,
+		StatusDecoded: []string{"No grid"},
+	})))
 	assert.False(t, stateOf(v).equal(stateOf(&solis.Value{DecodedValue: 1.001})))
 }
