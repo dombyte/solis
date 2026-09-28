@@ -19,8 +19,15 @@ itself, and serves a React dashboard (REST + WebSocket) from the same Go binary.
 After starting, the API docs (Swagger UI) are available at `/docs`.
 
 The health check endpoint is `/health`: `200` with `{"status": "ok"|"degraded", ...}`, or
-**503** with `{"status": "failed", "component": "...", "reason": "..."}` when any component is
-failed or has exhausted its restart budget. It never blocks on a component.
+**503** with `{"status": "failed", "component": "...", "reason": "..."}`. A component's first
+failure only degrades the status while the supervisor restarts it; `/health` turns 503 once a
+restart has failed, when a non-restartable part (storage, event bus, HTTP server) failed, or
+when the supervisor itself stalled. It never blocks on a component.
+
+**A restart policy is required.** The app restarts failed components itself (up to 3 times in
+a row); when that does not help it shuts down and **exits with code 1** instead of restarting
+in-process, so Docker/Podman (`restart: unless-stopped`) or systemd (`Restart=on-failure`)
+starts a fresh process. A clean `SIGTERM`/`SIGINT` shutdown exits 0 and is bounded to 30 s.
 
 ## Configuration
 
@@ -288,7 +295,8 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     ports:
       - "8080:8080"
-    restart: unless-stopped
+    restart: unless-stopped   # required: the app exits 1 when self-healing fails
+    stop_grace_period: 35s    # the app bounds its own shutdown to 30 s
 ```
 
 ### Local

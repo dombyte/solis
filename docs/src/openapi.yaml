@@ -36,12 +36,17 @@ paths:
         Returns the supervisor's snapshot of every restartable/watched component
         (modbus, poller, aggregator, websocket hub, storage, event bus, HTTP server).
         This endpoint never blocks on a component - it only reads the last published
-        snapshot, and fails closed: it reports `ok`/`degraded` with 200, or **503** the
-        moment any component is failed or has exhausted its restart budget.
+        snapshot, and fails closed. A restartable component's first failure is `degraded`
+        (200) while the supervisor restarts it; **503** once a restart of it failed (the
+        restarted instance failed or went silent again - it stays 503 until an instance
+        kept beating for the healthy grace), when its restart budget is exhausted, when a
+        non-restartable part failed, or when the snapshot is stale (supervisor stalled).
+        When the budget is exhausted the process exits 1 and the container runtime
+        restarts it.
       operationId: getHealth
       responses:
         '200':
-          description: All components are healthy, or a restartable component is recovering (degraded)
+          description: All components are healthy (ok), or a component is recovering, failed for the first time or restarted and not yet proven healthy (degraded)
           content:
             application/json:
               schema:
@@ -61,7 +66,7 @@ paths:
                     restarts: 0
                     restartable: true
         '503':
-          description: A component is failed or has exhausted its restart budget, or a non-restartable part (storage, event bus, HTTP server) failed
+          description: A restart of a component failed or its restart budget is exhausted, a non-restartable part (storage, event bus, HTTP server) failed, or the supervisor snapshot is stale
           content:
             application/json:
               schema:
@@ -69,12 +74,12 @@ paths:
               example:
                 status: "failed"
                 component: "modbus"
-                reason: "restart budget exhausted (3)"
+                reason: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
                 timestamp: "2026-08-03T10:00:00Z"
                 components:
                   modbus:
                     state: "failed"
-                    reason: "restart budget exhausted (3)"
+                    reason: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
                     restarts: 3
                     restartable: true
 
@@ -328,7 +333,7 @@ components:
         reason:
           type: string
           description: Explains a non-healthy state
-          example: "restart budget exhausted (3)"
+          example: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
         last_beat:
           type: string
           format: date-time
@@ -347,8 +352,8 @@ components:
       type: object
       description: |
         Fail-closed supervisor snapshot. Never blocks on a component. `status` is `ok` or
-        `degraded` (HTTP 200), or `failed` (HTTP 503) when any component is failed/budget-exhausted
-        or a non-restartable part failed.
+        `degraded` (HTTP 200), or `failed` (HTTP 503) once a restart failed, the restart budget
+        is exhausted, a non-restartable part failed or the snapshot is stale.
       required:
         - status
         - components
@@ -365,7 +370,7 @@ components:
         reason:
           type: string
           description: Human-readable failure reason (only set when status is failed)
-          example: "restart budget exhausted (3)"
+          example: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
         components:
           type: object
           description: Every supervised component/part, keyed by name

@@ -1,12 +1,16 @@
 // Package main is the Solis monitor entry point. Without a subcommand it runs the server
-// inside a restart loop; `solis backfill --years N` runs a maintenance job and exits 0/1.
+// once and exits 0 on a clean (signal) shutdown and 1 on any error, including a fatal
+// health escalation, so the container runtime's restart policy restarts it; `solis
+// backfill --years N` runs a maintenance job and exits 0/1.
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"time"
+	"os/signal"
+	"syscall"
 
 	_ "time/tzdata" // fallback zoneinfo so TZ=Europe/Berlin never silently becomes UTC
 
@@ -15,12 +19,7 @@ import (
 	"github.com/dombyte/solis/internal/logging"
 )
 
-// Restart loop limits (spec §2.1: unchanged from v2).
-const (
-	maxRestarts  = 100
-	restartDelay = 5 * time.Second
-	configPath   = "config.yaml"
-)
+const configPath = "config.yaml"
 
 func main() {
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
@@ -29,7 +28,7 @@ func main() {
 // dispatch selects the subcommand and returns the process exit code.
 func dispatch(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "serve" {
-		return restartLoop(stderr, runServer, maxRestarts, restartDelay)
+		return serve(stderr, runServer)
 	}
 	switch args[0] {
 	case "backfill":
@@ -52,32 +51,20 @@ func printUsage(w io.Writer) {
 `)
 }
 
-// restartLoop runs run until it returns nil (clean shutdown). Errors and panics
-// (including health-fatal escalations) restart the whole app after restartDelay; the
-// shared ceiling of maxRestarts ends the process with exit code 1.
-func restartLoop(stderr io.Writer, run func() error, limit int, delay time.Duration) int {
+// serve runs the server once under a context cancelled by SIGINT/SIGTERM. There is no
+// in-process restart: any error (startup, fatal health escalation, shutdown timeout) is
+// exit code 1, and the container runtime (restart: unless-stopped) starts a fresh
+// process. A panic on another goroutine crashes the process, which restarts it too.
+func serve(stderr io.Writer, run func(context.Context) error) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log := logging.New(stderr, "INFO", true)
-	for attempt := 1; attempt <= limit; attempt++ {
-		err := runRecovered(run)
-		if err == nil {
-			log.Info().Msg("clean shutdown")
-			return 0
-		}
-		log.Error().Err(err).Int("attempt", attempt).Dur("delay", delay).
-			Msg("application stopped, restarting")
-		time.Sleep(delay)
+	if err := run(ctx); err != nil {
+		log.Error().Err(err).Msg("application stopped with an error, exiting with code 1")
+		return 1
 	}
-	log.Error().Int("max", limit).Msg("maximum restart count reached, exiting")
-	return 1
-}
-
-func runRecovered(run func() error) (err error) {
-	defer func() {
-		if p := recover(); p != nil {
-			err = fmt.Errorf("panic: %v", p)
-		}
-	}()
-	return run()
+	log.Info().Msg("clean shutdown")
+	return 0
 }
 
 // loadConfig loads and validates config.yaml.

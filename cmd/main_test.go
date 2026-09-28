@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -37,21 +38,39 @@ func TestDispatch_HelpAndUnknown(t *testing.T) {
 	assert.Contains(t, errOut.String(), `unknown command "frobnicate"`)
 }
 
-func TestRestartLoop(t *testing.T) {
+// There is no in-process restart loop: the server runs once, a clean shutdown is exit
+// 0 and every error (health fatal, startup, shutdown timeout) is exit 1 so the container
+// runtime restarts the process.
+func TestServe_ExitCodes(t *testing.T) {
 	var logs bytes.Buffer
-	assert.Equal(t, 0, restartLoop(&logs, func() error { return nil }, 3, 0))
-
 	calls := 0
-	code := restartLoop(&logs, func() error {
+	assert.Equal(t, 0, serve(&logs, func(context.Context) error { calls++; return nil }))
+	assert.Contains(t, logs.String(), "clean shutdown")
+
+	logs.Reset()
+	code := serve(&logs, func(context.Context) error {
 		calls++
-		if calls == 1 {
-			panic("boom")
+		return errors.New("health fatal: poller: restart budget exhausted")
+	})
+	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, calls, "run exactly once per process, no retry")
+	assert.Contains(t, logs.String(), "exiting with code 1")
+}
+
+func TestServe_SignalCancelsContext(t *testing.T) {
+	var logs bytes.Buffer
+	code := serve(&logs, func(ctx context.Context) error {
+		p, err := os.FindProcess(os.Getpid())
+		require.NoError(t, err)
+		require.NoError(t, p.Signal(syscall.SIGTERM))
+		select {
+		case <-ctx.Done():
+			return nil // the app treats a cancelled parent context as a clean shutdown
+		case <-time.After(5 * time.Second):
+			return errors.New("SIGTERM did not cancel the context")
 		}
-		return errors.New("health fatal: poller")
-	}, 3, 0)
-	assert.Equal(t, 1, code, "shared restart ceiling reached")
-	assert.Equal(t, 3, calls)
-	assert.Contains(t, logs.String(), "panic: boom")
+	})
+	assert.Equal(t, 0, code, logs.String())
 }
 
 func TestBackfill_FlagsAndConfig(t *testing.T) {
@@ -90,12 +109,12 @@ func TestBackfill_Success(t *testing.T) {
 
 func TestRunServer_ConfigErrorAndLockedDatabase(t *testing.T) {
 	inConfigDir(t, "app:\n  port: 0\n")
-	require.Error(t, runServer(), "invalid config")
+	require.Error(t, runServer(context.Background()), "invalid config")
 
 	dbPath := inConfigDir(t, "app:\n  serve_only: true\nstorage:\n  path: ./data/solis.db\n")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0o750))
 	job, err := maintenance.AcquireExclusive(dbPath)
 	require.NoError(t, err)
 	defer func() { _ = job.Release() }()
-	assert.ErrorIs(t, runServer(), maintenance.ErrLocked)
+	assert.ErrorIs(t, runServer(context.Background()), maintenance.ErrLocked)
 }

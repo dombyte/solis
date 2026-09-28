@@ -82,8 +82,17 @@ func (s *Supervisor) Watch(name string, p Probe) {
 }
 
 // Snapshot returns the last published health snapshot; it never blocks on components.
+// A snapshot older than StaleSnapshotFactor sweeps means the supervisor loop itself is
+// stuck, so it is reported failed instead of repeating the last (possibly ok) status.
 func (s *Supervisor) Snapshot() Snapshot {
-	return *s.snap.Load()
+	snap := *s.snap.Load()
+	maxAge := StaleSnapshotFactor * s.SweepInterval()
+	if age := s.clock.Now().Sub(snap.At); age > maxAge && snap.Status != StatusFailed {
+		snap.Status, snap.Component = StatusFailed, supervisorName
+		snap.Reason = fmt.Sprintf("health snapshot is %s old (max %s): supervisor stalled",
+			age, maxAge)
+	}
+	return snap
 }
 
 // SweepInterval is poll interval / 2 with a floor of MinSweepInterval.
@@ -122,36 +131,63 @@ func (s *Supervisor) sweep() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
+	s.sweepManaged(now)
+	s.sweepWatched()
+	s.publish(now)
+}
+
+// sweepManaged restarts every due, failed or stale restartable component. Caller holds mu.
+func (s *Supervisor) sweepManaged(now time.Time) {
 	for _, m := range s.managed {
 		if s.ctx.Err() != nil {
-			break
+			return
 		}
-		if restart, reason := m.evaluate(now, s.interval); restart {
+		if restart, reason := m.evaluate(now, s.interval); restart && s.restartDue(m, now) {
 			s.restart(m, reason)
 		}
 	}
+}
+
+// sweepWatched probes the non-restartable parts; a failure escalates. Caller holds mu.
+func (s *Supervisor) sweepWatched() {
 	for _, w := range s.watched {
 		w.state, w.reason = w.probe()
 		if w.state == Failed && s.ctx.Err() == nil {
 			s.fatal(w.name, "non-restartable component failed: "+w.reason)
 		}
 	}
-	s.publish(now)
 }
 
-// restart recreates m within the budget or latches it and escalates. Caller holds mu.
+// restartDue spaces restarts at least one sweep interval apart, so an instance that fails
+// instantly (Start error, reported failure) cannot burn the whole budget in milliseconds.
+func (s *Supervisor) restartDue(m *managed, now time.Time) bool {
+	return now.Sub(m.startedAt) >= s.SweepInterval()
+}
+
+// restart recreates m within the budget or latches it and escalates. An instance that
+// does not stop in time also escalates: starting a successor next to a still-running
+// instance could duplicate writers, so only a process restart can clean it up. Caller
+// holds mu.
 func (s *Supervisor) restart(m *managed, reason string) {
 	if m.failures >= RestartBudget {
-		m.latched = true
-		m.setReason("restart budget exhausted: " + reason)
-		s.fatal(m.name, "restart budget exhausted: "+reason)
+		s.latch(m, "restart budget exhausted: "+reason)
 		return
 	}
 	m.failures++
 	s.log.Warn().Str("target", m.name).Int("attempt", m.failures).Str("reason", reason).
 		Msg("restarting component")
-	s.stop(m)
+	if !s.stop(m) {
+		s.latch(m, "stop timed out, cannot restart safely: "+reason)
+		return
+	}
 	s.start(m)
+}
+
+// latch marks m permanently failed and escalates to a process exit. Caller holds mu.
+func (s *Supervisor) latch(m *managed, reason string) {
+	m.latched = true
+	m.setReason(reason)
+	s.fatal(m.name, reason)
 }
 
 // fatal cancels the root context with a wrapped ErrHealthFatal (no-op if cancelled).
@@ -194,16 +230,16 @@ func safeFactory(f Factory, r Reporter) (c Component, err error) {
 	return f(r)
 }
 
-// stop stops m's current instance, bounded by StopTimeout. Stop runs only after the
-// instance's Start returned, so a component is never stopped before it started. Caller
-// holds mu.
-func (s *Supervisor) stop(m *managed) {
+// stop stops m's current instance, bounded by StopTimeout, and reports whether it
+// stopped in time. Stop runs only after the instance's Start returned, so a component is
+// never stopped before it started. Caller holds mu.
+func (s *Supervisor) stop(m *managed) bool {
 	if m.cancel != nil {
 		m.cancel()
 		m.cancel = nil
 	}
 	if m.comp == nil {
-		return
+		return true
 	}
 	done := make(chan error, 1)
 	comp, started := m.comp, m.started
@@ -220,8 +256,12 @@ func (s *Supervisor) stop(m *managed) {
 		if err != nil {
 			s.log.Warn().Str("target", m.name).Err(err).Msg("component stop failed")
 		}
+		return true
 	case <-timer.C():
-		s.log.Warn().Str("target", m.name).Msg("component stop timed out")
+		s.log.Error().Str("target", m.name).Dur("timeout", StopTimeout).
+			Msg("component stop timed out")
+		m.comp = nil // its Stop is still pending; never stop the hung instance twice
+		return false
 	}
 }
 
@@ -259,7 +299,11 @@ func (s *Supervisor) publish(now time.Time) {
 	for _, m := range s.managed {
 		cs := m.status()
 		snap.Components[m.name] = cs
-		s.mergeStatus(&snap, m.name, cs, m.latched)
+		failed := m.restartFailed(m.state())
+		if failed && cs.Reason == "" {
+			cs.Reason = fmt.Sprintf("restarted %d times, not yet proven healthy", m.failures)
+		}
+		s.mergeStatus(&snap, m.name, cs, failed)
 	}
 	for _, w := range s.watched {
 		cs := ComponentStatus{State: w.state.String(), Reason: w.reason}
@@ -269,15 +313,16 @@ func (s *Supervisor) publish(now time.Time) {
 	s.snap.Store(&snap)
 }
 
-// mergeStatus folds one component into the overall status: a latched restartable or a
-// failed non-restartable part fails the whole app; anything not healthy degrades it.
+// mergeStatus folds one component into the overall status: a restartable whose restart
+// failed (or that latched) or a failed non-restartable part fails the whole app; anything
+// else that is not healthy, or restarted and not yet proven healthy, only degrades it.
 func (s *Supervisor) mergeStatus(snap *Snapshot, name string, cs ComponentStatus, fatal bool) {
 	switch {
 	case fatal:
 		if snap.Status != StatusFailed {
 			snap.Status, snap.Component, snap.Reason = StatusFailed, name, cs.Reason
 		}
-	case cs.State != Healthy.String() && snap.Status == StatusOK:
+	case (cs.State != Healthy.String() || cs.Restarts > 0) && snap.Status == StatusOK:
 		snap.Status = StatusDegraded
 	}
 }

@@ -92,17 +92,26 @@ func (m *managed) evaluate(now time.Time, interval time.Duration) (bool, string)
 	if silent := now.Sub(ref); silent > grace {
 		return true, fmt.Sprintf("no heartbeat for %s (grace %s)", silent, grace)
 	}
-	m.resetFailures(st, beat, now, interval)
+	m.resetFailures(st, beat, interval)
 	return false, ""
 }
 
 // resetFailures clears the consecutive-failure counter once a restarted component has
-// beaten and stayed healthy for the healthy grace since its start.
-func (m *managed) resetFailures(st State, beat, now time.Time, interval time.Duration) {
-	if st == Healthy && m.failures > 0 && beat.After(m.startedAt) &&
-		now.Sub(m.startedAt) >= HealthyGraceFactor*interval {
+// kept beating for the healthy grace since its start: its latest beat must itself lie a
+// full grace after the start, so one beat right after Start followed by a hang never
+// counts as a recovery (evaluate already guarantees the beat is fresh).
+func (m *managed) resetFailures(st State, beat time.Time, interval time.Duration) {
+	if st == Healthy && m.failures > 0 &&
+		beat.Sub(m.startedAt) >= HealthyGraceFactor*interval {
 		m.failures = 0
 	}
+}
+
+// restartFailed reports that a restart did not bring the component back: a restarted
+// instance failed again (a further restart was needed) or is failed right now. The first
+// failure only degrades the app; this one makes /health fail closed.
+func (m *managed) restartFailed(st State) bool {
+	return m.latched || m.failures > 1 || (m.failures == 1 && st == Failed)
 }
 
 func graceFor(st State, interval time.Duration) time.Duration {

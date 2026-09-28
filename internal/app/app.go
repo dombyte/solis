@@ -1,16 +1,17 @@
 // Package app is the composition root: the only package that names concrete types and
 // wires them together. It builds the root logger children, creates the non-restartable
 // parts (storage, cache, event bus, HTTP server), registers the restartable components
-// with the health supervisor and runs until the root context is cancelled.
+// with the health supervisor and runs until the root context is cancelled. It never
+// restarts itself: a fatal health escalation makes Run return an error so the process
+// exits and the container runtime (Docker/Podman restart policy) restarts it.
 package app
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
+	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -53,13 +54,43 @@ type App struct {
 	cache   *cache.Cache
 	sup     *health.Supervisor
 	http    *server.Server
+
+	stopping     chan struct{} // closed once the shutdown began (signal or fatal)
+	stoppingOnce sync.Once
 }
 
-// Run builds the application, serves until a signal or a fatal health escalation and
-// shuts down gracefully. It returns nil on a clean shutdown and the wrapped
-// health.ErrHealthFatal (or a startup error) otherwise, so main() restarts the app.
-func Run(ctx context.Context, cfg *config.AppConfig, root zerolog.Logger) (err error) {
-	a := &App{cfg: cfg, log: logging.Component(root, "app"), clock: util.NewRealClock()}
+// Run builds the application and serves until ctx is cancelled (a signal: clean
+// shutdown, nil) or a fatal health escalation (the wrapped health.ErrHealthFatal); a
+// startup error is returned as is. Once the shutdown began it is bounded by
+// ShutdownTimeout; on ErrShutdownTimeout the caller must exit the process. Run never
+// restarts the app: every non-nil result means "exit non-zero".
+func Run(ctx context.Context, cfg *config.AppConfig, root zerolog.Logger) error {
+	a := &App{
+		cfg: cfg, log: logging.Component(root, "app"), clock: util.NewRealClock(),
+		stopping: make(chan struct{}),
+	}
+	stop := context.AfterFunc(ctx, a.beginShutdown)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { done <- a.runRecovered(ctx, root) }()
+	return awaitShutdown(done, a.stopping, a.clock, ShutdownTimeout)
+}
+
+// beginShutdown starts the ShutdownTimeout clock (idempotent).
+func (a *App) beginShutdown() {
+	a.stoppingOnce.Do(func() { close(a.stopping) })
+}
+
+// runRecovered runs one application lifetime and turns a panic on this goroutine into
+// an error. The deferred close runs first while unwinding, so the lock and the database
+// are released either way.
+func (a *App) runRecovered(ctx context.Context, root zerolog.Logger) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			a.log.Error().Interface("panic", p).Bytes("stack", debug.Stack()).Msg("app panic")
+			err = errors.Join(fmt.Errorf("app: panic: %v", p), err)
+		}
+	}()
 	defer func() { err = errors.Join(err, a.close()) }()
 	if err := a.build(ctx, root); err != nil {
 		return err
@@ -142,6 +173,7 @@ func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
 	}
 	iv := a.cfg.Poller.Interval
 	a.sup = health.New(ctx, iv, a.clock, logging.Component(root, "health"))
+	context.AfterFunc(a.sup.Context(), a.beginShutdown) // fatal escalation or signal
 	reader := &util.Slot[poller.Reader]{}
 	a.sup.Manage(nameModbus, CreateModbus(modbusSettings(a.cfg.Modbus), iv, reader, a.clock,
 		logging.Component(root, nameModbus)))
@@ -201,30 +233,25 @@ func (a *App) busProbe() (health.State, string) {
 	return health.Healthy, ""
 }
 
-// serve runs the supervisor until a signal (clean) or a fatal escalation.
+// serve runs the supervisor until the parent context is cancelled (clean) or a fatal
+// escalation, then waits for the periodic database jobs so close() never closes the
+// store or releases the lock under a running backup or cleanup.
 func (a *App) serve() error {
 	ctx := a.sup.Context()
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(sig)
-	go func() {
-		select {
-		case s := <-sig:
-			a.log.Info().Str("signal", s.String()).Msg("shutdown requested")
-			a.sup.Shutdown()
-		case <-ctx.Done():
-		}
-	}()
-	go a.dbm.RunPeriodicBackups(ctx)
-	go a.dbm.RunPeriodicCleanup(ctx, a.store)
+	var jobs sync.WaitGroup
+	jobs.Go(func() { a.dbm.RunPeriodicBackups(ctx) })
+	jobs.Go(func() { a.dbm.RunPeriodicCleanup(ctx, a.store) })
 	a.logStartup()
 
 	a.sup.Run() // returns after stopping components in reverse order
+	jobs.Wait()
 	cause := context.Cause(ctx)
 	if errors.Is(cause, health.ErrHealthFatal) {
-		a.log.Error().Err(cause).Msg("health fatal: restarting application")
+		a.log.Error().Err(cause).
+			Msg("health fatal: exiting so the container runtime restarts the app")
 		return cause
 	}
+	a.log.Info().Msg("shutdown complete")
 	return nil
 }
 

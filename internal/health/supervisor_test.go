@@ -35,6 +35,10 @@ type fakeComp struct {
 	stopEarly atomic.Bool
 	order     *[]string
 	orderMu   *sync.Mutex
+	// beatOn, when set, makes Start beat once (then never again); stopBlock, when set,
+	// blocks Stop until closed.
+	beatOn    *clocktest.Clock
+	stopBlock chan struct{}
 }
 
 func (f *fakeComp) Start(context.Context) error {
@@ -42,12 +46,18 @@ func (f *fakeComp) Start(context.Context) error {
 		<-f.startGate
 	}
 	f.started.Store(true)
+	if f.beatOn != nil {
+		f.Beat(f.beatOn.Now().Add(time.Millisecond))
+	}
 	return f.startErr
 }
 
 func (f *fakeComp) Stop() error {
 	if !f.started.Load() {
 		f.stopEarly.Store(true)
+	}
+	if f.stopBlock != nil {
+		<-f.stopBlock
 	}
 	f.stopped.Store(true)
 	if f.order != nil {
@@ -130,6 +140,16 @@ func (h *harness) sweep(n int) {
 		h.clk.Advance(h.sup.SweepInterval())
 		h.waitSnapshot()
 	}
+}
+
+// waitStatus waits until the published snapshot has the given overall status.
+func (h *harness) waitStatus(status string) Snapshot {
+	var snap Snapshot
+	require.Eventually(h.t, func() bool {
+		snap = h.sup.Snapshot()
+		return snap.Status == status
+	}, time.Second, time.Millisecond)
+	return snap
 }
 
 func (h *harness) shutdown() {
@@ -251,8 +271,8 @@ func TestBudgetIsIndependentOfInterval(t *testing.T) {
 		go func() { sup.Run(); close(done) }()
 		require.True(t, clk.BlockUntil(1))
 		for sup.Context().Err() == nil {
-			now := clk.Now()
 			clk.Advance(sup.SweepInterval())
+			now := clk.Now() // after the advance: wait for this sweep, not the previous one
 			require.Eventually(t, func() bool { return !sup.Snapshot().At.Before(now) },
 				time.Second, time.Millisecond)
 		}
@@ -287,20 +307,128 @@ func TestFactoryPanicAndStartErrorCountAsFailures(t *testing.T) {
 	h.shutdown()
 }
 
-func TestReportedFailureRestartsImmediately(t *testing.T) {
+func TestReportedFailureRestartsAtNextDueSweep(t *testing.T) {
 	h := newHarness(t)
 	h.sup.Manage("hub", h.factory("hub", func() *fakeComp { return &fakeComp{} }))
 	h.run()
 	old := h.latest("hub")
 	old.rep.Report(Failed, "listener died")
-	require.Eventually(t, func() bool { return h.instances("hub") == 2 }, time.Second,
+	// Restarts are spaced one sweep apart: the report alone does not restart yet.
+	assert.Never(t, func() bool { return h.instances("hub") > 1 }, 50*time.Millisecond,
 		time.Millisecond)
+	h.sweep(1)
+	require.Equal(t, 2, h.instances("hub"))
 	// Reports from the stopped generation are ignored.
 	old.rep.Report(Failed, "late")
 	h.latest("hub").Beat(h.clk.Now())
 	h.sweep(1)
 	assert.Equal(t, 2, h.instances("hub"))
 	h.shutdown()
+}
+
+// A component that beats once right after Start and then hangs must not reset its
+// failure counter: the budget runs out and the supervisor escalates (review RT-H1).
+func TestBeatOnceThenHangEscalates(t *testing.T) {
+	h := newHarness(t)
+	h.sup.Manage("p", h.factory("p", func() *fakeComp { return &fakeComp{beatOn: h.clk} }))
+	h.run()
+	for i := 0; i < 200 && h.sup.Context().Err() == nil; i++ {
+		h.sweep(1)
+		assert.LessOrEqual(t, h.instances("p"), 1+RestartBudget)
+	}
+	<-h.done
+	require.ErrorIs(t, context.Cause(h.sup.Context()), ErrHealthFatal)
+	assert.Equal(t, 1+RestartBudget, h.instances("p"))
+	assert.Equal(t, StatusFailed, h.sup.Snapshot().Status)
+}
+
+// The first failure only degrades /health; once a restarted instance fails again the
+// snapshot is failed (503) while the supervisor keeps restarting, and a restart that
+// keeps beating for the healthy grace returns the app to ok.
+func TestHealthFailsClosedOnceARestartFails(t *testing.T) {
+	h := newHarness(t)
+	h.sup.Manage("p", h.factory("p", func() *fakeComp { return &fakeComp{} }))
+	h.run()
+
+	h.latest("p").rep.Report(Failed, "boom")
+	h.waitStatus(StatusDegraded)
+	h.sweep(1) // restart #1
+	require.Equal(t, 2, h.instances("p"))
+	assert.Equal(t, StatusDegraded, h.sup.Snapshot().Status, "restarted, not yet proven")
+
+	h.latest("p").rep.Report(Failed, "boom again")
+	snap := h.waitStatus(StatusFailed)
+	assert.Equal(t, "p", snap.Component)
+	assert.Equal(t, "boom again", snap.Reason)
+	require.NoError(t, h.sup.Context().Err(), "budget left: no escalation yet")
+
+	h.sweep(1) // restart #2: healthy now, but still failed until proven
+	require.Equal(t, 3, h.instances("p"))
+	h.latest("p").Beat(h.clk.Now())
+	h.sweep(1)
+	snap = h.sup.Snapshot()
+	assert.Equal(t, StatusFailed, snap.Status)
+	assert.Contains(t, snap.Reason, "not yet proven healthy")
+
+	for range 7 { // keeps beating for the 30s healthy grace
+		h.latest("p").Beat(h.clk.Now())
+		h.sweep(1)
+	}
+	snap = h.sup.Snapshot()
+	assert.Equal(t, StatusOK, snap.Status)
+	assert.Equal(t, 0, snap.Components["p"].Restarts)
+	h.shutdown()
+}
+
+// An instance whose Stop hangs during a restart escalates instead of getting a second
+// instance started next to it (review RT-M4).
+func TestStopTimeoutDuringRestartEscalates(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	defer close(release)
+	h.sup.Manage("p", h.factory("p", func() *fakeComp { return &fakeComp{stopBlock: release} }))
+	h.run()
+	h.latest("p").rep.Report(Failed, "wedged")
+	h.clk.Advance(h.sup.SweepInterval()) // due sweep: restart -> Stop blocks
+	require.True(t, h.clk.BlockUntil(2), "stop timer registered")
+	h.clk.Advance(StopTimeout)
+	<-h.done
+	cause := context.Cause(h.sup.Context())
+	require.ErrorIs(t, cause, ErrHealthFatal)
+	assert.Contains(t, cause.Error(), "stop timed out")
+	assert.Equal(t, 1, h.instances("p"), "no successor next to the hung instance")
+}
+
+// A factory whose instances fail instantly cannot burn the budget without the clock
+// moving: restarts are spaced one sweep apart (review RT-L1).
+func TestInstantFailuresAreSpaced(t *testing.T) {
+	h := newHarness(t)
+	h.sup.Manage("x", h.factory("x", func() *fakeComp {
+		return &fakeComp{startErr: errors.New("start failed")}
+	}))
+	h.run()
+	assert.Never(t, func() bool { return h.instances("x") > 1 }, 50*time.Millisecond,
+		time.Millisecond)
+	start := h.clk.Now()
+	for h.sup.Context().Err() == nil {
+		h.sweep(1)
+	}
+	<-h.done
+	assert.Equal(t, 1+RestartBudget, h.instances("x"))
+	assert.GreaterOrEqual(t, h.clk.Now().Sub(start),
+		time.Duration(RestartBudget)*h.sup.SweepInterval())
+}
+
+func TestStaleSnapshotReportsFailed(t *testing.T) {
+	clk := clocktest.New(t0)
+	sup := New(context.Background(), interval, clk, zerolog.Nop())
+	clk.Advance(StaleSnapshotFactor * sup.SweepInterval())
+	assert.Equal(t, StatusOK, sup.Snapshot().Status, "at the limit")
+	clk.Advance(time.Second)
+	snap := sup.Snapshot()
+	assert.Equal(t, StatusFailed, snap.Status)
+	assert.Equal(t, supervisorName, snap.Component)
+	assert.Contains(t, snap.Reason, "supervisor stalled")
 }
 
 func TestWatchedFailureIsFatal(t *testing.T) {

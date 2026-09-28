@@ -1,7 +1,8 @@
 // Package health is the central supervisor: it creates restartable components through
 // their factories, watches their self-reported state and heartbeats, restarts them within
-// a consecutive-failure budget and escalates to a whole-app restart by cancelling the root
-// context with ErrHealthFatal. It also publishes the snapshot served by /health.
+// a consecutive-failure budget and escalates by cancelling the root context with
+// ErrHealthFatal, which makes the process exit so the container runtime restarts it. It
+// also publishes the snapshot served by /health.
 package health
 
 import (
@@ -23,13 +24,21 @@ const (
 	RecoveringGraceFactor = 10
 	// MinSweepInterval is the floor of the staleness sweep (poll interval / 2).
 	MinSweepInterval = 5 * time.Second
-	// StopTimeout bounds each component Stop so a hung component cannot block shutdown.
+	// StopTimeout bounds each component Stop so a hung component cannot block shutdown;
+	// a restart whose Stop times out escalates to ErrHealthFatal.
 	StopTimeout = 5 * time.Second
+	// StaleSnapshotFactor x sweep interval: max age of the published snapshot before
+	// Snapshot reports the supervisor itself as failed.
+	StaleSnapshotFactor = 3
 )
+
+// supervisorName is the component named in a snapshot failed for staleness.
+const supervisorName = "health"
 
 var (
 	// ErrHealthFatal is the root-context cause when component restarts cannot recover the
-	// app (budget exhausted or a non-restartable part failed); main() restarts the app.
+	// app (budget exhausted, a restart's Stop timed out or a non-restartable part failed);
+	// the process then exits non-zero and the container runtime restarts it.
 	ErrHealthFatal = errors.New("health fatal")
 	// ErrShutdown is the root-context cause of a clean shutdown (signal).
 	ErrShutdown = errors.New("shutdown requested")

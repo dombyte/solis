@@ -7,7 +7,8 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     ports:
       - "8080:8080"
-    restart: unless-stopped
+    restart: unless-stopped   # required: the app exits 1 when self-healing fails
+    stop_grace_period: 35s    # the app bounds its own shutdown to 30 s
     environment:
       - TZ=Europe/Berlin
     devices:

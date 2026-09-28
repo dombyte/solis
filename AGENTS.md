@@ -45,7 +45,7 @@ checks; the pre-commit script is run by hand (`make check`), not installed as a 
 Package layout (packages marked *new* were added in v3):
 
 ```
-cmd/                     main.go (subcommand dispatch + restart loop), serve.go, backfill.go
+cmd/                     main.go (subcommand dispatch, signal ctx, exit code), serve.go, backfill.go
 internal/
   app/           *new*   composition root: Create* factories, health adapters, logger wiring
   config/                YAML/env config, structural Validate(); domain rules injected by app
@@ -160,7 +160,8 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 
 ### Health Package (`internal/health/`)
 - Supervisor: calls factories, registers, starts, watches and restarts restartable components
-- Owns the root context (`context.WithCancelCause`); fatal escalation cancels it with `ErrHealthFatal`
+- Owns the root context (`context.WithCancelCause`); fatal escalation cancels it with `ErrHealthFatal`,
+  the app shuts down (bounded by `app.ShutdownTimeout`) and the process exits 1
 - Publishes the snapshot served by `/health` (503 fail-closed)
 
 ### Storage Package (`internal/storage/`)
@@ -273,8 +274,15 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
 - Ordinary failures (poll timeout, read error, connection loss) are handled internally and reported
   as `Recovering`; they never touch the restart counter.
 - No `Restart()` method. Restart = supervisor Stop → factory → Start.
-- Non-restartable parts (storage, cache, event bus, HTTP server) are `Watch`ed; if they fail the
-  supervisor cancels the root context with `ErrHealthFatal` and `main()` restarts the whole app.
+- Restarts are spaced at least one sweep interval apart. The failure counter resets only
+  after a restarted instance **kept** beating for the healthy grace (its latest beat lies a
+  full grace after its start) — one beat followed by a hang is not a recovery.
+- Escalation (`ErrHealthFatal`): the restart budget (3) is exhausted, a restart's `Stop()`
+  exceeded `StopTimeout` (a successor is never started next to a hung instance), or a
+  non-restartable part (storage, cache, event bus, HTTP server; `Watch`ed) failed.
+- **No in-process restart.** On `ErrHealthFatal` (or any startup error, a panic, or
+  `app.ErrShutdownTimeout`) `main()` exits 1 and the container runtime's restart policy
+  (`restart: unless-stopped`) starts a fresh process; a signal (clean shutdown) exits 0.
 
 ## Write Domains (v3)
 
@@ -320,8 +328,11 @@ Deliberate choices where the implementation fills a gap in, or deviates from, th
   poll (it needs two registers).
 - **Read plan:** 3 Modbus reads (grid power at 33130 so it falls inside an existing block),
   pinned by the block-plan golden test.
-- **Shutdown:** single-phase graceful shutdown with bounded `Stop()`; no second-signal force
-  mode.
+- **Shutdown:** single-phase graceful shutdown with bounded `Stop()` and a hard overall
+  deadline (`app.ShutdownTimeout`, 30 s) after which `main()` exits 1 regardless; no
+  second-signal force mode. Periodic backup/cleanup jobs are joined before storage closes.
+- **Process restarts belong to the container runtime:** the app never restarts itself
+  in-process (a hung goroutine can only be ended by a process exit).
 - **Grid power sign** (positive = export) and the battery direction values are as verified on
   the device; if a firmware changes them, flip in `DeriveValues`, not in the UI.
 
@@ -518,9 +529,12 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 
 ### Health Endpoint (v3, fail-closed)
 - `GET /health` reads the supervisor snapshot only; it never blocks on a component.
-- 200 with `ok` or `degraded` (+ details); **503** with the failed component and reason when any
-  component is failed/budget-exhausted or a non-restartable part failed. Never report `ok` when a
-  subsystem is dead.
+- 200 with `ok` or `degraded` (+ details). A restartable component's first failure (and a
+  restarted instance that has not yet proven healthy) is `degraded`.
+- **503** with the failed component and reason once a restart failed (a restarted instance
+  failed or went silent again; stays 503 until an instance kept beating for the healthy grace),
+  the restart budget is exhausted, a non-restartable part failed, or the snapshot is older than
+  3 sweeps (supervisor stalled). Never report `ok` when a subsystem is dead.
 
 ### WebSocket Protocol (v3)
 ```json

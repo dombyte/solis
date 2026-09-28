@@ -8,8 +8,8 @@ import (
 	"github.com/dombyte/solis/internal/logging"
 )
 
-// runServer runs one application lifetime (server mode).
-func runServer() error {
+// runServer runs the application (server mode) until ctx is cancelled or it fails.
+func runServer(ctx context.Context) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -18,5 +18,5 @@ func runServer() error {
 	for _, w := range cfg.Warnings {
 		root.Warn().Str("component", "config").Msg(w)
 	}
-	return app.Run(context.Background(), cfg, root)
+	return app.Run(ctx, cfg, root)
 }
