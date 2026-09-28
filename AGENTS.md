@@ -49,7 +49,7 @@ v3 target layout (packages marked *new* are created during the v3 phases, see `P
 cmd/                     main.go (subcommand dispatch + restart loop), serve.go, backfill.go
 internal/
   app/           *new*   composition root: Create* factories, health adapters, logger wiring
-  config/                YAML/env config, Validate() methods (incl. strict rollover.time HH:MM)
+  config/                YAML/env config, structural Validate(); domain rules injected by app
   period/        *new*   Period (day/month/year keys from one captured instant), rollover window
   eventbus/      *new*   event bus (ValuesUpdated, PeriodClosed), non-blocking, per-subscriber policy
   health/        *new*   supervisor, component contract, restart budget, ErrHealthFatal, snapshot
@@ -60,6 +60,7 @@ internal/
   aggregator/            event-driven runner (debounce/heartbeat/catch-up) using aggregation
   cache/                 latest values; publishes change events; ReplaceDomain/Merge
   storage/               sole SQLite owner; PollerStore/AggregatorStore/ReadStore; closed periods
+  history/       *new*   history read-model rows (daily/monthly/yearly/total/status data points)
   database/              manager: migrations (incl. V3 meta table), backups, retention cleanup
   websocket/             subscription protocol, per-client diff, same-origin upgrader
   service/               ReadService for HTTP (cache + ReadStore + health snapshot)
@@ -78,8 +79,11 @@ ref/                     v3 spec + dashboard prototype (reference only, not buil
 
 ### Config Package (`internal/config/`)
 - Load configuration from YAML files
-- Validate configuration on startup
-- Provide typed config structs (AppConfig, ModbusConfig, ServerConfig)
+- Validate configuration on startup: structural checks in `Validate()`; rules owned by other
+  packages (Modbus address, strict `rollover.time` HH:MM, poll timeout vs health grace) are
+  `config.Rule`s passed in by `app.ConfigRules()`
+- Provide typed config structs (AppConfig, ModbusSettings, …); config imports no domain
+  package, and `app` maps sections onto each package's own `Settings`
 
 ### HTTP Package (`internal/http/`)
 
@@ -199,7 +203,9 @@ poller     → solis, period, eventbus, health(Reporter) + own interfaces (Store
 aggregator → aggregation, solis, period, eventbus, health(Reporter) + own Store, Cache
 websocket  → eventbus, solis, health(Reporter) + own Snapshotter
 cache      → eventbus, solis
-storage    → solis, period
+storage    → solis, period, history
+history    → utils only (shared by storage, service, handlers)
+config     → utils only
 modbus     → stdlib + simonvetter only (external layer: no config/health/logging-global imports)
 service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
 app        → everything (composition root)
