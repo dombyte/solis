@@ -198,14 +198,6 @@ func TestErrorMapper(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, m.Status(service.ErrWrongKind))
 	assert.Equal(t, http.StatusGatewayTimeout, m.Status(context.DeadlineExceeded))
 	assert.Equal(t, http.StatusInternalServerError, m.Status(errors.New("x")))
-
-	// Per-handler override wins without touching the default mapper.
-	teapot := errors.New("teapot")
-	o := m.With(Rule{Target: service.ErrNoData, Status: http.StatusNoContent},
-		Rule{Target: teapot, Status: http.StatusTeapot})
-	assert.Equal(t, http.StatusNoContent, o.Status(service.ErrNoData))
-	assert.Equal(t, http.StatusTeapot, o.Status(teapot))
-	assert.Equal(t, http.StatusNotFound, m.Status(service.ErrNoData))
 }
 
 func TestParseTimeRange(t *testing.T) {

@@ -52,11 +52,6 @@ func NewErrorMapper(log zerolog.Logger) *ErrorMapper {
 	return &ErrorMapper{rules: DefaultRules(), log: log}
 }
 
-// With returns a copy whose overrides take precedence (per-handler option).
-func (m *ErrorMapper) With(overrides ...Rule) *ErrorMapper {
-	return &ErrorMapper{rules: append(append([]Rule(nil), overrides...), m.rules...), log: m.log}
-}
-
 // Status returns the status code for err (500 when nothing matches).
 func (m *ErrorMapper) Status(err error) int {
 	for _, r := range m.rules {
