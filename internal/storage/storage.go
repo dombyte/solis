@@ -58,7 +58,8 @@ type Storage struct {
 
 // New opens (and if needed creates) the database and loads the close state.
 func New(cfg Settings, keys KeyLookup, clock utils.Clock,
-	log zerolog.Logger) (*Storage, error) {
+	log zerolog.Logger,
+) (*Storage, error) {
 	db, err := open(cfg, log)
 	if err != nil {
 		return nil, err

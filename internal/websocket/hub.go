@@ -85,8 +85,10 @@ type clientState struct {
 
 // NewHub validates dependencies and returns a stopped hub.
 func NewHub(d HubDeps) (*Hub, error) {
-	required := []bool{d.Bus != nil, d.Cache != nil, d.Keys != nil, d.Clock != nil,
-		d.Reporter != nil, d.PollInterval > 0}
+	required := []bool{
+		d.Bus != nil, d.Cache != nil, d.Keys != nil, d.Clock != nil,
+		d.Reporter != nil, d.PollInterval > 0,
+	}
 	for _, ok := range required {
 		if !ok {
 			return nil, ErrMissingDependency
@@ -179,8 +181,10 @@ func (h *Hub) do(op func(*loopState)) bool {
 func (h *Hub) loop(ctx context.Context, events <-chan eventbus.Event) {
 	h.d.Log.Debug().Dur("interval", h.d.PollInterval).Msg("websocket hub loop started")
 	defer close(h.done)
-	ls := &loopState{clients: make(map[*Client]*clientState),
-		flush: h.d.Clock.NewTimer(time.Hour)}
+	ls := &loopState{
+		clients: make(map[*Client]*clientState),
+		flush:   h.d.Clock.NewTimer(time.Hour),
+	}
 	ls.flush.Stop()
 	defer ls.closeAll()
 	beat := h.d.Clock.NewTicker(h.d.PollInterval)
@@ -236,15 +240,18 @@ func (h *Hub) handle(clients map[*Client]*clientState, c *Client, msg ClientMess
 		}
 	case TypePing:
 	default:
-		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeBadRequest,
-			Message: "unknown message type " + msg.Type})
+		h.send(clients, c, ErrorMessage{
+			Type: TypeError, Code: CodeBadRequest,
+			Message: "unknown message type " + msg.Type,
+		})
 	}
 }
 
 // subscribe adds known keys and answers with a snapshot of the newly added ones;
 // unknown keys get an error frame and never drop the connection.
 func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientState,
-	keys []string) {
+	keys []string,
+) {
 	var added, unknown []string
 	for _, k := range keys {
 		if _, ok := h.d.Keys.ByKey(k); !ok {
@@ -257,8 +264,10 @@ func (h *Hub) subscribe(clients map[*Client]*clientState, c *Client, st *clientS
 		}
 	}
 	if len(unknown) > 0 {
-		h.send(clients, c, ErrorMessage{Type: TypeError, Code: CodeUnknownKeys,
-			Message: "unknown keys ignored", Keys: unknown})
+		h.send(clients, c, ErrorMessage{
+			Type: TypeError, Code: CodeUnknownKeys,
+			Message: "unknown keys ignored", Keys: unknown,
+		})
 	}
 	snap := SnapshotMessage{Type: TypeSnapshot, Values: map[string]ValueDTO{}}
 	for k, v := range h.d.Cache.GetMultiple(added) {

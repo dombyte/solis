@@ -42,14 +42,17 @@ type watched struct {
 // New creates a supervisor whose root context derives from parent. pollInterval scales
 // every grace period.
 func New(parent context.Context, pollInterval time.Duration, clock utils.Clock,
-	log zerolog.Logger) *Supervisor {
+	log zerolog.Logger,
+) *Supervisor {
 	ctx, cancel := context.WithCancelCause(parent)
 	s := &Supervisor{
 		interval: pollInterval, clock: clock, log: log,
 		ctx: ctx, cancel: cancel, wake: make(chan struct{}, reportBuffer),
 	}
-	s.snap.Store(&Snapshot{Status: StatusOK, Components: map[string]ComponentStatus{},
-		At: clock.Now()})
+	s.snap.Store(&Snapshot{
+		Status: StatusOK, Components: map[string]ComponentStatus{},
+		At: clock.Now(),
+	})
 	return s
 }
 

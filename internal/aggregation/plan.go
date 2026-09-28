@@ -76,8 +76,10 @@ func dayJobs(p period.Period, w Watermarks) ([]Job, error) {
 	var jobs []Job
 	day, err := period.AddDays(start, 1)
 	for err == nil && day <= p.Day {
-		jobs = append(jobs, Job{Level: period.Daily, Key: day, From: day, To: day,
-			Freeze: w.ClosedThrough != "" && day <= w.ClosedThrough})
+		jobs = append(jobs, Job{
+			Level: period.Daily, Key: day, From: day, To: day,
+			Freeze: w.ClosedThrough != "" && day <= w.ClosedThrough,
+		})
 		day, err = period.AddDays(day, 1)
 	}
 	return jobs, err
@@ -123,6 +125,8 @@ func boundedJob(p period.Period, w Watermarks, l period.Level, key string) (Job,
 	if p.Day < to {
 		to = p.Day
 	}
-	return Job{Level: l, Key: key, From: first, To: to,
-		Freeze: w.ClosedThrough != "" && last <= w.ClosedThrough}, nil
+	return Job{
+		Level: l, Key: key, From: first, To: to,
+		Freeze: w.ClosedThrough != "" && last <= w.ClosedThrough,
+	}, nil
 }

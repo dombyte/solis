@@ -63,8 +63,10 @@ func TestHealth_FailClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		svc, r := setup(t)
-		svc.EXPECT().Health().Return(health.Snapshot{Status: tt.status, Component: "poller",
-			Reason: "restart budget exhausted", Components: map[string]health.ComponentStatus{}}).Once()
+		svc.EXPECT().Health().Return(health.Snapshot{
+			Status: tt.status, Component: "poller",
+			Reason: "restart budget exhausted", Components: map[string]health.ComponentStatus{},
+		}).Once()
 		code, body := do(t, r, "/health")
 		assert.Equal(t, tt.code, code, tt.status)
 		assert.Equal(t, tt.status, body["status"])
@@ -79,8 +81,10 @@ func TestKeys(t *testing.T) {
 	svc, r := setup(t)
 	svc.EXPECT().Keys().Return([]solis.Register{
 		{Key: "grid_power", Name: "Grid Power", Address: 33130, DataType: solis.Int32, Unit: "W"},
-		{Key: "pv_energy_monthly", Name: "PV Energy Monthly", DataType: solis.Uint32,
-			Unit: "kWh", Store: solis.StoreMonthly},
+		{
+			Key: "pv_energy_monthly", Name: "PV Energy Monthly", DataType: solis.Uint32,
+			Unit: "kWh", Store: solis.StoreMonthly,
+		},
 	}).Once()
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/keys", nil))
@@ -99,8 +103,10 @@ func TestKeys(t *testing.T) {
 func TestData_CurrentValue(t *testing.T) {
 	svc, r := setup(t)
 	svc.EXPECT().Register("grid_power").Return(reg("grid_power", solis.StoreNone), nil).Once()
-	svc.EXPECT().Current("grid_power").Return(&solis.Value{Key: "grid_power", Name: "Grid Power",
-		Unit: "W", DecodedValue: 0, RawValue: 0, Timestamp: t0}, nil).Once()
+	svc.EXPECT().Current("grid_power").Return(&solis.Value{
+		Key: "grid_power", Name: "Grid Power",
+		Unit: "W", DecodedValue: 0, RawValue: 0, Timestamp: t0,
+	}, nil).Once()
 	code, body := do(t, r, "/api/data/grid_power")
 	assert.Equal(t, http.StatusOK, code)
 	assert.Contains(t, body, "value", "zero is present, not omitted")
@@ -144,7 +150,8 @@ func TestData_TotalAndStatus(t *testing.T) {
 	svc, r := setup(t)
 	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
 	svc.EXPECT().Total(mock.Anything, "pv_energy_total").Return(&history.TotalDataPoint{
-		Value: 5230.456, RawValue: 5230.456, Timestamp: "t"}, nil).Once()
+		Value: 5230.456, RawValue: 5230.456, Timestamp: "t",
+	}, nil).Once()
 	code, body := do(t, r, "/api/data/pv_energy_total")
 	assert.Equal(t, http.StatusOK, code)
 	assert.InDelta(t, 5230.46, body["value"], 1e-9)
@@ -156,7 +163,8 @@ func TestData_TotalAndStatus(t *testing.T) {
 
 	svc.EXPECT().Register("grid_fault_1").Return(reg("grid_fault_1", solis.StoreStatus), nil)
 	svc.EXPECT().StatusHistory(mock.Anything, "grid_fault_1").Return(service.StatusHistory{
-		Key: "grid_fault_1", History: []service.StatusEntry{}}, nil).Once()
+		Key: "grid_fault_1", History: []service.StatusEntry{},
+	}, nil).Once()
 	code, body = do(t, r, "/api/data/grid_fault_1")
 	assert.Equal(t, http.StatusOK, code)
 	assert.Equal(t, "grid_fault_1", body["key"])
@@ -186,8 +194,10 @@ func TestData_Errors(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, code)
 	assert.Equal(t, "Internal Server Error", body["message"], "internals never exposed")
 
-	svc.EXPECT().Current("grid_power").Return(nil, &service.KeyError{Key: "grid_power",
-		Err: service.ErrNoData}).Once()
+	svc.EXPECT().Current("grid_power").Return(nil, &service.KeyError{
+		Key: "grid_power",
+		Err: service.ErrNoData,
+	}).Once()
 	code, _ = do(t, r, "/api/data/grid_power")
 	assert.Equal(t, http.StatusNotFound, code)
 }
@@ -225,8 +235,10 @@ func TestParseTimeRange(t *testing.T) {
 
 func TestData_StorageTimeout(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
-	deps := HandlerDeps{Service: svc, Errors: NewErrorMapper(zerolog.Nop()),
-		Clock: clocktest.New(t0), Timeout: time.Second}
+	deps := HandlerDeps{
+		Service: svc, Errors: NewErrorMapper(zerolog.Nop()),
+		Clock: clocktest.New(t0), Timeout: time.Second,
+	}
 	svc.EXPECT().Register("pv_energy_total").Return(reg("pv_energy_total", solis.StoreTotal), nil)
 	svc.EXPECT().Total(mock.Anything, "pv_energy_total").RunAndReturn(
 		func(ctx context.Context, _ string) (*history.TotalDataPoint, error) {

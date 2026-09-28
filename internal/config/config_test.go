@@ -41,8 +41,10 @@ func TestValidate(t *testing.T) {
 		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poll_timeout"},
 		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
 		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "error_retention"},
-		{"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
-			"daily_retention"},
+		{
+			"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
+			"daily_retention",
+		},
 		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "synchronous"},
 		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "temp_store"},
 		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "max_backups"},

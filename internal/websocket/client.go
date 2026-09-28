@@ -38,8 +38,10 @@ type Client struct {
 }
 
 func newClient(h *Hub, conn *websocket.Conn) *Client {
-	c := &Client{hub: h, conn: conn, send: make(chan []byte, sendBuffer), clock: h.d.Clock,
-		log: h.d.Log, closed: make(chan struct{})}
+	c := &Client{
+		hub: h, conn: conn, send: make(chan []byte, sendBuffer), clock: h.d.Clock,
+		log: h.d.Log, closed: make(chan struct{}),
+	}
 	c.touch()
 	return c
 }

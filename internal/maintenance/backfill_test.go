@@ -191,14 +191,22 @@ func TestBackfill_InvalidArgsAndOpenError(t *testing.T) {
 
 func TestReportFormatAndCounts(t *testing.T) {
 	r := Report{Lines: []Line{
-		{Level: "monthly", Key: "pv_energy_monthly", Period: "2026-08", Old: 412.3, HadOld: true,
-			New: 409.87, Unit: "kWh"},
-		{Level: "monthly", Key: "grid_energy_monthly", Period: "2026-08", Old: -3.1, HadOld: true,
-			New: -3.42, Unit: "kWh"},
-		{Level: "yearly", Key: "pv_energy_yearly", Period: "2025", Old: 5230, HadOld: true,
-			New: 4980.22, Unit: "kWh"},
-		{Level: "yearly", Key: "grid_import_yearly", Period: "2025", Old: 1, HadOld: true,
-			New: 1.001, Unit: "kWh"},
+		{
+			Level: "monthly", Key: "pv_energy_monthly", Period: "2026-08", Old: 412.3, HadOld: true,
+			New: 409.87, Unit: "kWh",
+		},
+		{
+			Level: "monthly", Key: "grid_energy_monthly", Period: "2026-08", Old: -3.1, HadOld: true,
+			New: -3.42, Unit: "kWh",
+		},
+		{
+			Level: "yearly", Key: "pv_energy_yearly", Period: "2025", Old: 5230, HadOld: true,
+			New: 4980.22, Unit: "kWh",
+		},
+		{
+			Level: "yearly", Key: "grid_import_yearly", Period: "2025", Old: 1, HadOld: true,
+			New: 1.001, Unit: "kWh",
+		},
 	}}
 	var b bytes.Buffer
 	require.NoError(t, r.Write(&b))

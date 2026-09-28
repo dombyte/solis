@@ -82,7 +82,8 @@ func (d *DayAttributor) SeedDays(now time.Time) []string {
 // Seed initialises every key from stored rows (day -> key -> value) and the persisted
 // closed-day watermarks, so a restart inside the window compares correctly (spec §7.2).
 func (d *DayAttributor) Seed(now time.Time, rows map[string]map[string]float64,
-	closed map[string]string) {
+	closed map[string]string,
+) {
 	expected := d.roll.LastEnded(now).Opening
 	w, in := inWindow(d.roll, now)
 	for k, st := range d.keys {

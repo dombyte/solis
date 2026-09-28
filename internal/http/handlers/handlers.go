@@ -79,9 +79,11 @@ func GetKeysHandler(deps HandlerDeps) http.Handler {
 			if _, periodic := r.Store.Level(); periodic {
 				desc += " - Use with start/end query parameters for historical data"
 			}
-			infos = append(infos, RegisterInfo{Key: r.Key, Name: r.Name, Address: r.Address,
+			infos = append(infos, RegisterInfo{
+				Key: r.Key, Name: r.Name, Address: r.Address,
 				DataType: r.DataType.String(), Unit: r.Unit, Store: r.Store.String(),
-				Description: desc})
+				Description: desc,
+			})
 		}
 		WriteJSON(w, http.StatusOK, infos)
 	})
@@ -107,8 +109,10 @@ func GetDataHandler(deps HandlerDeps) http.Handler {
 		}
 		ctx, cancel := deps.readContext(r.Context())
 		defer cancel()
-		body, err := dispatch(ctx, deps, dataRequest{reg: reg, hasRange: hasRange,
-			start: q.Get("start"), end: q.Get("end")})
+		body, err := dispatch(ctx, deps, dataRequest{
+			reg: reg, hasRange: hasRange,
+			start: q.Get("start"), end: q.Get("end"),
+		})
 		if err != nil {
 			deps.Errors.Write(w, err)
 			return
@@ -156,7 +160,8 @@ func dispatch(ctx context.Context, deps HandlerDeps, req dataRequest) (any, erro
 }
 
 func periodHistory(ctx context.Context, deps HandlerDeps, reg solis.Register, start, end string) (
-	any, error) {
+	any, error,
+) {
 	tr, err := ParseTimeRange(start, end, deps.Clock.Now())
 	if err != nil {
 		return nil, err
@@ -176,8 +181,10 @@ func total(ctx context.Context, deps HandlerDeps, reg solis.Register) (any, erro
 	if err != nil {
 		return nil, err
 	}
-	return DataResponse{Key: reg.Key, Name: reg.Name, Unit: reg.Unit,
-		Value: round(dp.Value), RawValue: round(dp.RawValue), Timestamp: dp.Timestamp}, nil
+	return DataResponse{
+		Key: reg.Key, Name: reg.Name, Unit: reg.Unit,
+		Value: round(dp.Value), RawValue: round(dp.RawValue), Timestamp: dp.Timestamp,
+	}, nil
 }
 
 // DataResponse is a single current or total value (values rounded to two decimals).
@@ -193,9 +200,11 @@ type DataResponse struct {
 
 // NewDataResponse renders a cached value.
 func NewDataResponse(v *solis.Value) DataResponse {
-	return DataResponse{Key: v.Key, Name: v.Name, Unit: v.Unit, Value: round(v.DecodedValue),
+	return DataResponse{
+		Key: v.Key, Name: v.Name, Unit: v.Unit, Value: round(v.DecodedValue),
 		RawValue: round(v.RawValue), Timestamp: v.Timestamp.Format(time.RFC3339),
-		StatusDecoded: v.StatusDecoded}
+		StatusDecoded: v.StatusDecoded,
+	}
 }
 
 func round(f float64) utils.Float64With2Decimals {

@@ -81,8 +81,10 @@ func TestDecodeBlock_StatusAndSignedGrid(t *testing.T) {
 	raw[0] = 0x0003                                     // solis_status Generating
 	raw[33130-33095], raw[33131-33095] = 0xFFFF, 0xFFFE // grid_power -2 W
 	values := d.DecodeBlock(b, raw, at)
-	assert.Equal(t, map[string]string{"name": "Generating",
-		"description": "Initializing / Generating"}, values["solis_status"].StatusDecoded)
+	assert.Equal(t, map[string]string{
+		"name":        "Generating",
+		"description": "Initializing / Generating",
+	}, values["solis_status"].StatusDecoded)
 	assert.InDelta(t, -2.0, values["grid_power"].DecodedValue, 1e-9)
 	assert.Nil(t, values["grid_fault_1"].StatusDecoded)
 }
@@ -97,8 +99,10 @@ func TestDecodeStatus(t *testing.T) {
 		d.DecodeStatus("battery_fault_2_bms", 1<<7))
 	assert.Nil(t, d.DecodeStatus("device_fault_5", 0))
 	assert.Equal(t, []string{"No bit map defined for register x"}, d.DecodeStatus("x", 1))
-	assert.Equal(t, map[string]string{"name": "Unknown Status (0x9999)",
-		"description": "Unknown status code: 0x9999"}, d.DecodeStatus("solis_status", 0x9999))
+	assert.Equal(t, map[string]string{
+		"name":        "Unknown Status (0x9999)",
+		"description": "Unknown status code: 0x9999",
+	}, d.DecodeStatus("solis_status", 0x9999))
 }
 
 func TestDerive_BatteryPowerSigned(t *testing.T) {

@@ -165,8 +165,10 @@ func TestPrepare_V2DatabaseIsMigrated(t *testing.T) {
 
 func TestPrepare_TooOldDatabaseIsRejected(t *testing.T) {
 	tests := map[string][]string{
-		"schema v1": {SchemaVersionTableSQL,
-			`INSERT INTO schema_version (version, success) VALUES (1, 1)`},
+		"schema v1": {
+			SchemaVersionTableSQL,
+			`INSERT INTO schema_version (version, success) VALUES (1, 1)`,
+		},
 		"pre-migration data": {`CREATE TABLE daily_values (id INTEGER PRIMARY KEY)`},
 	}
 	for name, stmts := range tests {

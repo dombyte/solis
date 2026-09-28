@@ -142,7 +142,7 @@ func openSourceDatabase(sourcePath string) (*sql.DB, error) {
 func ensureDestinationDirectory(destPath string) error {
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0750); err != nil {
+		if err := os.MkdirAll(destDir, 0o750); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
@@ -227,7 +227,8 @@ func checkBackupIntegrity(path string) (err error) {
 // CreateBackup creates an integrity-checked backup copy of the database file; now names
 // the file.
 func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolog.Logger) (
-	string, error) {
+	string, error,
+) {
 	if !config.Enabled {
 		log.Info().Msg("Backup disabled, skipping backup creation")
 		return "", nil
@@ -240,7 +241,7 @@ func CreateBackup(dbPath string, config *BackupConfig, now time.Time, log zerolo
 
 	// Ensure the backups subdirectory (and its parent) exists
 	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
-	if err := os.MkdirAll(backupsDir, 0750); err != nil {
+	if err := os.MkdirAll(backupsDir, 0o750); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
 

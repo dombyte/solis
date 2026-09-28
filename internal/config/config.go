@@ -280,7 +280,8 @@ func (s *StorageSettings) validateRetention() error {
 		name string
 		d    time.Duration
 	}{
-		{"daily_retention", s.DailyRetention}, {"error_retention", s.ErrorRetention},
+		{"daily_retention", s.DailyRetention},
+		{"error_retention", s.ErrorRetention},
 		{"cleanup_interval", s.CleanupInterval},
 	}
 	for _, d := range durations {

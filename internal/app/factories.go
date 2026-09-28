@@ -19,14 +19,17 @@ import (
 // CreateModbus returns the factory of the restartable Modbus component. Each instance
 // publishes its client through slot so the poller never holds a stale reference (D11).
 func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
-	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger) health.Factory {
+	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger,
+) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
 		c, err := modbus.New(modbusSettings(cfg), clock, log)
 		if err != nil {
 			return nil, err
 		}
-		return &modbusComponent{Status: health.NewStatus(rep, clock), client: c, slot: slot,
-			interval: interval}, nil
+		return &modbusComponent{
+			Status: health.NewStatus(rep, clock), client: c, slot: slot,
+			interval: interval,
+		}, nil
 	}
 }
 

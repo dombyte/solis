@@ -81,21 +81,27 @@ func newEnv(t *testing.T, start, cutover time.Time) *env {
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
-	cfg := storage.Settings{Path: filepath.Join(t.TempDir(), "s.db"),
-		Synchronous: "NORMAL", TempStore: "MEMORY"}
+	cfg := storage.Settings{
+		Path:        filepath.Join(t.TempDir(), "s.db"),
+		Synchronous: "NORMAL", TempStore: "MEMORY",
+	}
 	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 	_, _, err = st.EnsureCutover(bg, period.Of(cutover))
 	require.NoError(t, err)
 	bus := eventbus.New()
-	e := &env{t: t, clk: clk, st: st, store: &countingStore{Store: st}, bus: bus,
-		cache: &countingCache{Cache: cache.New(bus, zerolog.Nop())}, reg: reg}
+	e := &env{
+		t: t, clk: clk, st: st, store: &countingStore{Store: st}, bus: bus,
+		cache: &countingCache{Cache: cache.New(bus, zerolog.Nop())}, reg: reg,
+	}
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Recovering, "disk I/O error").Maybe()
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
-	e.agg, err = New(Deps{Store: e.store, Cache: e.cache, Bus: bus, Registry: reg, Clock: clk,
-		PollInterval: iv, Timeout: time.Second, Reporter: rep, Log: zerolog.Nop()})
+	e.agg, err = New(Deps{
+		Store: e.store, Cache: e.cache, Bus: bus, Registry: reg, Clock: clk,
+		PollInterval: iv, Timeout: time.Second, Reporter: rep, Log: zerolog.Nop(),
+	})
 	require.NoError(t, err)
 	return e
 }
@@ -108,7 +114,8 @@ func (e *env) start() {
 
 func (e *env) daily(key, day string, v float64) {
 	require.NoError(e.t, e.st.WritePoll(bg, storage.PollWrite{
-		Daily: []storage.DailyRow{{Key: key, Day: day, Value: v, Raw: v * 10}}}))
+		Daily: []storage.DailyRow{{Key: key, Day: day, Value: v, Raw: v * 10}},
+	}))
 }
 
 func (e *env) closeAll(day string) {
@@ -120,8 +127,10 @@ func (e *env) closeAll(day string) {
 }
 
 func (e *env) pollEvent() {
-	e.bus.Publish(eventbus.Event{Kind: eventbus.ValuesUpdated, Domain: eventbus.DomainPoller,
-		At: e.clk.Now()})
+	e.bus.Publish(eventbus.Event{
+		Kind: eventbus.ValuesUpdated, Domain: eventbus.DomainPoller,
+		At: e.clk.Now(),
+	})
 }
 
 func (e *env) waitRuns(n int32) {

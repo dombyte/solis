@@ -37,13 +37,16 @@ type bounds struct {
 
 // rangeQuery binds b to a `key, from, to, limit` history statement.
 func rangeQuery(what, stmt string, b bounds) query {
-	return query{what: what, sql: stmt,
-		args: []any{b.key, b.start.Format(b.layout), b.end.Format(b.layout), b.limit}}
+	return query{
+		what: what, sql: stmt,
+		args: []any{b.key, b.start.Format(b.layout), b.end.Format(b.layout), b.limit},
+	}
 }
 
 // scanRows runs q and scans every row with scan.
 func scanRows[T any](ctx context.Context, db *sql.DB, q query,
-	scan func(*sql.Rows) (T, error)) ([]T, error) {
+	scan func(*sql.Rows) (T, error),
+) ([]T, error) {
 	what := q.what
 	rows, err := db.QueryContext(ctx, q.sql, q.args...)
 	if err != nil {
@@ -73,12 +76,15 @@ func statusTimestamp(t time.Time) string {
 // Over the row cap the newest maxErrorRows changes are kept. CAST drops the DATETIME
 // decltype so the driver returns the stored text instead of reformatting it.
 func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.ErrorDataPoint, error) {
-	out, err := scanRows(ctx, s.db, query{what: "error history",
+	[]*history.ErrorDataPoint, error,
+) {
+	out, err := scanRows(ctx, s.db, query{
+		what: "error history",
 		sql: `SELECT CAST(timestamp AS TEXT), raw_value, string_value FROM error_data
 		WHERE register_key = ? AND timestamp >= ? AND timestamp <= ?
 		ORDER BY timestamp DESC LIMIT ?`,
-		args: []any{key, statusTimestamp(start), statusTimestamp(end), maxErrorRows}},
+		args: []any{key, statusTimestamp(start), statusTimestamp(end), maxErrorRows},
+	},
 		func(r *sql.Rows) (*history.ErrorDataPoint, error) {
 			var dp history.ErrorDataPoint
 			var str sql.NullString
@@ -93,7 +99,8 @@ func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end ti
 // GetDailyHistory returns the daily rows of key between the start and end days.
 // substr() drops the DATE decltype so the driver returns the raw YYYY-MM-DD key.
 func (s *Storage) GetDailyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.DailyDataPoint, error) {
+	[]*history.DailyDataPoint, error,
+) {
 	return scanRows(ctx, s.db, rangeQuery("daily history",
 		`SELECT substr(date, 1, 10), value, raw_value FROM daily_values
 		WHERE register_key = ? AND date >= ? AND date <= ? ORDER BY date LIMIT ?`,
@@ -106,7 +113,8 @@ func (s *Storage) GetDailyHistory(ctx context.Context, key string, start, end ti
 
 // GetMonthlyHistory returns the monthly rows of key between the start and end months.
 func (s *Storage) GetMonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.MonthlyDataPoint, error) {
+	[]*history.MonthlyDataPoint, error,
+) {
 	return scanRows(ctx, s.db, rangeQuery("monthly history",
 		`SELECT month, value, raw_value FROM monthly_values
 		WHERE register_key = ? AND month >= ? AND month <= ? ORDER BY month LIMIT ?`,
@@ -119,7 +127,8 @@ func (s *Storage) GetMonthlyHistory(ctx context.Context, key string, start, end 
 
 // GetYearlyHistory returns the yearly rows of key between the start and end years.
 func (s *Storage) GetYearlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.YearlyDataPoint, error) {
+	[]*history.YearlyDataPoint, error,
+) {
 	return scanRows(ctx, s.db, rangeQuery("yearly history",
 		`SELECT year, value, raw_value FROM yearly_values
 		WHERE register_key = ? AND year >= ? AND year <= ? ORDER BY year LIMIT ?`,
@@ -133,7 +142,8 @@ func (s *Storage) GetYearlyHistory(ctx context.Context, key string, start, end t
 // GetTotalHistory returns the stored total of key, or nil when none exists. The
 // timestamp is returned as stored (CAST drops the DATETIME decltype).
 func (s *Storage) GetTotalHistory(ctx context.Context, key string) (
-	*history.TotalDataPoint, error) {
+	*history.TotalDataPoint, error,
+) {
 	var dp history.TotalDataPoint
 	err := s.db.QueryRowContext(ctx, `SELECT value, raw_value, CAST(timestamp AS TEXT)
 		FROM total_values

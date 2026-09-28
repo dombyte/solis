@@ -92,7 +92,8 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 // Recompute rewrites monthly and yearly rows (always both) of the affected years and, if a
 // closed year is included, the total baseline. It returns the report lines.
 func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int) (
-	Report, error) {
+	Report, error,
+) {
 	var rep Report
 	if err := checkPurged(tx, now, years); err != nil {
 		return rep, err
@@ -136,7 +137,8 @@ func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
 }
 
 func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year string,
-	rep *Report) error {
+	rep *Report,
+) error {
 	months, err := monthsOf(year, now)
 	if err != nil {
 		return err
@@ -155,8 +157,10 @@ func recomputeYear(tx storage.BackfillTx, reg Registry, now period.Period, year 
 	if err != nil {
 		return err
 	}
-	return recomputePeriod(tx, reg, job{level: period.Yearly, key: year, from: first,
-		to: min(last, now.Day)}, rep)
+	return recomputePeriod(tx, reg, job{
+		level: period.Yearly, key: year, from: first,
+		to: min(last, now.Day),
+	}, rep)
 }
 
 // monthsOf lists the months of year up to the current month.
@@ -200,8 +204,10 @@ func recomputePeriod(tx storage.BackfillTx, reg Registry, j job, rep *Report) er
 		if err := tx.PutPeriod(l, key, p, vals[key]); err != nil {
 			return err
 		}
-		rep.add(Line{Level: l.String(), Key: key, Period: p, Old: old, HadOld: had,
-			New: vals[key], Unit: unitOf(reg, key)})
+		rep.add(Line{
+			Level: l.String(), Key: key, Period: p, Old: old, HadOld: had,
+			New: vals[key], Unit: unitOf(reg, key),
+		})
 	}
 	return nil
 }
@@ -224,8 +230,10 @@ func refreshBaseline(tx storage.BackfillTx, reg Registry, rep *Report) error {
 	next := aggregation.ApplyEdges(edges, sums)
 	for _, key := range sortedKeys(next) {
 		o, had := old[key]
-		rep.add(Line{Level: "total", Key: key, Period: "baseline", Old: o, HadOld: had,
-			New: next[key], Unit: unitOf(reg, key)})
+		rep.add(Line{
+			Level: "total", Key: key, Period: "baseline", Old: o, HadOld: had,
+			New: next[key], Unit: unitOf(reg, key),
+		})
 	}
 	return tx.PutBaseline(next)
 }

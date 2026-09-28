@@ -83,8 +83,10 @@ func New(d Deps) (*Aggregator, error) {
 }
 
 func (d Deps) validate() error {
-	required := []bool{d.Store != nil, d.Cache != nil, d.Bus != nil, d.Registry != nil,
-		d.Clock != nil, d.Reporter != nil, d.PollInterval > 0}
+	required := []bool{
+		d.Store != nil, d.Cache != nil, d.Bus != nil, d.Registry != nil,
+		d.Clock != nil, d.Reporter != nil, d.PollInterval > 0,
+	}
 	for _, ok := range required {
 		if !ok {
 			return ErrMissingDependency
@@ -168,7 +170,8 @@ func (a *Aggregator) loop(ctx context.Context, events <-chan eventbus.Event) {
 // window; later events in the window arm one trailing run. Own (aggregator-domain)
 // events are ignored.
 func (a *Aggregator) onEvent(ctx context.Context, e eventbus.Event, debounce utils.Timer,
-	armed bool) bool {
+	armed bool,
+) bool {
 	switch {
 	case e.Kind == eventbus.PeriodClosed:
 		a.run(ctx)

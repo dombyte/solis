@@ -109,9 +109,11 @@ func New(d Deps) (*Poller, error) {
 }
 
 func (d Deps) validate() error {
-	required := []bool{d.Source != nil, d.Store != nil, d.Cache != nil, d.Bus != nil,
+	required := []bool{
+		d.Source != nil, d.Store != nil, d.Cache != nil, d.Bus != nil,
 		d.Decoder != nil, d.Registry != nil, d.Clock != nil, d.Reporter != nil,
-		d.Settings.Interval > 0}
+		d.Settings.Interval > 0,
+	}
 	for _, ok := range required {
 		if !ok {
 			return ErrMissingDependency

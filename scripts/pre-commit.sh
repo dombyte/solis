@@ -24,18 +24,15 @@ print_result() {
     fi
 }
 
-# 1. Run gofmt
-echo "Running gofmt..."
-gofmt -w -s . 2>/dev/null
-print_result $? "gofmt"
-
-# 2. Run goimports
-echo "Running goimports..."
-if command -v goimports &> /dev/null; then
-    goimports -w -d . 2>/dev/null
-    print_result $? "goimports"
+# 1-2. Format: gofumpt + goimports (formatters in .golangci.yml); gofmt as fallback
+echo "Formatting..."
+if command -v golangci-lint &> /dev/null; then
+    golangci-lint fmt --config .golangci.yml
+    print_result $? "golangci-lint fmt (gofumpt, goimports)"
 else
-    echo -e "${YELLOW}⚠${NC} goimports not installed, skipping"
+    echo -e "${YELLOW}⚠${NC} golangci-lint not installed, falling back to gofmt"
+    gofmt -w -s . 2>/dev/null
+    print_result $? "gofmt"
 fi
 
 # 3. Run golangci-lint

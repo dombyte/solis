@@ -160,19 +160,22 @@ func readHistory[T any](s *ReadService, want solis.Store, get historyFunc[T]) hi
 
 // DailyHistory returns daily rows of a daily key.
 func (s *ReadService) DailyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.DailyDataPoint, error) {
+	[]*history.DailyDataPoint, error,
+) {
 	return readHistory(s, solis.StoreDaily, s.d.Store.GetDailyHistory)(ctx, key, start, end)
 }
 
 // MonthlyHistory returns monthly rows of a monthly key.
 func (s *ReadService) MonthlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.MonthlyDataPoint, error) {
+	[]*history.MonthlyDataPoint, error,
+) {
 	return readHistory(s, solis.StoreMonthly, s.d.Store.GetMonthlyHistory)(ctx, key, start, end)
 }
 
 // YearlyHistory returns yearly rows of a yearly key.
 func (s *ReadService) YearlyHistory(ctx context.Context, key string, start, end time.Time) (
-	[]*history.YearlyDataPoint, error) {
+	[]*history.YearlyDataPoint, error,
+) {
 	return readHistory(s, solis.StoreYearly, s.d.Store.GetYearlyHistory)(ctx, key, start, end)
 }
 
@@ -220,13 +223,16 @@ func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHist
 	}
 	// Cleared states (no active bits) are kept: "fault cleared" is history too.
 	for _, p := range points {
-		out.History = append(out.History, StatusEntry{Timestamp: p.Timestamp,
-			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue))})
+		out.History = append(out.History, StatusEntry{
+			Timestamp:     p.Timestamp,
+			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue)),
+		})
 	}
 	if v := s.d.Cache.Get(key); v != nil && v.StatusDecoded != nil && !lastIs(points, v) {
 		out.History = append(out.History, StatusEntry{
 			Timestamp:     v.Timestamp.UTC().Format(period.TimestampLayout),
-			StatusDecoded: v.StatusDecoded})
+			StatusDecoded: v.StatusDecoded,
+		})
 	}
 	// Both sources use period.TimestampLayout, so string order is time order.
 	sort.SliceStable(out.History, func(i, j int) bool {

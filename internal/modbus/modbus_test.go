@@ -25,6 +25,7 @@ func (d *device) HandleCoils(*sv.CoilsRequest) ([]bool, error) { return nil, sv.
 func (d *device) HandleDiscreteInputs(*sv.DiscreteInputsRequest) ([]bool, error) {
 	return nil, sv.ErrIllegalFunction
 }
+
 func (d *device) HandleHoldingRegisters(*sv.HoldingRegistersRequest) ([]uint16, error) {
 	return nil, sv.ErrIllegalFunction
 }
@@ -64,15 +65,19 @@ func startDevice(t *testing.T, port int) *sv.ModbusServer {
 }
 
 func settings(port int) Settings {
-	return Settings{Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
-		Timeout: 500 * time.Millisecond}
+	return Settings{
+		Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
+		Timeout: 500 * time.Millisecond,
+	}
 }
 
 func TestSettingsValidate(t *testing.T) {
 	assert.NoError(t, settings(502).Validate())
 	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}.Validate())
-	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
-		Parity: "e"}.Validate())
+	assert.NoError(t, Settings{
+		Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+		Parity: "e",
+	}.Validate())
 	for _, s := range []Settings{
 		{},
 		{Address: "tcp://h:502", Timeout: 0},

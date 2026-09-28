@@ -41,7 +41,8 @@ type Manager struct {
 
 // NewManager creates a manager with all migrations registered.
 func NewManager(cfg Settings, backup *BackupConfig, clock utils.Clock,
-	log zerolog.Logger) *Manager {
+	log zerolog.Logger,
+) *Manager {
 	registry := NewMigrationRegistry()
 	registry.Register(migrations.GetV3Migration())
 	return &Manager{

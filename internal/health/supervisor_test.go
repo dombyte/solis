@@ -42,6 +42,7 @@ func (f *fakeComp) Start(context.Context) error {
 	f.started.Store(true)
 	return f.startErr
 }
+
 func (f *fakeComp) Stop() error {
 	if !f.started.Load() {
 		f.stopEarly.Store(true)
@@ -74,8 +75,10 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	clk := clocktest.New(t0)
-	return &harness{t: t, clk: clk, sup: New(context.Background(), interval, clk, zerolog.Nop()),
-		comps: make(map[string][]*fakeComp)}
+	return &harness{
+		t: t, clk: clk, sup: New(context.Background(), interval, clk, zerolog.Nop()),
+		comps: make(map[string][]*fakeComp),
+	}
 }
 
 func (h *harness) factory(name string, mk func() *fakeComp) Factory {

@@ -169,8 +169,10 @@ func New(set Settings, clock utils.Clock, log zerolog.Logger) (*Client, error) {
 		return nil, err
 	}
 	scheme, _, _ := set.scheme()
-	return &Client{set: set, rtu: scheme == "rtu", clock: clock, log: log,
-		lost: make(chan struct{}, 1)}, nil
+	return &Client{
+		set: set, rtu: scheme == "rtu", clock: clock, log: log,
+		lost: make(chan struct{}, 1),
+	}, nil
 }
 
 // IsConnected reports whether the connection is up.
@@ -313,7 +315,8 @@ func (c *Client) Run(ctx context.Context, beatEvery time.Duration, beat func()) 
 // wait sleeps d, beating every beatEvery, and returns early when ctx is done or (with
 // stopOnLost) when a read marked the connection lost.
 func (c *Client) wait(ctx context.Context, d, beatEvery time.Duration, beat func(),
-	stopOnLost bool) {
+	stopOnLost bool,
+) {
 	lost := c.lost
 	if !stopOnLost {
 		lost = nil

@@ -99,8 +99,10 @@ func newEnv(t *testing.T, start time.Time) *env {
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
-	cfg := storage.Settings{Path: filepath.Join(t.TempDir(), "s.db"),
-		Synchronous: "NORMAL", TempStore: "MEMORY"}
+	cfg := storage.Settings{
+		Path:        filepath.Join(t.TempDir(), "s.db"),
+		Synchronous: "NORMAL", TempStore: "MEMORY",
+	}
 	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
@@ -109,8 +111,10 @@ func newEnv(t *testing.T, start time.Time) *env {
 	require.NoError(t, err)
 	t.Cleanup(unsub)
 
-	e := &env{t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
-		events: events}
+	e := &env{
+		t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
+		events: events,
+	}
 	var src utils.Slot[Reader]
 	src.Store(e.dev)
 	rep := mocks.NewMockReporter(t)
@@ -118,8 +122,10 @@ func newEnv(t *testing.T, start time.Time) *env {
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
 	roll := rollover(t, "23:59")
 	e.p, err = New(Deps{
-		Settings: config.PollerSettings{Interval: pollEvery, BlockAttempts: 1,
-			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second},
+		Settings: config.PollerSettings{
+			Interval: pollEvery, BlockAttempts: 1,
+			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second,
+		},
 		Rollover: roll, Source: &src, Store: st, Cache: countingCache{e.cache, &e.polls},
 		Bus: bus, Decoder: solis.NewDecoder(reg, zerolog.Nop()), Registry: reg, Clock: clk,
 		Timeout: time.Second, Reporter: rep, Log: zerolog.Nop(),
@@ -273,7 +279,8 @@ func TestPoll_MidnightRolloverEmitsPeriodClosed(t *testing.T) {
 
 	// A late write for the closed day is rejected by storage (not by the poller).
 	err := e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
-		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 99}}})
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 99},
+	}})
 	assert.ErrorIs(t, err, storage.ErrPeriodClosed)
 
 	// At window end the remaining keys are force-closed.
@@ -287,7 +294,8 @@ func TestPoll_MidnightRolloverEmitsPeriodClosed(t *testing.T) {
 func TestPoll_ColdStartSeedsFromStorage(t *testing.T) {
 	e := newEnv(t, time.Date(2026, 8, 6, 0, 10, 0, 0, time.Local))
 	require.NoError(t, e.st.WritePoll(bg, storage.PollWrite{Daily: []storage.DailyRow{
-		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300}}}))
+		{Key: "pv_energy_daily", Day: "2026-08-05", Value: 30, Raw: 300},
+	}}))
 	e.dev.set(33035, 2) // 0.2 after the inverter reset
 	e.start()
 	e.waitPolls(1)

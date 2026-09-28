@@ -68,7 +68,8 @@ func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
 
 // applyComputed writes rows, freezes and folds inside tx and returns the rejected rows.
 func (s *Storage) applyComputed(tx *sql.Tx, next *metaState, w ComputedWrite) (
-	[]error, error) {
+	[]error, error,
+) {
 	var rejected []error
 	for _, r := range w.Rows {
 		if err := s.writeComputedRow(tx, *next, r, w.At); err != nil {
@@ -99,8 +100,10 @@ func (s *Storage) writeComputedRow(tx *sql.Tx, m metaState, r PeriodRow, at time
 	}
 	if r.Level != period.Total {
 		if closed := m.frozen[r.Level]; r.Period <= closed {
-			return &PeriodClosedError{Level: r.Level.String(), Key: r.Key, Period: r.Period,
-				ClosedThrough: closed}
+			return &PeriodClosedError{
+				Level: r.Level.String(), Key: r.Key, Period: r.Period,
+				ClosedThrough: closed,
+			}
 		}
 	}
 	return upsertPeriod(tx, reg, r, at)
@@ -109,12 +112,16 @@ func (s *Storage) writeComputedRow(tx *sql.Tx, m metaState, r PeriodRow, at time
 // checkAggregatorDomain allows computed monthly/yearly/total keys and net daily keys.
 func checkAggregatorDomain(reg solis.Register, l period.Level) error {
 	if reg.Store != solis.StoreForLevel(l) {
-		return &WriteDomainError{Writer: writerAggregator, Key: reg.Key,
-			Reason: "store does not match level " + l.String()}
+		return &WriteDomainError{
+			Writer: writerAggregator, Key: reg.Key,
+			Reason: "store does not match level " + l.String(),
+		}
 	}
 	if !reg.Computed() || (l == period.Daily && !reg.Net) {
-		return &WriteDomainError{Writer: writerAggregator, Key: reg.Key,
-			Reason: "not a computed register"}
+		return &WriteDomainError{
+			Writer: writerAggregator, Key: reg.Key,
+			Reason: "not a computed register",
+		}
 	}
 	return nil
 }

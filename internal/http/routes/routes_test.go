@@ -37,8 +37,10 @@ func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 		w.WriteHeader(http.StatusTeapot)
 	})
 	return svc, SetupRoutes(Deps{
-		Handlers: handlers.HandlerDeps{Service: svc,
-			Errors: handlers.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now())},
+		Handlers: handlers.HandlerDeps{
+			Service: svc,
+			Errors:  handlers.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
+		},
 		WebSocket: ws, FrontendDir: fe, DocsDir: docs, Log: zerolog.Nop(),
 	})
 }
@@ -84,9 +86,11 @@ func TestRoutes(t *testing.T) {
 
 func TestRoutes_WithoutDistFolders(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
-	r := SetupRoutes(Deps{Handlers: handlers.HandlerDeps{Service: svc},
+	r := SetupRoutes(Deps{
+		Handlers:    handlers.HandlerDeps{Service: svc},
 		FrontendDir: filepath.Join(t.TempDir(), "absent"), DocsDir: "/nonexistent",
-		Log: zerolog.Nop()})
+		Log: zerolog.Nop(),
+	})
 	assert.Equal(t, http.StatusNotFound, get(r, "/").Code)
 	assert.Equal(t, http.StatusNotFound, get(r, "/ws").Code)
 }

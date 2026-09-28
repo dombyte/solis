@@ -62,20 +62,26 @@ func round(v float64) utils.Float64With2Decimals {
 
 // MarshalJSON rounds values to two decimals.
 func (d DailyDataPoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(roundedPoint{Date: d.Date, Value: round(d.Value),
-		RawValue: round(d.RawValue)})
+	return json.Marshal(roundedPoint{
+		Date: d.Date, Value: round(d.Value),
+		RawValue: round(d.RawValue),
+	})
 }
 
 // MarshalJSON rounds values to two decimals.
 func (m MonthlyDataPoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(roundedPoint{Month: m.Month, Value: round(m.Value),
-		RawValue: round(m.RawValue)})
+	return json.Marshal(roundedPoint{
+		Month: m.Month, Value: round(m.Value),
+		RawValue: round(m.RawValue),
+	})
 }
 
 // MarshalJSON rounds values to two decimals.
 func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(roundedPoint{Year: y.Year, Value: round(y.Value),
-		RawValue: round(y.RawValue)})
+	return json.Marshal(roundedPoint{
+		Year: y.Year, Value: round(y.Value),
+		RawValue: round(y.RawValue),
+	})
 }
 
 // MarshalJSON rounds values to two decimals.

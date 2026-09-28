@@ -221,8 +221,10 @@ func TestSumDaily_ExplicitBounds(t *testing.T) {
 func TestBaselineFold_Idempotent(t *testing.T) {
 	s, _, _ := newStore(t, day("2027-01-01"))
 	fold := BaselineFold{Year: "2026", Add: map[string]float64{"pv_energy_total": 4000}}
-	w := ComputedWrite{Freezes: []Freeze{{Level: period.Yearly, Period: "2026"}},
-		Folds: []BaselineFold{fold}}
+	w := ComputedWrite{
+		Freezes: []Freeze{{Level: period.Yearly, Period: "2026"}},
+		Folds:   []BaselineFold{fold},
+	}
 	require.NoError(t, s.WriteComputed(ctx, w))
 	require.NoError(t, s.WriteComputed(ctx, w)) // duplicate close event
 
@@ -448,8 +450,10 @@ func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 	base := clk.Now()
 	rows := make([]StatusRow, 0, maxErrorRows+2)
 	for i := range maxErrorRows + 2 {
-		rows = append(rows, StatusRow{Key: "solis_status", Raw: float64(i),
-			At: base.Add(time.Duration(i) * time.Second)})
+		rows = append(rows, StatusRow{
+			Key: "solis_status", Raw: float64(i),
+			At: base.Add(time.Duration(i) * time.Second),
+		})
 	}
 	require.NoError(t, s.WritePoll(ctx, PollWrite{Status: rows}))
 	e, err := s.GetErrorHistory(ctx, "solis_status", base.Add(-time.Hour),

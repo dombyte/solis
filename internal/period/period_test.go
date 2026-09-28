@@ -23,13 +23,19 @@ func TestOf_KeyFormats(t *testing.T) {
 		day, month, year string
 	}{
 		{"midday", time.Date(2026, 8, 5, 12, 0, 0, 0, loc), "2026-08-05", "2026-08", "2026"},
-		{"just before midnight", time.Date(2026, 12, 31, 23, 59, 59, 0, loc),
-			"2026-12-31", "2026-12", "2026"},
+		{
+			"just before midnight", time.Date(2026, 12, 31, 23, 59, 59, 0, loc),
+			"2026-12-31", "2026-12", "2026",
+		},
 		{"midnight", time.Date(2027, 1, 1, 0, 0, 0, 0, loc), "2027-01-01", "2027-01", "2027"},
-		{"spring forward gap normalises", time.Date(2026, 3, 29, 2, 30, 0, 0, loc),
-			"2026-03-29", "2026-03", "2026"},
-		{"fall back repeated hour", time.Date(2026, 10, 25, 2, 30, 0, 0, loc),
-			"2026-10-25", "2026-10", "2026"},
+		{
+			"spring forward gap normalises", time.Date(2026, 3, 29, 2, 30, 0, 0, loc),
+			"2026-03-29", "2026-03", "2026",
+		},
+		{
+			"fall back repeated hour", time.Date(2026, 10, 25, 2, 30, 0, 0, loc),
+			"2026-10-25", "2026-10", "2026",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -112,15 +118,19 @@ func TestMonthsAndYearsBetween(t *testing.T) {
 }
 
 func TestParseRollover(t *testing.T) {
-	valid := map[string]string{"23:59": "23:59", "00:00": "00:00", "09:05": "09:05",
-		"20:30": "20:30"}
+	valid := map[string]string{
+		"23:59": "23:59", "00:00": "00:00", "09:05": "09:05",
+		"20:30": "20:30",
+	}
 	for in, want := range valid {
 		r, err := ParseRollover(in)
 		require.NoError(t, err, in)
 		assert.Equal(t, want, r.String())
 	}
-	invalid := []string{"11:59 PM", "24:00", "9:05", "23:60", "2359", "", "ab:cd", "23-59",
-		" 23:59", "23:5x"}
+	invalid := []string{
+		"11:59 PM", "24:00", "9:05", "23:60", "2359", "", "ab:cd", "23-59",
+		" 23:59", "23:5x",
+	}
 	for _, in := range invalid {
 		_, err := ParseRollover(in)
 		assert.ErrorIs(t, err, ErrInvalidRollover, in)
@@ -140,13 +150,19 @@ func TestWindowAt_LateRollover(t *testing.T) {
 		opening  string
 	}{
 		{"before window", time.Date(2026, 8, 5, 22, 58, 0, 0, loc), false, "", ""},
-		{"window start", time.Date(2026, 8, 5, 22, 59, 0, 0, loc), true,
-			"2026-08-05", "2026-08-06"},
-		{"just after midnight", time.Date(2026, 8, 6, 0, 5, 0, 0, loc), true,
-			"2026-08-05", "2026-08-06"},
+		{
+			"window start", time.Date(2026, 8, 5, 22, 59, 0, 0, loc), true,
+			"2026-08-05", "2026-08-06",
+		},
+		{
+			"just after midnight", time.Date(2026, 8, 6, 0, 5, 0, 0, loc), true,
+			"2026-08-05", "2026-08-06",
+		},
 		{"window end exclusive", time.Date(2026, 8, 6, 0, 59, 0, 0, loc), false, "", ""},
-		{"year boundary", time.Date(2027, 1, 1, 0, 30, 0, 0, loc), true,
-			"2026-12-31", "2027-01-01"},
+		{
+			"year boundary", time.Date(2027, 1, 1, 0, 30, 0, 0, loc), true,
+			"2026-12-31", "2027-01-01",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

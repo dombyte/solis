@@ -19,8 +19,10 @@ func ConfigRules() []config.Rule {
 
 // modbusSettings converts the config section into the Modbus client's settings.
 func modbusSettings(m config.ModbusSettings) modbus.Settings {
-	return modbus.Settings{Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
-		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits}
+	return modbus.Settings{
+		Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
+		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits,
+	}
 }
 
 // validateModbus applies the Modbus client's own settings rules.
@@ -47,9 +49,11 @@ func validatePollTimeout(c *config.AppConfig) error {
 
 // StorageSettings maps the storage section onto the storage package's settings.
 func StorageSettings(s config.StorageSettings) storage.Settings {
-	return storage.Settings{Path: s.Path, DailyRetention: s.DailyRetention,
+	return storage.Settings{
+		Path: s.Path, DailyRetention: s.DailyRetention,
 		ErrorRetention: s.ErrorRetention, WalMode: s.WalMode, Synchronous: s.Synchronous,
-		TempStore: s.TempStore}
+		TempStore: s.TempStore,
+	}
 }
 
 // DatabaseSettings maps the storage section onto the database manager's settings.

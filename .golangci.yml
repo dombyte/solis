@@ -141,13 +141,18 @@ linters:
         path: _test\.go
       - linters: [rowserrcheck, sqlclosecheck, bodyclose]
         path: _test\.go
-      # Frozen v1/v2 migrations (Plan.md A2): their SQL is historical and stays unchanged.
-      - linters: [lll]
-        path: internal/database/migrations/v[12]_migrations?\.go
 
 formatters:
   enable:
+    - gofumpt
     - goimports
+  settings:
+    gofumpt:
+      extra-rules: false
+    goimports:
+      # Import groups: stdlib, third-party, project (AGENTS.md code style)
+      local-prefixes:
+        - github.com/dombyte/solis
   exclusions:
     generated: lax
     paths:
