@@ -18,7 +18,8 @@ const V3MetaTableSQL = `CREATE TABLE IF NOT EXISTS meta (
 // v3Version is the schema version V3Migration migrates to.
 const v3Version = 3
 
-// V3Migration adds the meta table (Plan.md D1) and normalizes error_data timestamps.
+// V3Migration adds the meta table (cutover, watermarks, baselines) and normalizes error_data
+// timestamps.
 type V3Migration struct{}
 
 // Version returns the migration version (3).

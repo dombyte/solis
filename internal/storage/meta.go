@@ -11,7 +11,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 )
 
-// Meta table keys (Plan.md D1).
+// Meta table keys: cutover date, closed-period watermarks, baselines, retention watermark.
 const (
 	metaCutover        = "v3_cutover_date"
 	metaClosedDaily    = "closed:daily:" // + daily key (poller)

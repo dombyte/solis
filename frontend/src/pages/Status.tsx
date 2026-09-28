@@ -25,7 +25,7 @@ export function Status(): React.ReactElement {
   const fallbackStatusIds = ['solis_status', 'operating_status', 'grid_fault_1', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'];
   const statusRegisterIds = systemStatusGroup?.dataIds.filter(id => id !== 'inverter_temp') || fallbackStatusIds;
 
-  // Status page subscribes to all status keys (Plan.md §4.1).
+  // Status page subscribes to all status keys.
   const statusKeys = useMemo(
     () => statusRegisterIds
       .map(id => registerMetadata.get(id)?.key)

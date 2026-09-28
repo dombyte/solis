@@ -7,14 +7,12 @@ Solis Monitor polls a Solis hybrid inverter over Modbus (TCP or RTU), stores dai
 status/fault changes in SQLite, computes monthly/yearly/total values itself, and serves a React
 dashboard (REST + WebSocket) from the same Go binary.
 
-- **v3 is in progress.** The authoritative design is `ref/solis-monitor-v3-refactor-specification(3).md`;
-  the implementation plan, spec decisions (D1–D15) and phase order are in `Plan.md`.
+- **v3 is implemented.** The original design is `ref/solis-monitor-v3-refactor-specification(3).md`;
+  where the code deviates from it on purpose, the reason is under "Design Decisions (v3)" below.
 - The dashboard power-flow reference is `ref/solis-v3-dashboard-power-flow-diagram-prototype.tsx`
   (layout/geometry/colors/animation; emoji icons are placeholders for lucide-react).
-- Where this file and the spec disagree, the spec + `Plan.md` decisions win; update this file.
-- Cross-project Go standard: `ref/Arch_Plan.md` (DI, factories, zero global state, error
-  handling, testing, tooling). All new/changed Go code must comply; `Plan.md` §7 maps each rule
-  to the v3 design and lists the open confirmations (A1–A7).
+- This file is self-contained: every rule that applies to this repository is written here.
+  When code and this file disagree, fix one of them in the same change.
 
 ## Tools
 ```bash
@@ -27,6 +25,8 @@ go run golang.org/x/tools/cmd/deadcode@latest -test ./...   # unused exported co
 go run golang.org/x/vuln/cmd/govulncheck@latest ./...       # known vulnerabilities
 go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.yaml
 ```
+CI (`.github/workflows/checks.yml`) runs the same checks plus mock drift and the frontend
+checks; the pre-commit script is run by hand (`make check`), not installed as a git hook.
 
 ---
 
@@ -42,7 +42,7 @@ go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.ya
 
 ## Project Structure
 
-v3 target layout (packages marked *new* are created during the v3 phases, see `Plan.md`):
+Package layout (packages marked *new* were added in v3):
 
 ```
 cmd/                     main.go (subcommand dispatch + restart loop), serve.go, backfill.go
@@ -207,7 +207,7 @@ storage    → solis, period, history
 history    → util only (shared by storage, service, httphandler)
 config     → util only; imported only by cmd and app (every other package declares its
              own Settings struct, mapped from config in internal/app/config_mapping.go)
-modbus     → stdlib + simonvetter only (external layer: no config/health/logging-global imports)
+modbus     → stdlib + simonvetter + util (Clock) only (external layer: no config/health/logging)
 service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
 app        → everything (composition root)
 ```
@@ -223,9 +223,11 @@ Avoid circular imports between packages. Use interfaces for decoupling.
 Each package exposes a clean, minimal public API. Internal details stay unexported.
 
 ### 5. Avoid Global State
-Use dependency injection instead of global variables. Zero tolerance (Arch_Plan): no
-package-level loggers, caches, upgraders or lookup maps in new/changed code — build them in a
-constructor (e.g. `solis.NewRegistry()`, `solis.NewDecoder()`) and inject them.
+Use dependency injection instead of global variables. Zero tolerance (enforced by
+`gochecknoglobals`; only `Err…` sentinels are allowed): no package-level loggers, caches,
+upgraders or lookup maps — build them in a constructor (e.g. `solis.NewRegistry()`,
+`solis.NewDecoder()`) and inject them. Dependencies are injected as interfaces declared by the
+consumer; only `internal/app` names concrete types and creates them (`Create*` factories).
 
 ### 6. Testable Components
 Design packages to be easily testable in isolation. Use interfaces for external dependencies.
@@ -288,12 +290,45 @@ at full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ---
 
+## Design Decisions (v3)
+
+Deliberate choices where the implementation fills a gap in, or deviates from, the v3 spec.
+
+- **`meta` table:** the only schema addition. Holds the cutover date, closed-period watermarks
+  (`closed:daily:<key>`, `closed:netdaily`, `closed:monthly`, `closed:yearly`), the total
+  baselines (`baseline:<key>`), `baseline_year` and the retention watermark `purged_before`.
+  At cutover: monthly = previous month, yearly = previous year, daily/net-daily = today − 2.
+- **Cache domains:** the poller replaces only its own keys (`ReplaceDomain`); the aggregator
+  merges its disjoint computed keys (`Merge`). Neither wipes the other.
+- **Net values:** net daily rows live in `daily_values` and are written only by the aggregator;
+  storage rejects net keys from the poller and non-net keys from the aggregator. Net values are
+  computed from the same run's export/import values, never read back from the cache.
+- **Totals are app-lifetime:** computed from daily rows plus a baseline folded in at each year
+  close; pre-cutover inverter totals are not carried over.
+- **Catch-up:** every aggregator run finalises and freezes any closed, not-yet-frozen
+  month/year; `PeriodClosed` (published once per rollover window, on the first closing key or a
+  forced close) only makes that happen sooner.
+- **Day attribution:** the "new day" after a counter reset is the day whose local midnight is
+  nearest the rollover time; per-key bases live in memory and are seeded from the DB at start.
+- **WebSocket diff:** by `value` + `status_decoded` only (timestamps change every poll); each
+  `update` frame carries one frame-level `ts`.
+- **Liveness:** every component beats from its own loop, idle or not; the Modbus reconnect loop
+  beats while waiting in backoff. Initial grace after (re)start is 5× the poll interval.
+- **Modbus wiring:** construction never fails on connectivity; the client is published through a
+  `util.Slot` so the poller always reads the current client after a restart.
+- **Derived values:** `battery_power_signed` is produced by `solis.DeriveValues` after a full
+  poll (it needs two registers).
+- **Read plan:** 3 Modbus reads (grid power at 33130 so it falls inside an existing block),
+  pinned by the block-plan golden test.
+- **Shutdown:** single-phase graceful shutdown with bounded `Stop()`; no second-signal force
+  mode.
+- **Grid power sign** (positive = export) and the battery direction values are as verified on
+  the device; if a firmware changes them, flip in `DeriveValues`, not in the UI.
+
 ## Naming Conventions
 
 ### Packages
-- Lowercase, singular or compound (Arch_Plan), e.g. `eventbus`, `httphandler`
-- `handlers` → `httphandler`, `routes` → `router` and `utils` → `util` were renamed (Plan.md A3);
-  do not create new plural package names
+- Lowercase, singular or compound, e.g. `eventbus`, `httphandler`, `router`, `util`; never plural
 - Directory depth: max 3 levels **below `internal/`** (e.g. `internal/http/httphandler/mocks`)
 
 ### Files
@@ -642,7 +677,8 @@ func LoadConfig(path string) (*AppConfig, error) {
 ### Unit Tests
 - Framework: stdlib `testing` + testify (`require`/`assert`) + mockery mocks
 - Create `_test.go` files for each package
-- Aim for >90% coverage (Arch_Plan minimums by gocyclo: <5 → 60 %, 5–9 → 70 %, ≥10 → 80 %)
+- Aim for >90% coverage per package; per-function minimums by gocyclo: <5 → 60 %,
+  5–9 → 70 %, ≥10 → 80 % (`main()` is exempt)
 - Test both happy paths and error cases
 - Test edge cases (empty inputs, invalid data, etc.)
 
@@ -809,7 +845,7 @@ When refactoring existing code:
 3. **Test thoroughly** after each move
 4. **Keep old files** until new structure is verified
 5. **Remove old files** only after confirmation
-6. **Update documentation** (Plan.md, AGENTS.md)
+6. **Update documentation** (AGENTS.md, README.md, docs/src/openapi.yaml)
 
 ---
 

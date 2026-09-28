@@ -67,7 +67,8 @@ type ErrorMessage struct {
 	Keys    []string `json:"keys,omitempty"`
 }
 
-// pushed is the per-client diff state of one key (value + status only, Plan.md D7).
+// pushed is the per-client diff state of one key: value + status only, because timestamps
+// change every poll.
 type pushed struct {
 	value  float64
 	status any

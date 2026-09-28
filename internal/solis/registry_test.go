@@ -16,7 +16,7 @@ func newTestRegistry(t *testing.T) *Registry {
 	return r
 }
 
-// TestBlockPlanGolden pins the read plan (Plan.md §2.4): 3 reads instead of v2's 5.
+// TestBlockPlanGolden pins the read plan: 3 reads instead of v2's 5.
 // Update deliberately when register addresses change.
 func TestBlockPlanGolden(t *testing.T) {
 	r := newTestRegistry(t)

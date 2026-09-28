@@ -47,26 +47,24 @@ linters:
     # Code structure
     - lll
 
-    # Arch_Plan: zero global state, no panic at runtime
     - gochecknoglobals
     - forbidigo
 
   settings:
-    # Arch_Plan panic policy: never at runtime (recover-and-rethrow needs a nolint reason)
     forbidigo:
       forbid:
         - pattern: ^panic$
-          msg: "Arch_Plan: no panic at runtime; return an error"
+          msg: "no panic at runtime; return an error"
 
     # Line length linter - hard limit of 100 chars per Global Plan
     lll:
       line-length: 100
 
-    # Cyclomatic complexity linter (reports > min-complexity; Arch_Plan: < 8)
+    # Cyclomatic complexity linter (reports > min-complexity)
     gocyclo:
       min-complexity: 7
 
-    # Magic numbers (Arch_Plan: named constants). Register/status tables are data.
+    # Magic numbers; register/status tables are data.
     mnd:
       ignored-files:
         - internal/solis/table\.go$
@@ -105,7 +103,7 @@ linters:
         - name: package-comments
           disabled: false
 
-        # Style: max function length (Arch_Plan: < 40 lines; args = max statements, max lines)
+        # Style: max function length (args = max statements, max lines)
         - name: function-length
           disabled: false
           arguments: [40, 40]
