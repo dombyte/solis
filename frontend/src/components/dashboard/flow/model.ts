@@ -118,11 +118,11 @@ function getNodeDirection(node: FlowNode, values: Record<string, number | null>)
       return values.pv_total_power !== null && values.pv_total_power > 0 ? 'out' : 'none';
     case 'grid':
       // Grid: positive = export (out from grid), negative = import (into grid)
-      if (values.grid_power === null) return 'none';
+      if (values.grid_power === null || values.grid_power === 0) return 'none';
       return values.grid_power > 0 ? 'out' : 'in';
     case 'battery':
       // battery_power_signed > 0 = charging (into battery = in), < 0 = discharging (out of battery)
-      if (values.battery_power_signed === null) return 'none';
+      if (values.battery_power_signed === null || values.battery_power_signed === 0) return 'none';
       return values.battery_power_signed > 0 ? 'in' : 'out';
     case 'household':
       // Household always consumes (out from inverter)
@@ -152,14 +152,15 @@ function getEdgeState(edge: FlowEdgeName, values: Record<string, number | null>)
         reverse: false // Always PV -> inverter
       };
     case 'grid_to_inverter':
-      // grid_power > 0 = export (grid -> inverter is reverse of path direction)
-      // grid_power < 0 = import (inverter -> grid, path direction)
+      // The path is drawn grid -> inverter.
+      // grid_power > 0 = export: energy flows inverter -> grid, so the animation is reversed
+      // grid_power < 0 = import: energy flows grid -> inverter, the path direction
       if (values.grid_power === null || values.grid_power === 0) {
         return { active: false, reverse: false };
       }
       return { 
         active: true,
-        reverse: values.grid_power > 0 // export: grid -> inverter (reverse of drawn path)
+        reverse: values.grid_power > 0 // export: inverter -> grid (against the drawn path)
       };
     case 'battery_to_inverter':
       // battery_power_signed > 0 = charging (battery <- inverter, so reverse)
@@ -289,7 +290,7 @@ export function buildFlowViewModel(
       direction: getNodeDirection('battery', values),
       color: '--flow-batt',
       label: 'Battery',
-      soc: values.battery_soc ?? 0,
+      soc: values.battery_soc ?? undefined, // missing SOC shows "–", not 0 % (FE-L4)
       stale: !batteryPresent,
     },
     household: {
@@ -403,9 +404,9 @@ export function getBatterySubStatus(batteryPower: number | null): string {
 }
 
 /**
- * Plain-text summary of the whole diagram, for a screen-reader-only aria-live
- * region: the SVG/card nodes carry their own per-node label, but only a single
- * live region lets assistive tech hear values change on every WebSocket tick.
+ * Plain-text summary of the whole diagram for screen readers (read on demand, not a
+ * live region: announcing every WebSocket tick would flood assistive tech). Only
+ * status changes are live (StatusDisplay).
  */
 export function buildFlowSummary(viewModel: FlowViewModel): string {
   const { nodes, inverter } = viewModel;

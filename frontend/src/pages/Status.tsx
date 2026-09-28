@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
+import { format } from 'date-fns';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useSubscription } from '../lib/hooks/useSubscription';
 import { useMobile } from '../hooks/useMobile';
@@ -19,11 +20,11 @@ export function Status(): React.ReactElement {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
   const registerValues = useRegisterStore(state => state.registerValues);
 
-  // Get status register IDs from the system_status group, excluding inverter_temp
-  const systemStatusGroup = dashboardGroups.find(g => g.id === 'system_status');
-  // Fallback list in case dashboardGroups is not available
-  const fallbackStatusIds = ['solis_status', 'operating_status', 'grid_fault_1', 'battery_1_bms_fault', 'battery_2_bms_fault', 'backup_load_fault', 'battery_fault_03', 'device_fault_04', 'device_fault_05'];
-  const statusRegisterIds = systemStatusGroup?.dataIds.filter(id => id !== 'inverter_temp') || fallbackStatusIds;
+  // Status register IDs from the system_status group (members defined in data.ts)
+  const statusRegisterIds = useMemo(
+    () => dashboardGroups.find(g => g.id === 'system_status')?.dataIds ?? [],
+    []
+  );
 
   // Status page subscribes to all status keys.
   const statusKeys = useMemo(
@@ -64,9 +65,15 @@ export function Status(): React.ReactElement {
     timestamp: string;
   }
 
-  // Fetch history for selected status key
+  // Fetch history for selected status key. A newer request aborts the previous one, so a
+  // slow response for one register can never replace another's history (review FE-M5).
+  const historyAbortRef = useRef<AbortController | null>(null);
   const fetchHistory = useCallback(async (id: string) => {
     if (!id) return;
+    historyAbortRef.current?.abort();
+    const controller = new AbortController();
+    historyAbortRef.current = controller;
+    const { signal } = controller;
 
     setHistoryLoading(true);
     setHistoryError(null);
@@ -77,24 +84,28 @@ export function Status(): React.ReactElement {
       if (!source) {
         throw new Error('Register not found');
       }
-      
-      // Use the new API client with source field
-      const data = await api.get(source);
-      const response = data as { history: StatusHistoryEntry[] };
-      
-      // Convert status history to a format similar to HistoryDataPoint
-      const convertedData: StatusHistoryDataPoint[] = response.history.map(entry => ({
-        date: entry.timestamp.split('T')[0], // Extract date part
+
+      const data = await api.get(source, undefined, { signal });
+      if (signal.aborted) return;
+      const history = (data as { history?: unknown } | null)?.history;
+      if (!Array.isArray(history)) {
+        throw new Error('Unexpected status history response');
+      }
+
+      // Date and time both in local time (the server sends UTC "...Z" timestamps).
+      const convertedData: StatusHistoryDataPoint[] = (history as StatusHistoryEntry[]).map(entry => ({
+        date: format(new Date(entry.timestamp), 'yyyy-MM-dd'),
         value: entry.status_decoded,
         timestamp: entry.timestamp,
       }));
-      
+
       setHistoryData(convertedData);
     } catch (error) {
+      if (signal.aborted) return;
       setHistoryError(error instanceof Error ? error.message : 'Failed to load history');
       setHistoryData(null);
     } finally {
-      setHistoryLoading(false);
+      if (!signal.aborted) setHistoryLoading(false);
     }
   }, []);
 

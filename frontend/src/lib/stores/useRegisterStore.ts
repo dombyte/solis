@@ -15,30 +15,19 @@ interface RegisterStoreState {
   isConnected: boolean;
   lastUpdated: Date | null;
   isLoading: boolean;
-  error: string | null;
   
   // Actions
   initialize: () => Promise<void>;
   applyWsValues: (values: Record<string, WsValueDTO>, ts?: string, removed?: string[]) => void;
   setConnected: (connected: boolean) => void;
   clearValues: () => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  
+
   // Getters
   getRegisterById: (id: string) => RegisterMetadata | undefined;
-  getRegisterByKey: (key: string) => RegisterMetadata | undefined;
-  getValueById: (id: string) => RegisterValue | undefined;
-  getValueByKey: (key: string) => RegisterValue | undefined;
-  getValuesByGroup: (groupId: string) => RegisterValue[];
-  getAllValues: () => RegisterValue[];
 
   // Template resolution getter
   getResolvedRegisterById: (id: string) => (RegisterMetadata & { displayValue: number | string | null | undefined }) | undefined;
   
-  // Helper methods
-  hasDataForId: (id: string) => boolean;
-  hasDataForKey: (key: string) => boolean;
 }
 
 // Convert ApiDataObject to RegisterMetadata
@@ -148,7 +137,6 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
   isConnected: false,
   lastUpdated: null,
   isLoading: true,
-  error: null,
 
   initialize: () => {
     return new Promise<void>((resolve) => {
@@ -240,47 +228,13 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
     });
     set({ registerValues: values, lastUpdated: null });
   },
-  setLoading: (loading) => set({ isLoading: loading }),
-  setError: (error) => set({ error }),
 
   getRegisterById: (id) => get().registerMetadata.get(id),
-  getRegisterByKey: (key) => get().registerMetadataByKey.get(key),
-  
-  getValueById: (id) => get().registerValues.get(id),
-  
-  getValueByKey: (key) => {
-    const reg = get().registerMetadataByKey.get(key);
-    return reg ? get().registerValues.get(reg.id) : undefined;
-  },
   
   getResolvedRegisterById: (id) => {
     const metadata = get().registerMetadata.get(id);
     if (!metadata) return undefined;
     const value = get().registerValues.get(id);
     return resolveRegisterMetadata(metadata, value);
-  },
-  
-  getValuesByGroup: (groupId) => {
-    const allValues = Array.from(get().registerValues.values());
-    const metadata = get().registerMetadata;
-    
-    return allValues.filter(v => {
-      const reg = metadata.get(v.id);
-      return reg?.group === groupId;
-    });
-  },
-  
-  getAllValues: () => Array.from(get().registerValues.values()),
-  
-  hasDataForId: (id) => {
-    const value = get().registerValues.get(id);
-    return value !== undefined && value.value !== null;
-  },
-  
-  hasDataForKey: (key) => {
-    const reg = get().registerMetadataByKey.get(key);
-    if (!reg) return false;
-    const value = get().registerValues.get(reg.id);
-    return value !== undefined && value.value !== null;
   },
 }));

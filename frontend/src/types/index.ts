@@ -16,16 +16,7 @@ export interface ApiDataObject {
   format?: FormatType;
   scale?: number;
   order?: number;
-  visible?: boolean;
   value?: string | TemplateString; // Template for value display (e.g., '{DecodedValue}')
-  externalApi?: {
-    baseUrl?: string;
-    path?: string;
-    headers?: Record<string, string>;
-    authTokenEnvVar?: string;
-    pollInterval?: number;
-    dataMapper?: (data: unknown) => number;
-  };
 }
 
 // Group Configuration

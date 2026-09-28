@@ -2,6 +2,7 @@ import React from 'react';
 import { Sun, Factory, Home, ShieldCheck, BatteryCharging, BatteryMedium } from 'lucide-react';
 import type { FlowViewModel } from './model';
 import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus, buildFlowSummary } from './model';
+import { ANIMATION_DURATION } from './FlowEdge';
 
 /**
  * Mobile flow diagram with card list and flow rail
@@ -51,7 +52,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
     },
     {
       key: 'battery' as const,
-      name: `Battery · ${Math.round(nodes.battery.soc ?? 0)}%`,
+      name: `Battery · ${nodes.battery.soc === undefined ? '–' : `${Math.round(nodes.battery.soc)}%`}`,
       value: nodes.battery.displayValue,
       sub: getBatterySubStatus(nodes.battery.value),
       color: 'var(--color-flow-batt)',
@@ -168,7 +169,8 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
                   background: 'var(--color-card)',
                   border: `1.5px solid ${card.color}`,
                   width: '70%',
-                  opacity: card.stale ? 0.35 : 1,
+                  // the container already dims a stale diagram: dim once (FE-L3)
+                  opacity: card.stale && !stale ? 0.35 : 1,
                   transition: 'opacity 0.5s ease'
                 }}
                 role="img"
@@ -209,7 +211,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
           ))}
         </div>
       </div>
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
+      <div className="sr-only" role="note">
         {buildFlowSummary(viewModel)}
       </div>
     </div>
@@ -277,7 +279,7 @@ function RailConnector({ y, active, reverse, color }: { y: number; active: boole
         strokeDashoffset={0}
         opacity={1}
         style={{
-          animation: `flowRail 0.4s linear infinite`,
+          animation: `flowRail ${ANIMATION_DURATION} linear infinite`,
           animationDirection,
           transition: 'opacity 0.5s ease',
         }}

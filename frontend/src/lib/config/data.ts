@@ -212,7 +212,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_daily',
     format: 'energy',
     precision: 2,
-    order: 3,
+    order: 4,
   },
   {
     key: 'grid_import_daily',
@@ -225,7 +225,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_daily',
     format: 'energy',
     precision: 2,
-    order: 4,
+    order: 6,
   },
   {
     key: 'grid_export_daily',
@@ -251,7 +251,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_daily',
     format: 'energy',
     precision: 2,
-    order: 6,
+    order: 9,
   },
   {
     key: 'battery_discharge_daily',
@@ -290,7 +290,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_daily',
     format: 'energy',
     precision: 2,
-    order: 9,
+    order: 3,
   },
 
   // Monthly Energy Registers
@@ -584,7 +584,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_total',
     format: 'energy',
     precision: 2,
-    order: 4,
+    order: 6,
   },
   {
     key: 'grid_export_total',
@@ -612,7 +612,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_total',
     format: 'energy',
     precision: 2,
-    order: 6,
+    order: 9,
   },
   {
     key: 'battery_discharge_total',
@@ -651,7 +651,7 @@ export const apiDataObjects: ApiDataObject[] = [
     group: 'energy_total',
     format: 'energy',
     precision: 2,
-    order: 9,
+    order: 4,
   },
 
 

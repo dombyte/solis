@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import type { RegisterValue } from '../../../types';
 import { useMobile } from '../../../hooks/useMobile';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { useSubscription } from '../../../lib/hooks/useSubscription';
@@ -21,8 +23,22 @@ export function PowerFlow(): React.ReactElement {
   useSubscription([...POWER_FLOW_KEYS]);
   
   // Get data from store
-  const registerValues = useRegisterStore(state => state.registerValues);
   const registerMetadataByKey = useRegisterStore(state => state.registerMetadataByKey);
+  // Only the diagram's keys, compared shallowly: frames that change other keys do not
+  // rebuild the flow model (review FE-M2).
+  const flowValues = useRegisterStore(useShallow(state => POWER_FLOW_KEYS.map(key => {
+    const reg = state.registerMetadataByKey.get(key);
+    return reg ? state.registerValues.get(reg.id) : undefined;
+  })));
+  const registerValues = useMemo(() => {
+    const values = new Map<string, RegisterValue>();
+    POWER_FLOW_KEYS.forEach((key, i) => {
+      const reg = registerMetadataByKey.get(key);
+      const value = flowValues[i];
+      if (reg && value) values.set(reg.id, value);
+    });
+    return values;
+  }, [flowValues, registerMetadataByKey]);
   const isLoading = useRegisterStore(state => state.isLoading);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
   const isConnected = useRegisterStore(state => state.isConnected);

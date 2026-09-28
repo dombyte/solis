@@ -71,7 +71,11 @@ export function DesktopNav() {
                     isCollapsed ? "justify-center" : "justify-start gap-2"
                   )}
                 >
-                  <Link to={item.path} className="flex items-center justify-center w-full overflow-hidden">
+                  <Link
+                    to={item.path}
+                    aria-current={isActive(item.path) ? 'page' : undefined}
+                    className="flex items-center justify-center w-full overflow-hidden"
+                  >
                     <LineAwesomeIcon icon={item.icon} size="lg" />
                     {!isCollapsed && (
                       <span className="text-sm ml-2 whitespace-nowrap">{item.label}</span>

@@ -709,7 +709,9 @@
   }
 }
 
-/* Respect prefers-reduced-motion */
+/* Respect prefers-reduced-motion: every animation runs once in 0.01ms, so flow edges
+   stay static at their start position (active edges keep their color; only the moving
+   dashes stop). Intentional. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

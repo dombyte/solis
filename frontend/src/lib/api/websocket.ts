@@ -22,6 +22,16 @@ function reconnectDelay(attempt: number, random: () => number = Math.random): nu
  * multiple components can want the same key without double-subscribing or dropping it
  * early; the full active key set is resent on every (re)connect.
  */
+const MESSAGE_TYPES = new Set(['snapshot', 'update', 'error']);
+
+/** Minimal runtime check of a server frame before it reaches the store (FE-L11). */
+function isWebSocketMessage(m: unknown): m is WebSocketMessage {
+  if (typeof m !== 'object' || m === null) return false;
+  const { type, values } = m as { type?: unknown; values?: unknown };
+  if (typeof type !== 'string' || !MESSAGE_TYPES.has(type)) return false;
+  return type === 'error' || (typeof values === 'object' && values !== null);
+}
+
 class SolisWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
@@ -129,7 +139,11 @@ class SolisWebSocket {
 
     this.ws.onmessage = (event) => {
       try {
-        const message: WebSocketMessage = JSON.parse(event.data);
+        const message: unknown = JSON.parse(event.data);
+        if (!isWebSocketMessage(message)) {
+          console.warn('Ignoring malformed WebSocket frame:', event.data);
+          return;
+        }
         this.listeners.forEach(listener => listener(message));
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);

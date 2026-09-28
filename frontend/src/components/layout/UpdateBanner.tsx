@@ -1,13 +1,16 @@
 import { useVersionCheck } from '../../lib/hooks/useVersionCheck';
 import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
+import { useMobile } from '../../hooks/useMobile';
 
 export function UpdateBanner() {
   const { hasUpdate, triggerUpdate } = useVersionCheck();
+  const isMobile = useMobile();
 
   if (!hasUpdate) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 right-4 z-50 max-w-[calc(100vw-2rem)]">
+    // Above the fixed mobile nav on mobile (App reserves pb-24 for it).
+    <div className={`fixed ${isMobile ? 'bottom-28' : 'bottom-4'} left-4 right-4 z-50 max-w-[calc(100vw-2rem)]`}>
       <div className="flex items-center justify-between gap-4 p-4 bg-card border border-border rounded-lg shadow-lg w-full" role="status">
         <div className="flex items-center gap-3">
           <LineAwesomeIcon icon="la-sync-alt" size="lg" className="text-primary" />

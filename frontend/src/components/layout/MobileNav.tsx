@@ -32,7 +32,7 @@ export function MobileNav() {
                 size="icon"
                 className="h-16 w-16 rounded-full touch-target relative"
               >
-                <Link to={item.path}>
+                <Link to={item.path} aria-current={active ? 'page' : undefined}>
                   {active && (
                     <div className="absolute -top-5 left-0 w-full h-1 bg-primary rounded-full" />
                   )}

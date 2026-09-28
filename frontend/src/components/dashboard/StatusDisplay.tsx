@@ -22,10 +22,9 @@ export function StatusDisplay({
   showTooltip = true,
 }: StatusDisplayProps): React.ReactElement {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
-  const registerValues = useRegisterStore(state => state.registerValues);
+  const value = useRegisterStore(state => state.registerValues.get(dataId));
   
   const register = registerMetadata.get(dataId);
-  const value = registerValues.get(dataId);
 
   if (!register) {
     return <span className={className}>-</span>;

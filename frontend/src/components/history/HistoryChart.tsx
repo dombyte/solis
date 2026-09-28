@@ -175,8 +175,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             // barPercentage/categoryPercentage only control a bar's *fraction* of its
             // category slot, which is the entire plot width when there's 1 category.
             maxBarThickness: isMobile ? 40 : 56,
-            // Minimum bar length in pixels to prevent bars from getting too thin
-            minBarLength: isMobile ? 8 : 10,
+            // No minBarLength: it also applies to 0, drawing a day with 0 kWh as a
+            // visible bar (review FE-M7).
           };
         }),
       },

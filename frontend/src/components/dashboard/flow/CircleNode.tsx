@@ -128,6 +128,7 @@ export function CircleBatteryNode({
 }: CircleBatteryNodeProps): React.ReactElement {
   const opacity = node.stale ? 0.35 : 1;
   const soc = node.soc ?? 0;
+  const socText = node.soc === undefined ? '–' : `${node.soc.toFixed(0)}%`;
   const ariaLabel = node.stale
     ? 'Battery: no data'
     : `Battery: ${soc.toFixed(0)}% charge, ${node.displayValue}`;
@@ -147,7 +148,7 @@ export function CircleBatteryNode({
         cy={cy} 
         r={r} 
         fill="var(--color-card)" 
-        stroke="var(--color-flow-batt)" 
+        stroke={node.stale ? 'var(--color-border)' : 'var(--color-flow-batt)'} 
         strokeWidth={2.5} 
       />
       
@@ -193,7 +194,7 @@ export function CircleBatteryNode({
           transition: 'opacity 0.5s ease'
         }}
       >
-        {soc.toFixed(0)}%
+        {socText}
       </text>
       
       {/* Power value */}

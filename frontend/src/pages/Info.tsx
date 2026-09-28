@@ -30,15 +30,14 @@ export function Info() {
     setChecking(true);
     setCheckStatus('checking');
     try {
-      await checkForUpdate();
-      // Small delay to allow state to propagate
-      await new Promise(resolve => setTimeout(resolve, 100));
-      setCheckStatus(hasUpdate ? 'update-available' : 'up-to-date');
+      // Use the fresh result: `hasUpdate` from this render is the value before the check.
+      const updateAvailable = await checkForUpdate();
+      setCheckStatus(updateAvailable ? 'update-available' : 'up-to-date');
     } finally {
       setChecking(false);
       setLastCheckTime(Date.now());
     }
-  }, [checkForUpdate, hasUpdate]);
+  }, [checkForUpdate]);
 
   // Trigger update and reload
   const handleTriggerUpdate = useCallback(() => {

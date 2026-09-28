@@ -7,9 +7,9 @@ import { websocketClient } from '../api/websocket';
  * components are safe, and re-subscribes the active set on reconnect.
  */
 export function useSubscription(keys: string[]): void {
-  // JSON-encode rather than comma-join so a register key could safely contain a comma,
-  // and stringify inside useMemo so effect deps stay stable across re-renders with the
-  // same keys but a new array reference.
+  // JSON-encode rather than comma-join so a register key could safely contain a comma.
+  // Callers usually pass a new array every render, so the memo recomputes each time; the
+  // effect still only re-runs when the resulting string (the key set) changes.
   const keysKey = useMemo(() => JSON.stringify(keys), [keys]);
 
   useEffect(() => {

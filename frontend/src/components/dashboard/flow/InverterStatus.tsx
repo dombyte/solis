@@ -9,7 +9,6 @@ interface InverterStatusProps {
   status: string;
   operatingStatus: string;
   alert: boolean;
-  stale: boolean;
   showIcon?: boolean;
 }
 
@@ -40,19 +39,12 @@ export function InverterStatus({
   status, 
   operatingStatus,
   alert,
-  stale,
   showIcon = true 
 }: InverterStatusProps): React.ReactElement {
-  const opacity = stale ? 0.35 : 1;
   const statusColor = getStatusColor(alert);
   
   return (
-    <g 
-      style={{
-        opacity,
-        transition: 'opacity 0.5s ease'
-      }}
-    >
+    <g>
       {/* Inverter icon at top center (0, -30) - only on desktop */}
       {showIcon && (
         <g transform="translate(0, -30)">

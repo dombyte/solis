@@ -63,6 +63,9 @@ function buildBkEdge(bx: number, by: number): string {
 
 export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement {
   const { nodes, edges, inverter, stale } = viewModel;
+  // Dim once: when the whole diagram is stale the SVG is dimmed, so nodes must not dim
+  // again on top of it (0.35 x 0.35 made them nearly invisible, review FE-L3).
+  const own = <T extends { stale: boolean }>(n: T): T => (stale ? { ...n, stale: false } : n);
 
   // Edge paths
   const edgePaths = {
@@ -120,7 +123,7 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
 
       {/* Nodes */}
       <CircleNode 
-        node={nodes.pv}
+        node={own(nodes.pv)}
         cx={PV.x}
         cy={PV.y}
         r={R}
@@ -128,7 +131,7 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
         labelPos="above"
       />
       <CircleNode 
-        node={nodes.grid}
+        node={own(nodes.grid)}
         cx={GRID.x}
         cy={GRID.y}
         r={R}
@@ -136,21 +139,21 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
         labelPos="above"
       />
       <CircleNode 
-        node={nodes.household}
+        node={own(nodes.household)}
         cx={HH.x}
         cy={HH.y}
         r={R}
         icon="house"
       />
       <CircleNode 
-        node={nodes.backup}
+        node={own(nodes.backup)}
         cx={BK.x}
         cy={BK.y}
         r={R}
         icon="shield"
       />
       <CircleBatteryNode 
-        node={nodes.battery}
+        node={own(nodes.battery)}
         cx={BAT.x}
         cy={BAT.y}
         r={R}
@@ -160,10 +163,6 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
       {/* Inverter box at center - use flow-inv-bg for distinct appearance */}
       <g
         transform={`translate(${C.x}, ${C.y})`}
-        style={{
-          opacity: stale ? 0.35 : 1,
-          transition: 'opacity 0.5s ease'
-        }}
         role="img"
         aria-label={`Inverter: ${inverter.status}, ${inverter.operatingStatus}`}
       >
@@ -181,12 +180,11 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
           status={inverter.status}
           operatingStatus={inverter.operatingStatus}
           alert={inverter.alert}
-          stale={stale}
           showIcon={true}
         />
       </g>
     </svg>
-    <div className="sr-only" aria-live="polite" aria-atomic="true">
+    <div className="sr-only" role="note">
       {buildFlowSummary(viewModel)}
     </div>
     </div>

@@ -80,7 +80,6 @@ export function DataCard({ group, className = '' }: DataCardProps): React.ReactE
                   dataId={dataId} 
                   showLabel 
                   showUnit 
-                  showStatusIndicator={isStatusGroup}
                   showTooltip={showTooltips}
                 />
               )

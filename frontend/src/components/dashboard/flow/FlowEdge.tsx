@@ -15,7 +15,7 @@ interface FlowEdgeProps {
 
 // Animation duration in seconds (~42px/s)
 // 17px dash pattern / 42px/s = ~0.4s for one cycle
-const ANIMATION_DURATION = '0.4s';
+export const ANIMATION_DURATION = '0.4s';
 
 export function FlowEdge({ 
   d, 

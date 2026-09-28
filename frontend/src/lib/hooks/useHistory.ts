@@ -29,6 +29,8 @@ export interface UseHistoryResult {
   isLoading: boolean;
   error: string | null;
   loadHistory: (registerIds: string[], startDate?: string, endDate?: string) => Promise<void>;
+  /** Aborts any request in flight and clears the chart data and error. */
+  clearHistory: () => void;
 }
 
 export function useHistory(): UseHistoryResult {
@@ -77,7 +79,9 @@ export function useHistory(): UseHistoryResult {
           if (startDate) params.start = startDate;
           if (endDate) params.end = endDate;
 
-          historyData = await api.get(source, params, { signal }) as HistoryDataPoint[];
+          const body = await api.get(source, params, { signal });
+          if (!Array.isArray(body)) throw new Error('unexpected history response');
+          historyData = body as HistoryDataPoint[];
         } catch (err) {
           if (signal.aborted) return;
           console.error(`Failed to fetch history for ${source}:`, err);
@@ -153,5 +157,12 @@ export function useHistory(): UseHistoryResult {
     }
   }, []);
 
-  return { data, isLoading, error, loadHistory };
+  const clearHistory = useCallback(() => {
+    abortControllerRef.current?.abort();
+    setData(null);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
+  return { data, isLoading, error, loadHistory, clearHistory };
 }
