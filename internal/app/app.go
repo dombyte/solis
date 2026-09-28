@@ -143,10 +143,10 @@ func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
 	iv := a.cfg.Poller.Interval
 	a.sup = health.New(ctx, iv, a.clock, logging.Component(root, "health"))
 	reader := &utils.Slot[poller.Reader]{}
-	a.sup.Manage(nameModbus, CreateModbus(a.cfg.Modbus, iv, reader, a.clock,
+	a.sup.Manage(nameModbus, CreateModbus(modbusSettings(a.cfg.Modbus), iv, reader, a.clock,
 		logging.Component(root, nameModbus)))
 	a.sup.Manage(namePoller, CreatePoller(poller.Deps{
-		Settings: a.cfg.Poller, Rollover: roll,
+		Settings: pollerSettings(a.cfg.Poller), Rollover: roll,
 		Source: reader, Store: a.store, Cache: a.cache, Bus: a.bus, Decoder: a.decoder,
 		Registry: a.reg, Clock: a.clock, Timeout: a.cfg.App.Timeout,
 		Log: logging.Component(root, namePoller),
@@ -178,7 +178,7 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 		},
 		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,
 	})
-	a.http = server.New(&a.cfg.App, router, httpLog)
+	a.http = server.New(serverSettings(a.cfg.App), router, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
 	a.sup.Watch("eventbus", a.busProbe)
 	a.sup.Watch("http", a.http.Probe)

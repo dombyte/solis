@@ -6,8 +6,10 @@ import (
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/storage"
 )
 
@@ -59,4 +61,18 @@ func StorageSettings(s config.StorageSettings) storage.Settings {
 // DatabaseSettings maps the storage section onto the database manager's settings.
 func DatabaseSettings(s config.StorageSettings) database.Settings {
 	return database.Settings{Path: s.Path, CleanupInterval: s.CleanupInterval}
+}
+
+// pollerSettings maps the poller section onto the poller's settings.
+func pollerSettings(p config.PollerSettings) poller.Settings {
+	return poller.Settings{
+		Interval: p.Interval, BlockAttempts: p.BlockAttempts,
+		BlockRetryDelay: p.BlockRetryDelay, BlockInterval: p.BlockInterval,
+		PollTimeout: p.PollTimeout,
+	}
+}
+
+// serverSettings maps the app section onto the HTTP server's settings.
+func serverSettings(a config.AppSettings) server.Settings {
+	return server.Settings{Port: a.Port, Timeout: a.Timeout}
 }

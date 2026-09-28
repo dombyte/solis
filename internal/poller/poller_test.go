@@ -15,7 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/cache"
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
@@ -122,7 +121,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 	rep.EXPECT().Report(health.Healthy, "").Maybe()
 	roll := rollover(t, "23:59")
 	e.p, err = New(Deps{
-		Settings: config.PollerSettings{
+		Settings: Settings{
 			Interval: pollEvery, BlockAttempts: 1,
 			BlockRetryDelay: time.Second, PollTimeout: 5 * time.Second,
 		},

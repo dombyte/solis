@@ -205,7 +205,8 @@ websocket  → eventbus, solis, health(Reporter) + own Snapshotter
 cache      → eventbus, solis
 storage    → solis, period, history
 history    → utils only (shared by storage, service, handlers)
-config     → utils only
+config     → utils only; imported only by cmd and app (every other package declares its
+             own Settings struct, mapped from config in internal/app/config_mapping.go)
 modbus     → stdlib + simonvetter only (external layer: no config/health/logging-global imports)
 service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
 app        → everything (composition root)

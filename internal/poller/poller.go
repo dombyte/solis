@@ -12,7 +12,6 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/period"
@@ -56,9 +55,23 @@ type Registry interface {
 	ByKey(key string) (solis.Register, bool)
 }
 
+// Settings are the poll cadence, retry and timeout settings.
+type Settings struct {
+	// Interval is the time between poll cycle starts.
+	Interval time.Duration
+	// BlockAttempts is the number of retries per block.
+	BlockAttempts int
+	// BlockRetryDelay is the delay between retries of the same block.
+	BlockRetryDelay time.Duration
+	// BlockInterval is the delay between successive block reads.
+	BlockInterval time.Duration
+	// PollTimeout bounds one full poll cycle.
+	PollTimeout time.Duration
+}
+
 // Deps are the poller's dependencies.
 type Deps struct {
-	Settings config.PollerSettings
+	Settings Settings
 	Rollover period.Rollover
 	Source   Source
 	Store    Store

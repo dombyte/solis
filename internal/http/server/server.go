@@ -15,12 +15,19 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
 )
 
 // ShutdownTimeout bounds graceful shutdown.
 const ShutdownTimeout = 5 * time.Second
+
+// Settings are the listen port and the request timeout.
+type Settings struct {
+	// Port is the TCP listen port.
+	Port int
+	// Timeout bounds reading and writing a request (idle connections get twice that).
+	Timeout time.Duration
+}
 
 // Server wraps http.Server.
 type Server struct {
@@ -32,7 +39,7 @@ type Server struct {
 }
 
 // New creates a server listening on cfg.Port.
-func New(cfg *config.AppSettings, handler http.Handler, log zerolog.Logger) *Server {
+func New(cfg Settings, handler http.Handler, log zerolog.Logger) *Server {
 	return &Server{
 		log: log,
 		srv: &http.Server{

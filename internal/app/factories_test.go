@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/utils"
 	"github.com/dombyte/solis/internal/utils/clocktest"
@@ -22,8 +22,8 @@ func (nopReporter) Report(health.State, string) {}
 
 func newModbusComponent(t *testing.T, slot *utils.Slot[poller.Reader]) health.Component {
 	t.Helper()
-	cfg := config.ModbusSettings{Address: "tcp://127.0.0.1:1", Timeout: time.Second}
-	c, err := CreateModbus(cfg, time.Hour, slot, clocktest.New(time.Now()), zerolog.Nop())(
+	settings := modbus.Settings{Address: "tcp://127.0.0.1:1", Timeout: time.Second}
+	c, err := CreateModbus(settings, time.Hour, slot, clocktest.New(time.Now()), zerolog.Nop())(
 		nopReporter{})
 	require.NoError(t, err)
 	return c

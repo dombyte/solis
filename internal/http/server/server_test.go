@@ -12,12 +12,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
 )
 
 func TestServeProbeStop(t *testing.T) {
-	s := New(&config.AppSettings{Port: 1, Timeout: time.Second},
+	s := New(Settings{Port: 1, Timeout: time.Second},
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, "ok")
 		}), zerolog.Nop())
@@ -39,7 +38,7 @@ func TestServeProbeStop(t *testing.T) {
 }
 
 func TestProbeReportsUnexpectedServeError(t *testing.T) {
-	s := New(&config.AppSettings{Port: 1, Timeout: time.Second}, http.NotFoundHandler(),
+	s := New(Settings{Port: 1, Timeout: time.Second}, http.NotFoundHandler(),
 		zerolog.Nop())
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -56,7 +55,7 @@ func TestStartBusyPortFails(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = ln.Close() }()
 	port := ln.Addr().(*net.TCPAddr).Port
-	s := New(&config.AppSettings{Port: port, Timeout: time.Second}, http.NotFoundHandler(),
+	s := New(Settings{Port: port, Timeout: time.Second}, http.NotFoundHandler(),
 		zerolog.Nop())
 	assert.Error(t, s.Start())
 }

@@ -9,7 +9,10 @@ import (
 
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database"
+	"github.com/dombyte/solis/internal/http/server"
+	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/poller"
 	"github.com/dombyte/solis/internal/storage"
 )
 
@@ -113,4 +116,25 @@ func TestSettingsMapping(t *testing.T) {
 		StorageSettings(s))
 	assert.Equal(t, database.Settings{Path: "x.db", CleanupInterval: 2 * time.Hour},
 		DatabaseSettings(s))
+
+	assert.Equal(t, poller.Settings{
+		Interval: time.Second, BlockAttempts: 2,
+		BlockRetryDelay: 3 * time.Second, BlockInterval: 4 * time.Second,
+		PollTimeout: 5 * time.Second,
+	},
+		pollerSettings(config.PollerSettings{
+			Interval: time.Second, BlockAttempts: 2,
+			BlockRetryDelay: 3 * time.Second, BlockInterval: 4 * time.Second,
+			PollTimeout: 5 * time.Second,
+		}))
+	assert.Equal(t, server.Settings{Port: 8080, Timeout: time.Minute},
+		serverSettings(config.AppSettings{Debug: "INFO", Port: 8080, Timeout: time.Minute}))
+	assert.Equal(t, modbus.Settings{
+		Address: "rtu:///dev/ttyUSB0", UnitID: 3,
+		Timeout: time.Second, Speed: 9600, DataBits: 8, Parity: "E", StopBits: 1,
+	},
+		modbusSettings(config.ModbusSettings{
+			Address: "rtu:///dev/ttyUSB0", SlaveID: 3,
+			Timeout: time.Second, Speed: 9600, DataBits: 8, Parity: "E", StopBits: 1,
+		}))
 }

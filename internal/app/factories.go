@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/dombyte/solis/internal/aggregator"
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
@@ -18,11 +17,11 @@ import (
 
 // CreateModbus returns the factory of the restartable Modbus component. Each instance
 // publishes its client through slot so the poller never holds a stale reference (D11).
-func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
+func CreateModbus(settings modbus.Settings, interval time.Duration,
 	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger,
 ) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
-		c, err := modbus.New(modbusSettings(cfg), clock, log)
+		c, err := modbus.New(settings, clock, log)
 		if err != nil {
 			return nil, err
 		}
