@@ -13,14 +13,15 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/modbus"
-	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/utils"
 )
 
 // ErrInvalidConfig is wrapped by every validation failure.
 var ErrInvalidConfig = errors.New("invalid config")
+
+// Rule is an extra validation injected by the composition root for settings whose rules
+// are owned by other packages (Modbus address, rollover time, health grace).
+type Rule func(*AppConfig) error
 
 // removedKeys are settings that v3 ignores; their presence is reported as a warning.
 func removedKeys() map[string]string {
@@ -152,8 +153,9 @@ func setDefaults(v *viper.Viper) {
 
 // LoadConfig loads configuration from a YAML file and environment variables.
 // Environment variables use the SOLIS_ prefix with underscores (e.g. SOLIS_MODBUS_ADDRESS).
-// A missing file falls back to defaults; an invalid configuration is an error.
-func LoadConfig(configPath string) (*AppConfig, error) {
+// A missing file falls back to defaults; an invalid configuration (including a failed
+// rule) is an error.
+func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
 	v.SetConfigFile(configPath)
@@ -183,35 +185,24 @@ func LoadConfig(configPath string) (*AppConfig, error) {
 	}
 	cfg.Warnings = warnings
 
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Validate(rules...); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
-// Validate validates every settings section.
-func (c *AppConfig) Validate() error {
-	validators := []interface{ Validate() error }{
-		&c.Modbus, &c.App, &c.Poller, &c.Rollover, &c.Storage,
-	}
+// Validate validates every settings section, then applies rules.
+func (c *AppConfig) Validate(rules ...Rule) error {
+	validators := []interface{ Validate() error }{&c.App, &c.Poller, &c.Storage}
 	for _, v := range validators {
 		if err := v.Validate(); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 		}
 	}
-	if err := c.validatePollTimeout(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
-	}
-	return nil
-}
-
-// validatePollTimeout keeps one poll cycle inside the supervisor's healthy grace: the
-// poller beats at cycle start and end, so a longer cycle would restart a working poller.
-func (c *AppConfig) validatePollTimeout() error {
-	grace := health.HealthyGraceFactor * c.Poller.Interval
-	if c.Poller.PollTimeout >= grace {
-		return fmt.Errorf("poll_timeout %s must be below %d x poller.interval (%s)",
-			c.Poller.PollTimeout, health.HealthyGraceFactor, grace)
+	for _, r := range rules {
+		if err := r(c); err != nil {
+			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+		}
 	}
 	return nil
 }
@@ -223,17 +214,6 @@ func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
 		return data, nil
 	}
 	return utils.ParseDuration(s)
-}
-
-// ModbusClientSettings converts the section into the Modbus client's settings.
-func (m *ModbusSettings) ModbusClientSettings() modbus.Settings {
-	return modbus.Settings{Address: m.Address, UnitID: m.SlaveID, Timeout: m.Timeout,
-		Speed: m.Speed, DataBits: m.DataBits, Parity: m.Parity, StopBits: m.StopBits}
-}
-
-// Validate validates Modbus configuration (the client's own rules, checked at startup).
-func (m *ModbusSettings) Validate() error {
-	return m.ModbusClientSettings().Validate()
 }
 
 // Validate validates App configuration.
@@ -268,17 +248,6 @@ func (p *PollerSettings) Validate() error {
 		return errors.New("poll_timeout must be positive")
 	}
 	return nil
-}
-
-// Validate validates the rollover time (strict 24-hour HH:MM, hard failure otherwise).
-func (r *RolloverSettings) Validate() error {
-	_, err := period.ParseRollover(r.Time)
-	return err
-}
-
-// Parsed returns the parsed rollover time; call only after Validate succeeded.
-func (r *RolloverSettings) Parsed() (period.Rollover, error) {
-	return period.ParseRollover(r.Time)
 }
 
 // Validate validates Storage configuration.

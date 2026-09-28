@@ -21,7 +21,7 @@ import (
 func CreateModbus(cfg config.ModbusSettings, interval time.Duration,
 	slot *utils.Slot[poller.Reader], clock utils.Clock, log zerolog.Logger) health.Factory {
 	return func(rep health.Reporter) (health.Component, error) {
-		c, err := modbus.New(cfg.ModbusClientSettings(), clock, log)
+		c, err := modbus.New(modbusSettings(cfg), clock, log)
 		if err != nil {
 			return nil, err
 		}

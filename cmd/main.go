@@ -10,6 +10,7 @@ import (
 
 	_ "time/tzdata" // fallback zoneinfo so TZ=Europe/Berlin never silently becomes UTC
 
+	"github.com/dombyte/solis/internal/app"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/logging"
 )
@@ -81,7 +82,7 @@ func runRecovered(run func() error) (err error) {
 
 // loadConfig loads and validates config.yaml.
 func loadConfig() (*config.AppConfig, error) {
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath, app.ConfigRules()...)
 	if err != nil {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}

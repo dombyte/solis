@@ -132,7 +132,7 @@ const (
 )
 
 func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
-	roll, err := a.cfg.Rollover.Parsed()
+	roll, err := period.ParseRollover(a.cfg.Rollover.Time)
 	if err != nil {
 		return err
 	}
