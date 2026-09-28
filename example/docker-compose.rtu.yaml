@@ -1,9 +1,5 @@
 # Solis Monitor on a serial RS485 adapter (Modbus RTU). In config.yaml set
 #   modbus.address: "rtu:///dev/ttyUSB0"   (plus speed/parity if not 19200 8N2)
-#
-# The container runs as uid 65532: ./data must be writable by it, and the serial device
-# must be accessible (group_add with the device's group, usually "dialout").
-#   mkdir -p data && sudo chown -R 65532:65532 data
 services:
   solis:
     image: ghcr.io/dombyte/solis:latest
@@ -12,8 +8,6 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     devices:
       - /dev/ttyUSB0:/dev/ttyUSB0
-    group_add:
-      - dialout # or the numeric gid of the device (ls -n /dev/ttyUSB0)
     ports:
       - "8080:8080"
     environment:

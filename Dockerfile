@@ -18,7 +18,7 @@ RUN npm run build
 
 FROM golang:1.26.8-alpine AS builder
 WORKDIR /app
-RUN apk --no-cache add ca-certificates tzdata && mkdir -p /out/data
+RUN apk --no-cache add ca-certificates tzdata
 
 COPY go.mod go.sum* ./
 RUN go mod download
@@ -39,9 +39,5 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /app/solis /app
 COPY --from=frontend /frontend/dist /app/frontend/dist
 COPY --from=docs /docs/dist /app/docs/dist
-# Unprivileged user: the data directory is the only writable path. A bind-mounted ./data
-# must be writable by this uid (chown -R 65532:65532 data, see README).
-COPY --from=builder --chown=65532:65532 /out/data /app/data
-USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/app/solis"]

@@ -1,8 +1,5 @@
 # Solis Monitor with a Modbus TCP gateway (e.g. a Solis data logger or an RS485-to-TCP
 # adapter). Put config.yaml (see config.yaml in this directory) next to this file.
-#
-# The container runs as uid 65532 and needs a writable ./data:
-#   mkdir -p data && sudo chown -R 65532:65532 data
 services:
   solis:
     image: ghcr.io/dombyte/solis:latest

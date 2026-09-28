@@ -119,8 +119,7 @@ func acquireLock(dbPath string) (*maintenance.Lock, error) {
 		return nil, fmt.Errorf("app: %w (is a maintenance job running?)", err)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("app: %w (is the data directory writable by this user? "+
-			"the image runs as uid 65532)", err)
+		return nil, fmt.Errorf("app: %w (is the data directory writable?)", err)
 	}
 	return lock, nil
 }

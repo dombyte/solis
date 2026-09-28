@@ -288,7 +288,6 @@ Templates live in [`example/`](example/):
 ```bash
 cp example/docker-compose.yaml docker-compose.yaml
 cp example/config.yaml config.yaml          # set modbus.address
-mkdir -p data && sudo chown -R 65532:65532 data
 docker compose up -d
 
 # Development build from source
@@ -297,9 +296,6 @@ docker compose -f docker-compose.dev.yaml up --build
 
 - **Restart policy required:** when self-healing fails the app exits with code 1 and relies
   on `restart: unless-stopped` (or systemd `Restart=on-failure`) to start again.
-- **Non-root:** the image runs as uid/gid `65532`. **Upgrading an existing install:** the
-  container can no longer write a root-owned `./data`; run
-  `sudo chown -R 65532:65532 data` once before starting the new image.
 
 ### Local
 

@@ -14,7 +14,7 @@ COPY docs/ .
 RUN npm run build
 
 FROM alpine:latest AS builder
-RUN apk --update add ca-certificates tzdata && mkdir -p /out/data
+RUN apk --update add ca-certificates tzdata
 
 FROM scratch
 WORKDIR /app
@@ -25,10 +25,6 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY $TARGETPLATFORM/solis /app
 COPY --from=frontend /frontend/dist /app/frontend/dist
 COPY --from=docs /docs/dist /app/docs/dist
-# Unprivileged user: the data directory is the only writable path. A bind-mounted ./data
-# must be writable by this uid (chown -R 65532:65532 data, see README).
-COPY --from=builder --chown=65532:65532 /out/data /app/data
-USER 65532:65532
 
 EXPOSE 8080
 ENTRYPOINT ["/app/solis"]
