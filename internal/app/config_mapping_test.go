@@ -8,7 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/config"
+	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/storage"
 )
 
 // ruleConfig is testConfig with production poller timings (the grace rule rejects the
@@ -78,4 +80,15 @@ func TestConfigRules_RolloverSentinel(t *testing.T) {
 	cfg := ruleConfig(t)
 	cfg.Rollover.Time = "9:05"
 	assert.ErrorIs(t, cfg.Validate(ConfigRules()...), period.ErrInvalidRollover)
+}
+
+func TestSettingsMapping(t *testing.T) {
+	s := config.StorageSettings{Path: "x.db", DailyRetention: time.Hour,
+		ErrorRetention: time.Minute, WalMode: true, Synchronous: "FULL", TempStore: "FILE",
+		CleanupInterval: 2 * time.Hour}
+	assert.Equal(t, storage.Settings{Path: "x.db", DailyRetention: time.Hour,
+		ErrorRetention: time.Minute, WalMode: true, Synchronous: "FULL", TempStore: "FILE"},
+		StorageSettings(s))
+	assert.Equal(t, database.Settings{Path: "x.db", CleanupInterval: 2 * time.Hour},
+		DatabaseSettings(s))
 }

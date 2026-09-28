@@ -99,7 +99,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
-	cfg := &config.StorageSettings{Path: filepath.Join(t.TempDir(), "s.db"),
+	cfg := storage.Settings{Path: filepath.Join(t.TempDir(), "s.db"),
 		Synchronous: "NORMAL", TempStore: "MEMORY"}
 	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)

@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/cache"
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
@@ -82,7 +81,7 @@ func newEnv(t *testing.T, start, cutover time.Time) *env {
 	reg, err := solis.NewRegistry()
 	require.NoError(t, err)
 	clk := clocktest.New(start)
-	cfg := &config.StorageSettings{Path: filepath.Join(t.TempDir(), "s.db"),
+	cfg := storage.Settings{Path: filepath.Join(t.TempDir(), "s.db"),
 		Synchronous: "NORMAL", TempStore: "MEMORY"}
 	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)

@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
@@ -61,7 +60,7 @@ func newFixture(t *testing.T) *fixture {
 
 func (f *fixture) open(t *testing.T) *storage.Storage {
 	t.Helper()
-	cfg := &config.StorageSettings{Path: f.path, Synchronous: "NORMAL", TempStore: "MEMORY"}
+	cfg := storage.Settings{Path: f.path, Synchronous: "NORMAL", TempStore: "MEMORY"}
 	st, err := storage.New(cfg, f.reg, clocktest.New(now), zerolog.Nop())
 	require.NoError(t, err)
 	return st

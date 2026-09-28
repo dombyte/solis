@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog"
 	_ "modernc.org/sqlite" // SQLite driver
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database/migrations"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/utils"
@@ -25,10 +24,26 @@ import (
 
 const dirPerm = 0o750
 
+// Settings are the connection, pragma and retention settings of the storage.
+type Settings struct {
+	// Path is the SQLite database file.
+	Path string
+	// DailyRetention is the retention of daily rows (monthly/yearly rows follow it).
+	DailyRetention time.Duration
+	// ErrorRetention is the retention of status change rows.
+	ErrorRetention time.Duration
+	// WalMode enables write-ahead logging.
+	WalMode bool
+	// Synchronous is the SQLite synchronous mode (OFF, NORMAL, FULL, EXTRA; "" = default).
+	Synchronous string
+	// TempStore is the SQLite temp_store mode (DEFAULT, FILE, MEMORY; "" = default).
+	TempStore string
+}
+
 // Storage is the SQLite storage backend.
 type Storage struct {
 	db    *sql.DB
-	cfg   *config.StorageSettings
+	cfg   Settings
 	keys  KeyLookup
 	clock utils.Clock
 	log   zerolog.Logger
@@ -42,7 +57,7 @@ type Storage struct {
 }
 
 // New opens (and if needed creates) the database and loads the close state.
-func New(cfg *config.StorageSettings, keys KeyLookup, clock utils.Clock,
+func New(cfg Settings, keys KeyLookup, clock utils.Clock,
 	log zerolog.Logger) (*Storage, error) {
 	db, err := open(cfg, log)
 	if err != nil {
@@ -58,7 +73,7 @@ func New(cfg *config.StorageSettings, keys KeyLookup, clock utils.Clock,
 	return s, nil
 }
 
-func open(cfg *config.StorageSettings, log zerolog.Logger) (*sql.DB, error) {
+func open(cfg Settings, log zerolog.Logger) (*sql.DB, error) {
 	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, dirPerm); err != nil {
 			return nil, fmt.Errorf("storage: create directory: %w", err)
@@ -79,12 +94,12 @@ func open(cfg *config.StorageSettings, log zerolog.Logger) (*sql.DB, error) {
 	return db, nil
 }
 
-func configurePragmas(db *sql.DB, cfg *config.StorageSettings, log zerolog.Logger) {
+func configurePragmas(db *sql.DB, cfg Settings, log zerolog.Logger) {
 	var pragmas []string
 	if cfg.WalMode {
 		pragmas = append(pragmas, "PRAGMA journal_mode=WAL;")
 	}
-	// Synchronous and TempStore are validated enums (config.StorageSettings.Validate).
+	// Synchronous and TempStore are validated enums (validated by config).
 	if cfg.Synchronous != "" {
 		pragmas = append(pragmas, "PRAGMA synchronous="+cfg.Synchronous+";")
 	}

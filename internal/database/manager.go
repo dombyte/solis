@@ -11,7 +11,6 @@ import (
 	"github.com/rs/zerolog"
 	_ "modernc.org/sqlite" // SQLite driver
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database/migrations"
 	"github.com/dombyte/solis/internal/utils"
 )
@@ -21,10 +20,18 @@ type Cleaner interface {
 	CleanupAll(ctx context.Context) error
 }
 
+// Settings are the database file and the retention cleanup schedule.
+type Settings struct {
+	// Path is the SQLite database file.
+	Path string
+	// CleanupInterval is the retention cleanup interval (<= 0 disables it).
+	CleanupInterval time.Duration
+}
+
 // Manager owns the database lifecycle outside the storage connection: pre-migration
 // backups, schema migrations, periodic online backups and retention cleanup scheduling.
 type Manager struct {
-	cfg      *config.StorageSettings
+	cfg      Settings
 	backup   *BackupConfig
 	registry *MigrationRegistry
 	executor *MigrationExecutor
@@ -33,7 +40,7 @@ type Manager struct {
 }
 
 // NewManager creates a manager with all migrations registered.
-func NewManager(cfg *config.StorageSettings, backup *BackupConfig, clock utils.Clock,
+func NewManager(cfg Settings, backup *BackupConfig, clock utils.Clock,
 	log zerolog.Logger) *Manager {
 	registry := NewMigrationRegistry()
 	registry.Register(migrations.GetV3Migration())

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/dombyte/solis/internal/app"
 	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/logging"
 	"github.com/dombyte/solis/internal/maintenance"
@@ -48,11 +49,11 @@ func backfill(years int, stdout, stderr io.Writer) error {
 			return database.CreateBackup(st.Path, backupCfg, clock.Now(), log)
 		},
 		OpenStore: func() (maintenance.Store, func() error, error) {
-			mgr := database.NewManager(st, backupCfg, clock, log)
+			mgr := database.NewManager(app.DatabaseSettings(*st), backupCfg, clock, log)
 			if err := mgr.Prepare(context.Background()); err != nil {
 				return nil, nil, err
 			}
-			s, err := storage.New(st, reg, clock, log)
+			s, err := storage.New(app.StorageSettings(*st), reg, clock, log)
 			if err != nil {
 				return nil, nil, err
 			}

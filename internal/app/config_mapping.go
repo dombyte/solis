@@ -4,9 +4,11 @@ import (
 	"fmt"
 
 	"github.com/dombyte/solis/internal/config"
+	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/storage"
 )
 
 // ConfigRules returns the config validations owned by other packages; pass them to
@@ -41,4 +43,16 @@ func validatePollTimeout(c *config.AppConfig) error {
 			c.Poller.PollTimeout, health.HealthyGraceFactor, grace)
 	}
 	return nil
+}
+
+// StorageSettings maps the storage section onto the storage package's settings.
+func StorageSettings(s config.StorageSettings) storage.Settings {
+	return storage.Settings{Path: s.Path, DailyRetention: s.DailyRetention,
+		ErrorRetention: s.ErrorRetention, WalMode: s.WalMode, Synchronous: s.Synchronous,
+		TempStore: s.TempStore}
+}
+
+// DatabaseSettings maps the storage section onto the database manager's settings.
+func DatabaseSettings(s config.StorageSettings) database.Settings {
+	return database.Settings{Path: s.Path, CleanupInterval: s.CleanupInterval}
 }

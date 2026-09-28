@@ -92,14 +92,16 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 	}
 	a.log.Debug().Msg("registry created")
 	st := &a.cfg.Storage
-	a.dbm = database.NewManager(st, &database.BackupConfig{Enabled: st.EnableBackup,
+	a.dbm = database.NewManager(DatabaseSettings(*st), &database.BackupConfig{Enabled: st.EnableBackup,
 		MaxBackups: st.MaxBackups, BackupInterval: st.BackupInterval}, a.clock,
 		logging.Component(root, "database"))
 	if err := a.dbm.Prepare(ctx); err != nil {
 		return fmt.Errorf("app: prepare database: %w", err)
 	}
 	a.log.Debug().Msg("database prepared")
-	if a.store, err = storage.New(st, a.reg, a.clock, logging.Component(root, "storage")); err != nil {
+	a.store, err = storage.New(StorageSettings(*st), a.reg, a.clock,
+		logging.Component(root, "storage"))
+	if err != nil {
 		return err
 	}
 	a.log.Debug().Msg("storage created")

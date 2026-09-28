@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/utils/clocktest"
@@ -20,8 +19,8 @@ import (
 
 var ctx = context.Background()
 
-func testConfig(path string) *config.StorageSettings {
-	return &config.StorageSettings{
+func testConfig(path string) Settings {
+	return Settings{
 		Path: path, DailyRetention: 365 * 24 * time.Hour, ErrorRetention: 30 * 24 * time.Hour,
 		WalMode: true, Synchronous: "NORMAL", TempStore: "MEMORY",
 	}

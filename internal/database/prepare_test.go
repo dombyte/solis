@@ -13,13 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/utils/clocktest"
 )
 
 func newManager(t *testing.T, path string, clk *clocktest.Clock) *Manager {
 	t.Helper()
-	cfg := &config.StorageSettings{Path: path, CleanupInterval: time.Hour}
+	cfg := Settings{Path: path, CleanupInterval: time.Hour}
 	backup := &BackupConfig{Enabled: true, MaxBackups: 2, BackupInterval: time.Hour}
 	return NewManager(cfg, backup, clk, zerolog.Nop())
 }
@@ -122,7 +121,7 @@ func TestRunPeriodicBackups(t *testing.T) {
 }
 
 func TestRunPeriodic_Disabled(t *testing.T) {
-	cfg := &config.StorageSettings{Path: "x"}
+	cfg := Settings{Path: "x"}
 	m := NewManager(cfg, &BackupConfig{}, clocktest.New(time.Now()), zerolog.Nop())
 	m.RunPeriodicBackups(context.Background()) // returns immediately
 	m.RunPeriodicCleanup(context.Background(), &countingCleaner{})
