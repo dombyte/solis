@@ -869,6 +869,9 @@ Decoded values are full precision; rounding to 2 decimals happens only in JSON s
 - The total baseline refresh sums the daily rows from the cutover year's 1 January through
   the baseline year, exactly what the live aggregator folds (pre-cutover years are never
   carried into totals); nothing is refreshed while the baseline year precedes the cutover.
+- `--force` is the deliberate override: it recomputes periods without complete daily
+  history (overwriting stored values with partial sums) and rebuilds the baseline from all
+  daily rows. The `purged_before` refusal still applies.
 - Uses the same `aggregation` functions as the live aggregator. Output: the backup path,
   one line per recomputed row (`monthly  pv_energy_monthly        2026-08   412.30 kWh ->
   409.87 kWh`, `n/a` when there was no row), one `skipped` line per period without complete

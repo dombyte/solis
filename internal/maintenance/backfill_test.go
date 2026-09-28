@@ -92,7 +92,7 @@ func monthly(t *testing.T, f *fixture, key, month string) float64 {
 
 func TestBackfill_CurrentYear(t *testing.T) {
 	f := newFixture(t)
-	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 0))
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), Options{Years: 0}))
 	out := f.out.String()
 	assert.Contains(t, out, "backup: backups/solis.db.x.backup")
 	assert.Contains(t, out, "monthly  pv_energy_monthly        2026-08    12.00 kWh ->  10.00 kWh")
@@ -108,7 +108,7 @@ func TestBackfill_CurrentYear(t *testing.T) {
 
 	// Idempotent: a second run reports everything unchanged.
 	f.out.Reset()
-	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 0))
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), Options{Years: 0}))
 	rec, same, lower := summary(t, f.out.String())
 	assert.Positive(t, rec)
 	assert.Equal(t, rec, same)
@@ -137,7 +137,7 @@ func TestBackfill_ClosedYearKeepsIncompletePeriodsAndBaseline(t *testing.T) {
 	}))
 	require.NoError(t, st.Close())
 
-	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 1))
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), Options{Years: 1}))
 	out := f.out.String()
 	assert.Contains(t, out, "monthly  pv_energy_monthly        2025-06      n/a kWh -> 100.00 kWh")
 	assert.Contains(t, out, "skipped  monthly  2025-05  daily history starts 2025-06-01")
@@ -179,7 +179,7 @@ func TestBackfill_BaselineRefreshStartsAtCutoverYear(t *testing.T) {
 	}))
 	require.NoError(t, st.Close())
 
-	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), 1))
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), Options{Years: 1}))
 	assert.Contains(t, f.out.String(),
 		"total    pv_energy_total          baseline     1.00 kWh -> 100.00 kWh")
 	st = f.open(t)
@@ -200,7 +200,7 @@ func TestBackfill_RefusesWhileAppRuns(t *testing.T) {
 	err = RunBackfill(bg, f.env(t, func(context.Context) (string, error) {
 		backupCalled = true
 		return okBackup(bg)
-	}), 0)
+	}), Options{})
 	require.ErrorIs(t, err, ErrLocked)
 	var le *LockedError
 	require.ErrorAs(t, err, &le)
@@ -225,7 +225,7 @@ func TestBackfill_NoBackupNoWrite(t *testing.T) {
 		opened = true
 		return nil, nil, errors.New("unreachable")
 	}
-	err := RunBackfill(bg, env, 0)
+	err := RunBackfill(bg, env, Options{Years: 0})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nothing was written")
 	assert.False(t, opened)
@@ -234,7 +234,7 @@ func TestBackfill_NoBackupNoWrite(t *testing.T) {
 
 func TestBackfill_InvalidArgsAndOpenError(t *testing.T) {
 	f := newFixture(t)
-	err := RunBackfill(bg, f.env(t, okBackup), -1)
+	err := RunBackfill(bg, f.env(t, okBackup), Options{Years: -1})
 	assert.ErrorIs(t, err, ErrInvalidArgs)
 	var ae *ArgError
 	require.ErrorAs(t, err, &ae)
@@ -242,7 +242,7 @@ func TestBackfill_InvalidArgsAndOpenError(t *testing.T) {
 	assert.EqualError(t, ae, "invalid arguments: --years must be >= 0, got -1")
 	env := f.env(t, okBackup)
 	env.OpenStore = func(context.Context) (Store, func() error, error) { return nil, nil, errors.New("x") }
-	assert.Error(t, RunBackfill(bg, env, 0))
+	assert.Error(t, RunBackfill(bg, env, Options{Years: 0}))
 }
 
 func TestReportFormatAndCounts(t *testing.T) {
@@ -312,19 +312,19 @@ func TestRecompute_Errors(t *testing.T) {
 
 	tx := mocks.NewMockBackfillTx(t)
 	tx.EXPECT().PurgedBefore().Return("9999-01-01")
-	_, err := Recompute(tx, reg, period.Of(now), 0)
+	_, err := Recompute(tx, reg, period.Of(now), Options{Years: 0})
 	assert.ErrorIs(t, err, ErrPurgedHistory)
 
 	tx = mocks.NewMockBackfillTx(t)
 	tx.EXPECT().PurgedBefore().Return("")
 	tx.EXPECT().FirstDailyDay().Return("2020-01-01", nil)
-	_, err = Recompute(tx, reg, period.Period{Year: "x"}, 0)
+	_, err = Recompute(tx, reg, period.Period{Year: "x"}, Options{Years: 0})
 	assert.ErrorIs(t, err, period.ErrInvalidKey)
 
 	tx = mocks.NewMockBackfillTx(t)
 	tx.EXPECT().PurgedBefore().Return("")
 	tx.EXPECT().FirstDailyDay().Return("", errors.New("disk I/O error"))
-	_, err = Recompute(tx, reg, period.Of(now), 0)
+	_, err = Recompute(tx, reg, period.Of(now), Options{Years: 0})
 	assert.ErrorContains(t, err, "disk I/O error")
 }
 
@@ -335,7 +335,7 @@ func TestRecompute_SkipsPeriodsWithoutCompleteDailyHistory(t *testing.T) {
 	tx := mocks.NewMockBackfillTx(t)
 	tx.EXPECT().PurgedBefore().Return("")
 	tx.EXPECT().FirstDailyDay().Return("", nil) // no daily rows at all
-	rep, err := Recompute(tx, reg, period.Of(now), 0)
+	rep, err := Recompute(tx, reg, period.Of(now), Options{Years: 0})
 	require.NoError(t, err)
 	assert.Empty(t, rep.Lines, "nothing written without daily history")
 	assert.Len(t, rep.Skipped, 10, "Jan..Sep + the year")
@@ -360,4 +360,38 @@ func TestLockPath_ResolvesSymlink(t *testing.T) {
 	assert.Equal(t, LockPath(target), LockPath(link))
 	missing := filepath.Join(dir, "missing.db")
 	assert.Equal(t, missing+".lock", LockPath(missing))
+}
+
+// --force restores the pre-guard behaviour on purpose: periods without complete daily
+// history are recomputed (overwriting the stored value) and the baseline sums all daily
+// rows, pre-cutover years included.
+func TestBackfill_ForceOverridesIncompletePeriodsAndBaseline(t *testing.T) {
+	f := newFixture(t)
+	st := f.open(t)
+	require.NoError(t, st.Backfill(bg, func(tx storage.BackfillTx) error {
+		return tx.PutPeriod(period.Yearly, "pv_energy_yearly", "2025", 1234)
+	}))
+	require.NoError(t, st.Close())
+
+	require.NoError(t, RunBackfill(bg, f.env(t, okBackup), Options{Years: 1, Force: true}))
+	out := f.out.String()
+	assert.Contains(t, out, "force: periods without complete daily history are overwritten")
+	assert.Contains(t, out, "yearly   pv_energy_yearly         2025     1234.00 kWh -> 100.00 kWh")
+	assert.Contains(t, out, "monthly  pv_energy_monthly        2025-01      n/a kWh ->   0.00 kWh")
+	assert.Contains(t, out, "0 periods skipped")
+	assert.Contains(t, out, "total    pv_energy_total          baseline      n/a kWh -> 100.00 kWh")
+
+	st = f.open(t)
+	defer func() { _ = st.Close() }()
+	cs, err := st.CloseState(bg)
+	require.NoError(t, err)
+	assert.InDelta(t, 100.0, cs.Baseline["pv_energy_total"], 1e-9, "pre-cutover 2025 included")
+}
+
+func TestRecompute_ForceStillRefusesPurgedHistory(t *testing.T) {
+	reg := newFixture(t).reg
+	tx := mocks.NewMockBackfillTx(t)
+	tx.EXPECT().PurgedBefore().Return("2026-01-01")
+	_, err := Recompute(tx, reg, period.Of(now), Options{Years: 1, Force: true})
+	assert.ErrorIs(t, err, ErrPurgedHistory)
 }

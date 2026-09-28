@@ -264,7 +264,8 @@ Without a subcommand, `solis` runs the server. `solis <subcommand>` instead runs
 against the database and exits `0`/`1`; it never starts the HTTP server, poller or WebSocket hub.
 
 ```bash
-solis backfill --years 2   # recompute monthly + yearly for the current year + 2 closed years
+solis backfill --years 2           # recompute monthly + yearly for the current year + 2 closed years
+solis backfill --years 2 --force   # same, also overwriting periods without complete daily history
 ```
 
 The job refuses to run while the server holds its lock on the database, always takes a
@@ -272,6 +273,13 @@ backup first and verifies it with `PRAGMA integrity_check` (aborting with no wri
 failure), and refreshes the total baseline for any closed year it touches. Once retention
 cleanup has deleted daily rows, closed years can no longer be recomputed: the job then
 refuses `--years N > 0` instead of overwriting history with partial sums.
+
+By default the job keeps what it cannot fully recompute: months and years that start before
+the oldest daily row (e.g. inverter-reported history from before logging began) are skipped
+and listed in the report, and the total baseline only covers years since the v3 cutover.
+`--force` overrides both: those periods are overwritten with the sums of the rows that exist
+(possibly partial or zero), and the baseline is rebuilt from all daily rows, pre-cutover
+years included. Periods removed by retention are still refused.
 
 ## Running
 

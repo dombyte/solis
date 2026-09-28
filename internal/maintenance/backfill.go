@@ -89,12 +89,24 @@ type Env struct {
 	Out       io.Writer
 }
 
+// Options select what a backfill recomputes.
+type Options struct {
+	// Years is the number of closed years recomputed in addition to the current year.
+	Years int
+	// Force recomputes every period, even one that starts before the oldest daily row
+	// (writing partial or zero sums over the stored value), and refreshes the total
+	// baseline from all daily rows, pre-cutover years included. It is the pre-guard
+	// behaviour for a deliberate override; periods removed by retention (purged_before)
+	// are still refused.
+	Force bool
+}
+
 // RunBackfill locks the database, takes a verified backup, recomputes monthly and yearly
-// values for the current year plus `years` closed years (refreshing the total baseline
+// values for the current year plus opts.Years closed years (refreshing the total baseline
 // when a closed year is touched) and prints the report. No backup, no write.
-func RunBackfill(ctx context.Context, env Env, years int) (err error) {
-	if years < 0 {
-		return &ArgError{Arg: "--years", Reason: fmt.Sprintf("must be >= 0, got %d", years)}
+func RunBackfill(ctx context.Context, env Env, opts Options) (err error) {
+	if opts.Years < 0 {
+		return &ArgError{Arg: "--years", Reason: fmt.Sprintf("must be >= 0, got %d", opts.Years)}
 	}
 	lock, err := AcquireExclusive(env.DBPath)
 	if err != nil {
@@ -106,7 +118,7 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 	if err != nil {
 		return fmt.Errorf("backup failed, nothing was written: %w", err)
 	}
-	if _, err := fmt.Fprintf(env.Out, "backup: %s\n", backup); err != nil {
+	if err := writeHeader(env.Out, backup, opts.Force); err != nil {
 		return err
 	}
 	st, closeStore, err := env.OpenStore(ctx)
@@ -118,7 +130,7 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 	var rep Report
 	err = st.Backfill(ctx, func(tx storage.BackfillTx) error {
 		var rErr error
-		rep, rErr = Recompute(tx, env.Registry, period.Of(env.Now), years)
+		rep, rErr = Recompute(tx, env.Registry, period.Of(env.Now), opts)
 		return rErr
 	})
 	if err != nil {
@@ -127,23 +139,36 @@ func RunBackfill(ctx context.Context, env Env, years int) (err error) {
 	return rep.Write(env.Out)
 }
 
+// writeHeader prints the backup path and, with --force, what force changes.
+func writeHeader(out io.Writer, backup string, force bool) error {
+	if _, err := fmt.Fprintf(out, "backup: %s\n", backup); err != nil {
+		return err
+	}
+	if !force {
+		return nil
+	}
+	_, err := fmt.Fprintln(out, "force: periods without complete daily history are "+
+		"overwritten; the baseline includes all daily history")
+	return err
+}
+
 // Recompute rewrites monthly and yearly rows (always both) of the affected years and, if a
 // closed year is included, the total baseline. Periods that start before the oldest
 // daily row have no complete daily history: they are skipped and keep their stored
 // (e.g. inverter-reported) value instead of being overwritten with a partial or zero
-// sum. It returns the report lines.
-func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, years int) (
+// sum, unless opts.Force. It returns the report lines.
+func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, opts Options) (
 	Report, error,
 ) {
-	if err := checkPurged(tx, now, years); err != nil {
+	if err := checkPurged(tx, now, opts.Years); err != nil {
 		return Report{}, err
 	}
 	first, err := tx.FirstDailyDay()
 	if err != nil {
 		return Report{}, err
 	}
-	r := &recomputer{tx: tx, reg: reg, now: now, first: first}
-	err = r.run(years)
+	r := &recomputer{tx: tx, reg: reg, now: now, first: first, force: opts.Force}
+	err = r.run(opts.Years)
 	return r.rep, err
 }
 
@@ -188,6 +213,7 @@ type recomputer struct {
 	reg   Registry
 	now   period.Period
 	first string // oldest daily row ("" = none)
+	force bool   // Options.Force
 	rep   Report
 }
 
@@ -238,7 +264,7 @@ type job struct {
 // period computes edges + net from daily sums and writes every row, unless the daily
 // history does not reach back to the period's start (review DB-H1).
 func (r *recomputer) period(j job) error {
-	if r.first == "" || j.from < r.first {
+	if r.incomplete(j) {
 		r.rep.skip(Skip{Level: j.level.String(), Period: j.key, FirstDaily: r.first})
 		return nil
 	}
@@ -266,6 +292,12 @@ func (r *recomputer) period(j job) error {
 	return nil
 }
 
+// incomplete reports a period whose start lies before the oldest daily row, which is
+// skipped unless Force (review DB-H1).
+func (r *recomputer) incomplete(j job) bool {
+	return !r.force && (r.first == "" || j.from < r.first)
+}
+
 // sums runs one bounded daily sum per source key.
 func (r *recomputer) sums(keys []string, from, to string) (aggregation.Values, error) {
 	sums := aggregation.Values{}
@@ -285,12 +317,12 @@ func (r *recomputer) sums(keys []string, from, to string) (aggregation.Values, e
 // has been folded there is nothing to refresh.
 func (r *recomputer) refreshBaseline() error {
 	year, old := r.tx.Baseline()
-	cutover := r.tx.Cutover()
-	if year == "" || len(cutover) < len("2006") || year < cutover[:4] {
+	from, ok := r.baselineFrom(year)
+	if !ok {
 		return nil
 	}
 	edges := r.reg.Edges(period.Total)
-	sums, err := r.sums(aggregation.SourceKeys(edges), cutover[:4]+"-01-01", year+"-12-31")
+	sums, err := r.sums(aggregation.SourceKeys(edges), from, year+"-12-31")
 	if err != nil {
 		return err
 	}
@@ -303,6 +335,23 @@ func (r *recomputer) refreshBaseline() error {
 		})
 	}
 	return r.tx.PutBaseline(next)
+}
+
+// baselineFrom is the first day summed into the baseline: the cutover year's 1 January, or
+// the start of all history with Force (then pre-cutover years are included). false means
+// there is nothing to refresh.
+func (r *recomputer) baselineFrom(year string) (string, bool) {
+	if year == "" {
+		return "", false
+	}
+	if r.force {
+		return "", true
+	}
+	cutover := r.tx.Cutover()
+	if len(cutover) < len("2006") || year < cutover[:4] {
+		return "", false
+	}
+	return cutover[:4] + "-01-01", true
 }
 
 func unitOf(reg Registry, key string) string {

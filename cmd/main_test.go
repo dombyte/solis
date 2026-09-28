@@ -82,6 +82,7 @@ func TestBackfill_FlagsAndConfig(t *testing.T) {
 	assert.Equal(t, 1, runBackfill([]string{"--years", "x"}, &out, &errOut))
 	assert.Equal(t, 0, runBackfill([]string{"-h"}, &out, &errOut), "help is not an error")
 	assert.Contains(t, errOut.String(), "-years")
+	assert.Contains(t, errOut.String(), "-force")
 
 	inConfigDir(t, "storage:\n  path: ./data/solis.db\n  enable_backup: true\n")
 

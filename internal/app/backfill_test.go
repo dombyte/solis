@@ -30,7 +30,7 @@ func TestCreateBackfillEnv_RunsAJob(t *testing.T) {
 
 	for range 2 {
 		out.Reset()
-		require.NoError(t, maintenance.RunBackfill(context.Background(), env, 0))
+		require.NoError(t, maintenance.RunBackfill(context.Background(), env, maintenance.Options{}))
 		assert.Contains(t, out.String(), "backup: ")
 	}
 	entries, err := filepath.Glob(filepath.Join(filepath.Dir(cfg.Storage.Path), "backups", "*"))
