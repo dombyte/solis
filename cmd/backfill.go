@@ -12,7 +12,7 @@ import (
 	"github.com/dombyte/solis/internal/maintenance"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // runBackfill parses `backfill --years N` and runs the job; exit code 0/1.
@@ -40,20 +40,20 @@ func backfill(years int, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	clock := utils.NewRealClock()
+	clock := util.NewRealClock()
 	st := &cfg.Storage
 	backupCfg := &database.BackupConfig{Enabled: true, MaxBackups: st.MaxBackups}
 	return maintenance.RunBackfill(context.Background(), maintenance.Env{
 		DBPath: st.Path,
-		Backup: func() (string, error) {
-			return database.CreateBackup(st.Path, backupCfg, clock.Now(), log)
+		Backup: func(ctx context.Context) (string, error) {
+			return database.CreateBackup(ctx, st.Path, backupCfg, clock.Now(), log)
 		},
-		OpenStore: func() (maintenance.Store, func() error, error) {
+		OpenStore: func(ctx context.Context) (maintenance.Store, func() error, error) {
 			mgr := database.NewManager(app.DatabaseSettings(*st), backupCfg, clock, log)
-			if err := mgr.Prepare(context.Background()); err != nil {
+			if err := mgr.Prepare(ctx); err != nil {
 				return nil, nil, err
 			}
-			s, err := storage.New(app.StorageSettings(*st), reg, clock, log)
+			s, err := storage.New(ctx, app.StorageSettings(*st), reg, clock, log)
 			if err != nil {
 				return nil, nil, err
 			}

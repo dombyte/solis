@@ -19,8 +19,8 @@ import (
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/health/mocks"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
@@ -31,7 +31,7 @@ type env struct {
 	cache *cache.Cache
 	hub   *Hub
 	srv   *httptest.Server
-	slot  *utils.Slot[*Hub]
+	slot  *util.Slot[*Hub]
 	sent  int64 // cache writes (= bus events) so far
 }
 
@@ -48,7 +48,7 @@ func newEnv(t *testing.T) *env {
 		Clock: clk, PollInterval: 5 * time.Second, Reporter: rep, Log: zerolog.Nop(),
 	})
 	require.NoError(t, err)
-	e := &env{t: t, clk: clk, cache: cache.New(bus, zerolog.Nop()), hub: hub, slot: &utils.Slot[*Hub]{}}
+	e := &env{t: t, clk: clk, cache: cache.New(bus, zerolog.Nop()), hub: hub, slot: &util.Slot[*Hub]{}}
 	hub.d.Cache = e.cache // the hub reads the same cache that publishes on the bus
 	require.NoError(t, hub.Start(context.Background()))
 	t.Cleanup(func() { _ = hub.Stop() })
@@ -261,6 +261,7 @@ func TestHubStopClosesClientsAndRestartingHub503(t *testing.T) {
 func TestNewHubValidationAndUnstartedStop(t *testing.T) {
 	_, err := NewHub(HubDeps{})
 	assert.ErrorIs(t, err, ErrMissingDependency)
+	assert.EqualError(t, err, "websocket: missing dependency: Bus")
 	e := newEnv(t)
 	h, err := NewHub(e.hub.d)
 	require.NoError(t, err)

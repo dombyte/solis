@@ -176,23 +176,30 @@ func (s *subscription) pump() {
 			return
 		case <-s.kick:
 		}
-		for {
-			s.mu.Lock()
-			if len(s.overflow) == 0 {
-				s.mu.Unlock()
-				break
-			}
-			e := s.overflow[0]
-			s.mu.Unlock()
-			select {
-			case s.ch <- e:
-			case <-s.done:
-				return
-			}
-			s.mu.Lock()
-			s.overflow = s.overflow[1:]
-			s.mu.Unlock()
+		if !s.drain() {
+			return
 		}
+	}
+}
+
+// drain delivers queued overflow events in order; false means the subscription closed.
+func (s *subscription) drain() bool {
+	for {
+		s.mu.Lock()
+		if len(s.overflow) == 0 {
+			s.mu.Unlock()
+			return true
+		}
+		e := s.overflow[0]
+		s.mu.Unlock()
+		select {
+		case s.ch <- e:
+		case <-s.done:
+			return false
+		}
+		s.mu.Lock()
+		s.overflow = s.overflow[1:]
+		s.mu.Unlock()
 	}
 }
 

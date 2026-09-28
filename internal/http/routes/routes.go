@@ -11,7 +11,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog"
 
-	"github.com/dombyte/solis/internal/http/handlers"
+	"github.com/dombyte/solis/internal/http/httphandler"
 	"github.com/dombyte/solis/internal/http/middleware"
 )
 
@@ -24,7 +24,7 @@ const (
 // Deps are the router dependencies.
 type Deps struct {
 	// Handlers are the API handler dependencies.
-	Handlers handlers.HandlerDeps
+	Handlers httphandler.HandlerDeps
 	// WebSocket serves /ws.
 	WebSocket http.Handler
 	// FrontendDir and DocsDir override the dist folders (tests); empty = defaults.
@@ -68,10 +68,10 @@ func SetupRoutes(d Deps) *chi.Mux {
 		r.Handle("/ws", d.WebSocket)
 		r.Handle("/ws/", d.WebSocket)
 	}
-	r.Method(http.MethodGet, "/health", handlers.GetHealthHandler(d.Handlers))
+	r.Method(http.MethodGet, "/health", httphandler.GetHealthHandler(d.Handlers))
 	r.Route("/api", func(r chi.Router) {
-		r.Method(http.MethodGet, "/keys", handlers.GetKeysHandler(d.Handlers))
-		r.Method(http.MethodGet, "/data/{key}", handlers.GetDataHandler(d.Handlers))
+		r.Method(http.MethodGet, "/keys", httphandler.GetKeysHandler(d.Handlers))
+		r.Method(http.MethodGet, "/data/{key}", httphandler.GetDataHandler(d.Handlers))
 	})
 	mountDocs(r, d.DocsDir)
 	mountFrontend(r, d.FrontendDir)

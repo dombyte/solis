@@ -1,15 +1,18 @@
-// Package utils provides common utility functions for the Solis monitor application.
-package utils
+// Package util provides common utility functions for the Solis monitor application.
+package util
 
 import (
 	"fmt"
 	"math"
 )
 
+// twoDecimals is the scale for rounding to 2 decimal places.
+const twoDecimals = 100
+
 // RoundTo2DecimalPlaces rounds a value to exactly 2 decimal places.
 // This ensures consistent display format across all values.
 func RoundTo2DecimalPlaces(value float64) float64 {
-	return math.Round(value*100) / 100
+	return math.Round(value*twoDecimals) / twoDecimals
 }
 
 // Float64With2Decimals is a float64 that marshals to JSON with exactly 2 decimal places.

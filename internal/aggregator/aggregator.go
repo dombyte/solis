@@ -17,7 +17,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Cadence factors of the poll interval (spec §6; constants, not config).
@@ -52,7 +52,7 @@ type Deps struct {
 	Cache        Cache
 	Bus          eventbus.Subscriber
 	Registry     Registry
-	Clock        utils.Clock
+	Clock        util.Clock
 	PollInterval time.Duration
 	// Timeout bounds the storage calls of one run.
 	Timeout  time.Duration
@@ -83,16 +83,15 @@ func New(d Deps) (*Aggregator, error) {
 }
 
 func (d Deps) validate() error {
-	required := []bool{
-		d.Store != nil, d.Cache != nil, d.Bus != nil, d.Registry != nil,
-		d.Clock != nil, d.Reporter != nil, d.PollInterval > 0,
-	}
-	for _, ok := range required {
-		if !ok {
-			return ErrMissingDependency
-		}
-	}
-	return nil
+	return util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "Store", OK: d.Store != nil},
+		util.Requirement{Name: "Cache", OK: d.Cache != nil},
+		util.Requirement{Name: "Bus", OK: d.Bus != nil},
+		util.Requirement{Name: "Registry", OK: d.Registry != nil},
+		util.Requirement{Name: "Clock", OK: d.Clock != nil},
+		util.Requirement{Name: "Reporter", OK: d.Reporter != nil},
+		util.Requirement{Name: "PollInterval", OK: d.PollInterval > 0},
+	)
 }
 
 // Start subscribes to the bus and starts the loop. It is a no-op once started or
@@ -169,7 +168,7 @@ func (a *Aggregator) loop(ctx context.Context, events <-chan eventbus.Event) {
 // onEvent runs immediately for PeriodClosed and for the first poller event of a debounce
 // window; later events in the window arm one trailing run. Own (aggregator-domain)
 // events are ignored.
-func (a *Aggregator) onEvent(ctx context.Context, e eventbus.Event, debounce utils.Timer,
+func (a *Aggregator) onEvent(ctx context.Context, e eventbus.Event, debounce util.Timer,
 	armed bool,
 ) bool {
 	switch {

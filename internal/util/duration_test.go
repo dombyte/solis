@@ -1,4 +1,4 @@
-package utils
+package util
 
 import (
 	"testing"
@@ -38,6 +38,14 @@ func TestParseDuration_Invalid(t *testing.T) {
 		t.Run(in, func(t *testing.T) {
 			_, err := ParseDuration(in)
 			assert.ErrorIs(t, err, ErrInvalidDuration)
+			var de *DurationError
+			require.ErrorAs(t, err, &de)
+			assert.Equal(t, in, de.Input)
 		})
 	}
+}
+
+func TestDurationError_Message(t *testing.T) {
+	assert.EqualError(t, &DurationError{}, "invalid duration: empty")
+	assert.EqualError(t, &DurationError{Input: "1x"}, `invalid duration: "1x"`)
 }

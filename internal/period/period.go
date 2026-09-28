@@ -25,6 +25,21 @@ const (
 // ErrInvalidKey is returned when a period key does not match its layout.
 var ErrInvalidKey = errors.New("invalid period key")
 
+// KeyError reports a period key that does not match the layout of its level.
+type KeyError struct {
+	// Level is "day", "month" or "year".
+	Level string
+	// Key is the rejected key.
+	Key string
+}
+
+func (e *KeyError) Error() string {
+	return fmt.Sprintf("%v: %s %q", ErrInvalidKey, e.Level, e.Key)
+}
+
+// Unwrap returns ErrInvalidKey.
+func (e *KeyError) Unwrap() error { return ErrInvalidKey }
+
 // Level identifies a storage period granularity.
 type Level int
 
@@ -96,7 +111,7 @@ func (p Period) Key(l Level) string {
 func AddDays(day string, n int) (string, error) {
 	t, err := time.Parse(DayLayout, day)
 	if err != nil {
-		return "", fmt.Errorf("%w: day %q", ErrInvalidKey, day)
+		return "", &KeyError{Level: "day", Key: day}
 	}
 	return t.AddDate(0, 0, n).Format(DayLayout), nil
 }
@@ -105,7 +120,7 @@ func AddDays(day string, n int) (string, error) {
 func MonthBounds(month string) (first, last string, err error) {
 	t, err := time.Parse(MonthLayout, month)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: month %q", ErrInvalidKey, month)
+		return "", "", &KeyError{Level: "month", Key: month}
 	}
 	return t.Format(DayLayout), t.AddDate(0, 1, -1).Format(DayLayout), nil
 }
@@ -114,7 +129,7 @@ func MonthBounds(month string) (first, last string, err error) {
 func YearBounds(year string) (first, last string, err error) {
 	t, err := time.Parse(YearLayout, year)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: year %q", ErrInvalidKey, year)
+		return "", "", &KeyError{Level: "year", Key: year}
 	}
 	return t.Format(DayLayout), t.AddDate(1, 0, -1).Format(DayLayout), nil
 }
@@ -123,7 +138,7 @@ func YearBounds(year string) (first, last string, err error) {
 func AddMonths(month string, n int) (string, error) {
 	t, err := time.Parse(MonthLayout, month)
 	if err != nil {
-		return "", fmt.Errorf("%w: month %q", ErrInvalidKey, month)
+		return "", &KeyError{Level: "month", Key: month}
 	}
 	return t.AddDate(0, n, 0).Format(MonthLayout), nil
 }
@@ -132,7 +147,7 @@ func AddMonths(month string, n int) (string, error) {
 func AddYears(year string, n int) (string, error) {
 	t, err := time.Parse(YearLayout, year)
 	if err != nil {
-		return "", fmt.Errorf("%w: year %q", ErrInvalidKey, year)
+		return "", &KeyError{Level: "year", Key: year}
 	}
 	return t.AddDate(n, 0, 0).Format(YearLayout), nil
 }

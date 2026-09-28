@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -14,11 +15,14 @@ import (
 const V3MetaTableSQL = `CREATE TABLE IF NOT EXISTS meta (
 	key TEXT PRIMARY KEY, value TEXT NOT NULL)`
 
+// v3Version is the schema version V3Migration migrates to.
+const v3Version = 3
+
 // V3Migration adds the meta table (Plan.md D1) and normalizes error_data timestamps.
 type V3Migration struct{}
 
 // Version returns the migration version (3).
-func (m *V3Migration) Version() int { return 3 }
+func (m *V3Migration) Version() int { return v3Version }
 
 // Description returns a description of what this migration does.
 func (m *V3Migration) Description() string {
@@ -27,16 +31,16 @@ func (m *V3Migration) Description() string {
 }
 
 // Up creates the meta table and rewrites error_data timestamps into StatusTimestampLayout.
-func (m *V3Migration) Up(tx *sql.Tx) error {
-	if _, err := tx.Exec(V3MetaTableSQL); err != nil {
+func (m *V3Migration) Up(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, V3MetaTableSQL); err != nil {
 		return fmt.Errorf("create meta table: %w", err)
 	}
-	return normalizeStatusTimestamps(tx)
+	return normalizeStatusTimestamps(ctx, tx)
 }
 
 // Down drops the meta table; the original error_data timestamp layouts are not restored.
-func (m *V3Migration) Down(tx *sql.Tx) error {
-	_, err := tx.Exec(`DROP TABLE IF EXISTS meta`)
+func (m *V3Migration) Down(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS meta`)
 	return err
 }
 
@@ -64,21 +68,21 @@ func legacyTimestampLayouts() []string {
 
 // normalizeStatusTimestamps rewrites every parseable error_data timestamp into
 // StatusTimestampLayout (UTC); unparseable values stay untouched.
-func normalizeStatusTimestamps(tx *sql.Tx) error {
+func normalizeStatusTimestamps(ctx context.Context, tx *sql.Tx) error {
 	var n int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
 		WHERE type = 'table' AND name = 'error_data'`).Scan(&n); err != nil {
 		return fmt.Errorf("check error_data table: %w", err)
 	}
 	if n == 0 {
 		return nil
 	}
-	rows, err := readStatusTimestamps(tx)
+	rows, err := readStatusTimestamps(ctx, tx)
 	if err != nil {
 		return err
 	}
 	for id, ts := range rows {
-		if _, err := tx.Exec(`UPDATE OR IGNORE error_data SET timestamp = ? WHERE id = ?`,
+		if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE error_data SET timestamp = ? WHERE id = ?`,
 			ts, id); err != nil {
 			return fmt.Errorf("rewrite error_data %d: %w", id, err)
 		}
@@ -88,8 +92,8 @@ func normalizeStatusTimestamps(tx *sql.Tx) error {
 
 // readStatusTimestamps returns the normalized timestamp of every row that changes.
 // CAST drops the DATETIME decltype so the driver returns the stored text unparsed.
-func readStatusTimestamps(tx *sql.Tx) (map[int64]string, error) {
-	rows, err := tx.Query(`SELECT id, CAST(timestamp AS TEXT) FROM error_data`)
+func readStatusTimestamps(ctx context.Context, tx *sql.Tx) (map[int64]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, CAST(timestamp AS TEXT) FROM error_data`)
 	if err != nil {
 		return nil, fmt.Errorf("read error_data: %w", err)
 	}

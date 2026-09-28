@@ -1,4 +1,4 @@
-package handlers
+package httphandler
 
 import (
 	"context"
@@ -18,10 +18,10 @@ import (
 
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/history"
-	"github.com/dombyte/solis/internal/http/handlers/mocks"
+	"github.com/dombyte/solis/internal/http/httphandler/mocks"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var t0 = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)

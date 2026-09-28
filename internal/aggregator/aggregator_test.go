@@ -19,7 +19,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 const iv = 10 * time.Second // debounce 40s, heartbeat 50s
@@ -85,7 +85,7 @@ func newEnv(t *testing.T, start, cutover time.Time) *env {
 		Path:        filepath.Join(t.TempDir(), "s.db"),
 		Synchronous: "NORMAL", TempStore: "MEMORY",
 	}
-	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
+	st, err := storage.New(context.Background(), cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 	_, _, err = st.EnsureCutover(bg, period.Of(cutover))
@@ -147,6 +147,7 @@ func (e *env) cached(key string) float64 {
 func TestNew_MissingDependencies(t *testing.T) {
 	_, err := New(Deps{})
 	assert.ErrorIs(t, err, ErrMissingDependency)
+	assert.EqualError(t, err, "aggregator: missing dependency: Store")
 }
 
 func TestColdStartStaysIdle(t *testing.T) {

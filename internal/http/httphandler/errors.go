@@ -1,7 +1,7 @@
-// Package handlers provides the HTTP handlers of the Solis monitor API. Handlers are thin:
+// Package httphandler provides the HTTP handlers of the Solis monitor API. Handlers are thin:
 // they parse the request, call the read service and render JSON; errors go through the
 // central ErrorMapper.
-package handlers
+package httphandler
 
 import (
 	"context"

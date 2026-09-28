@@ -12,15 +12,15 @@ import (
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/modbus"
 	"github.com/dombyte/solis/internal/poller"
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 type nopReporter struct{}
 
 func (nopReporter) Report(health.State, string) {}
 
-func newModbusComponent(t *testing.T, slot *utils.Slot[poller.Reader]) health.Component {
+func newModbusComponent(t *testing.T, slot *util.Slot[poller.Reader]) health.Component {
 	t.Helper()
 	settings := modbus.Settings{Address: "tcp://127.0.0.1:1", Timeout: time.Second}
 	c, err := CreateModbus(settings, time.Hour, slot, clocktest.New(time.Now()), zerolog.Nop())(
@@ -30,7 +30,7 @@ func newModbusComponent(t *testing.T, slot *utils.Slot[poller.Reader]) health.Co
 }
 
 func TestModbusComponent_StaleStopKeepsSuccessor(t *testing.T) {
-	var slot utils.Slot[poller.Reader]
+	var slot util.Slot[poller.Reader]
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	oldC, newC := newModbusComponent(t, &slot), newModbusComponent(t, &slot)
@@ -47,7 +47,7 @@ func TestModbusComponent_StaleStopKeepsSuccessor(t *testing.T) {
 }
 
 func TestModbusComponent_StartAfterStopIsNoop(t *testing.T) {
-	var slot utils.Slot[poller.Reader]
+	var slot util.Slot[poller.Reader]
 	c := newModbusComponent(t, &slot)
 	require.NoError(t, c.Stop())
 	require.NoError(t, c.Start(context.Background()))

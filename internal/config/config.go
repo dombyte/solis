@@ -13,11 +13,26 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // ErrInvalidConfig is wrapped by every validation failure.
 var ErrInvalidConfig = errors.New("invalid config")
+
+// ValidationError names the settings section (or "rule") that failed validation.
+type ValidationError struct {
+	// Section is "app", "poller", "storage" or "rule".
+	Section string
+	// Err is the underlying validation failure.
+	Err error
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("%v: %s: %v", ErrInvalidConfig, e.Section, e.Err)
+}
+
+// Unwrap exposes ErrInvalidConfig and the underlying failure to errors.Is/As.
+func (e *ValidationError) Unwrap() []error { return []error{ErrInvalidConfig, e.Err} }
 
 // Rule is an extra validation injected by the composition root for settings whose rules
 // are owned by other packages (Modbus address, rollover time, health grace).
@@ -129,11 +144,18 @@ type StorageSettings struct {
 	CleanupInterval time.Duration `mapstructure:"cleanup_interval"`
 }
 
+// Numeric defaults (string and duration defaults are self-describing in setDefaults).
+const (
+	defaultPort          = 8080
+	defaultBlockAttempts = 3
+	defaultMaxBackups    = 3
+)
+
 // setDefaults configures default values for Viper.
 func setDefaults(v *viper.Viper) {
 	defaults := map[string]any{
-		"app.debug": "INFO", "app.port": 8080, "app.timeout": "30s",
-		"poller.interval": "30s", "poller.block_attempts": 3,
+		"app.debug": "INFO", "app.port": defaultPort, "app.timeout": "30s",
+		"poller.interval": "30s", "poller.block_attempts": defaultBlockAttempts,
 		"poller.block_retry_delay": "1s", "poller.block_interval": "0s",
 		"poller.poll_timeout": "30s",
 		"modbus.address":      "tcp://192.168.1.100:502",
@@ -143,7 +165,7 @@ func setDefaults(v *viper.Viper) {
 		"storage.daily_retention": "1y", "storage.error_retention": "1y",
 		"storage.wal_mode": true, "storage.synchronous": "NORMAL",
 		"storage.temp_store":    "MEMORY",
-		"storage.enable_backup": true, "storage.max_backups": 3,
+		"storage.enable_backup": true, "storage.max_backups": defaultMaxBackups,
 		"storage.backup_interval": "24h", "storage.cleanup_interval": "24h",
 	}
 	for k, val := range defaults {
@@ -164,13 +186,9 @@ func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	setDefaults(v)
 
-	var warnings []string
-	if err := v.ReadInConfig(); err != nil {
-		var notFound viper.ConfigFileNotFoundError
-		if !errors.As(err, &notFound) && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("failed to read config file: %w", err)
-		}
-		warnings = append(warnings, "config file not found, using defaults")
+	warnings, err := readConfigFile(v)
+	if err != nil {
+		return nil, err
 	}
 
 	var cfg AppConfig
@@ -178,12 +196,7 @@ func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 		durationHook, mapstructure.StringToSliceHookFunc(",")))); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
-	for key, why := range removedKeys() {
-		if v.InConfig(key) {
-			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
-		}
-	}
-	cfg.Warnings = warnings
+	cfg.Warnings = append(warnings, removedKeyWarnings(v)...)
 
 	if err := cfg.Validate(rules...); err != nil {
 		return nil, err
@@ -191,17 +204,44 @@ func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	return &cfg, nil
 }
 
+// readConfigFile reads the config file; a missing file is a warning, not an error.
+func readConfigFile(v *viper.Viper) ([]string, error) {
+	err := v.ReadInConfig()
+	if err == nil {
+		return nil, nil
+	}
+	var notFound viper.ConfigFileNotFoundError
+	if !errors.As(err, &notFound) && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+	return []string{"config file not found, using defaults"}, nil
+}
+
+// removedKeyWarnings lists removed settings that are still present in the file.
+func removedKeyWarnings(v *viper.Viper) []string {
+	var warnings []string
+	for key, why := range removedKeys() {
+		if v.InConfig(key) {
+			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
+		}
+	}
+	return warnings
+}
+
 // Validate validates every settings section, then applies rules.
 func (c *AppConfig) Validate(rules ...Rule) error {
-	validators := []interface{ Validate() error }{&c.App, &c.Poller, &c.Storage}
-	for _, v := range validators {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	sections := []struct {
+		name string
+		v    interface{ Validate() error }
+	}{{"app", &c.App}, {"poller", &c.Poller}, {"storage", &c.Storage}}
+	for _, s := range sections {
+		if err := s.v.Validate(); err != nil {
+			return &ValidationError{Section: s.name, Err: err}
 		}
 	}
 	for _, r := range rules {
 		if err := r(c); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+			return &ValidationError{Section: "rule", Err: err}
 		}
 	}
 	return nil
@@ -213,7 +253,7 @@ func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
 	if !ok || to != reflect.TypeFor[time.Duration]() {
 		return data, nil
 	}
-	return utils.ParseDuration(s)
+	return util.ParseDuration(s)
 }
 
 // Validate validates App configuration.

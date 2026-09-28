@@ -1,4 +1,4 @@
-// Package clocktest provides a manually advanced utils.Clock for tests of loops that
+// Package clocktest provides a manually advanced util.Clock for tests of loops that
 // wait on timers (no wall-clock sleeps in tests).
 package clocktest
 
@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
-// Clock is a fake utils.Clock. Time only moves when Advance or Set is called; timers
+// Clock is a fake util.Clock. Time only moves when Advance or Set is called; timers
 // and tickers whose deadline is reached fire during that call.
 type Clock struct {
 	mu      sync.Mutex
@@ -39,12 +39,12 @@ func (c *Clock) Now() time.Time {
 }
 
 // NewTimer creates a fake timer.
-func (c *Clock) NewTimer(d time.Duration) utils.Timer {
+func (c *Clock) NewTimer(d time.Duration) util.Timer {
 	return &fakeTimer{c: c, w: c.add(d, 0)}
 }
 
 // NewTicker creates a fake ticker.
-func (c *Clock) NewTicker(d time.Duration) utils.Ticker {
+func (c *Clock) NewTicker(d time.Duration) util.Ticker {
 	return &fakeTicker{c: c, w: c.add(d, d)}
 }
 
@@ -116,10 +116,13 @@ func (c *Clock) fire(w *waiter) {
 	w.active = false
 }
 
+// blockUntilTimeout bounds BlockUntil so a broken test fails instead of hanging.
+const blockUntilTimeout = 2 * time.Second
+
 // BlockUntil waits (real time, bounded) until at least n timers/tickers are active.
 // It lets a test wait for a goroutine to reach its select before advancing the clock.
 func (c *Clock) BlockUntil(n int) bool {
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(blockUntilTimeout)
 	for {
 		if c.activeCount() >= n {
 			return true

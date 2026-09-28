@@ -14,7 +14,7 @@ import (
 
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 var ctx = context.Background()
@@ -32,7 +32,7 @@ func newStore(t *testing.T, now time.Time) (*Storage, *clocktest.Clock, string) 
 	require.NoError(t, err)
 	clk := clocktest.New(now)
 	path := filepath.Join(t.TempDir(), "solis.db")
-	s, err := New(testConfig(path), reg, clk, zerolog.Nop())
+	s, err := New(ctx, testConfig(path), reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })
 	return s, clk, path
@@ -185,7 +185,7 @@ func TestEnsureCutover_FreezesPreCutoverHistory(t *testing.T) {
 	require.NoError(t, s.Close())
 
 	reg, _ := solis.NewRegistry()
-	s2, err := New(testConfig(path), reg, clocktest.New(day("2026-10-01")), zerolog.Nop())
+	s2, err := New(ctx, testConfig(path), reg, clocktest.New(day("2026-10-01")), zerolog.Nop())
 	require.NoError(t, err)
 	defer func() { _ = s2.Close() }()
 	st2, err := s2.CloseState(ctx)
@@ -466,6 +466,6 @@ func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 
 func TestNew_Errors(t *testing.T) {
 	reg, _ := solis.NewRegistry()
-	_, err := New(testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
+	_, err := New(ctx, testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())
 	assert.Error(t, err, "a directory is not a database")
 }

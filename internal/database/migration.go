@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -21,10 +22,10 @@ func NewMigrationExecutor(registry *MigrationRegistry, log zerolog.Logger) *Migr
 
 // GetCurrentVersion retrieves the current schema version from the database.
 // Returns 0 if the schema_version table doesn't exist or is empty.
-func (e *MigrationExecutor) GetCurrentVersion(db *sql.DB) (int, error) {
+func (e *MigrationExecutor) GetCurrentVersion(ctx context.Context, db *sql.DB) (int, error) {
 	// Check if schema_version table exists
 	var count int
-	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
 		WHERE type='table' AND name='schema_version'`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to check for schema_version table: %w", err)
@@ -37,7 +38,7 @@ func (e *MigrationExecutor) GetCurrentVersion(db *sql.DB) (int, error) {
 
 	// Get the highest version from schema_version table
 	var version int
-	err = db.QueryRow(`SELECT COALESCE(MAX(version), 0) FROM schema_version
+	err = db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_version
 		WHERE success = 1`).Scan(&version)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query schema version: %w", err)
@@ -57,15 +58,17 @@ const recordMigrationSQL = `INSERT OR REPLACE INTO schema_version
 	(version, description, applied_at, success) VALUES (?, ?, CURRENT_TIMESTAMP, 1)`
 
 // ApplyMigration applies a single migration and records it in one transaction.
-func (e *MigrationExecutor) ApplyMigration(db *sql.DB, migration Migration) error {
+func (e *MigrationExecutor) ApplyMigration(ctx context.Context, db *sql.DB,
+	migration Migration,
+) error {
 	version := migration.Version()
 	e.log.Info().Int("version", version).Str("description", migration.Description()).
 		Msg("applying migration")
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin migration transaction: %w", err)
 	}
-	if err := applyInTx(tx, migration); err != nil {
+	if err := applyInTx(ctx, tx, migration); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
 			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
 		}
@@ -79,15 +82,16 @@ func (e *MigrationExecutor) ApplyMigration(db *sql.DB, migration Migration) erro
 }
 
 // applyInTx runs the migration and records its version inside tx.
-func applyInTx(tx *sql.Tx, migration Migration) error {
+func applyInTx(ctx context.Context, tx *sql.Tx, migration Migration) error {
 	version := migration.Version()
-	if err := migration.Up(tx); err != nil {
+	if err := migration.Up(ctx, tx); err != nil {
 		return fmt.Errorf("migration %d failed: %w", version, err)
 	}
-	if _, err := tx.Exec(SchemaVersionTableSQL); err != nil {
+	if _, err := tx.ExecContext(ctx, SchemaVersionTableSQL); err != nil {
 		return fmt.Errorf("failed to ensure schema_version table exists: %w", err)
 	}
-	if _, err := tx.Exec(recordMigrationSQL, version, migration.Description()); err != nil {
+	_, err := tx.ExecContext(ctx, recordMigrationSQL, version, migration.Description())
+	if err != nil {
 		return fmt.Errorf("failed to record migration: %w", err)
 	}
 	return nil
@@ -95,7 +99,9 @@ func applyInTx(tx *sql.Tx, migration Migration) error {
 
 // ApplyPendingMigrations applies all pending migrations to the database.
 // Returns the number of migrations applied and any error that occurred.
-func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion int) (int, error) {
+func (e *MigrationExecutor) ApplyPendingMigrations(ctx context.Context, db *sql.DB,
+	currentVersion int,
+) (int, error) {
 	pending := e.GetPendingMigrations(currentVersion)
 	if len(pending) == 0 {
 		e.log.Info().Int("current_version", currentVersion).Msg("no pending migrations")
@@ -108,7 +114,7 @@ func (e *MigrationExecutor) ApplyPendingMigrations(db *sql.DB, currentVersion in
 	appliedCount := 0
 	for _, migration := range pending {
 		e.log.Debug().Int("version", migration.Version()).Msg("migration starting")
-		if err := e.ApplyMigration(db, migration); err != nil {
+		if err := e.ApplyMigration(ctx, db, migration); err != nil {
 			return appliedCount, fmt.Errorf("failed to apply migration %d: %w", migration.Version(), err)
 		}
 		appliedCount++

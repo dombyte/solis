@@ -76,6 +76,18 @@ func TestValidate_Rules(t *testing.T) {
 	err := cfg.Validate(pass, func(*AppConfig) error { return errRule })
 	require.ErrorIs(t, err, ErrInvalidConfig)
 	assert.ErrorIs(t, err, errRule)
+	var ve *ValidationError
+	require.ErrorAs(t, err, &ve)
+	assert.Equal(t, "rule", ve.Section)
+}
+
+func TestValidate_NamesSection(t *testing.T) {
+	cfg := validConfig()
+	cfg.Poller.Interval = 0
+	var ve *ValidationError
+	require.ErrorAs(t, cfg.Validate(), &ve)
+	assert.Equal(t, "poller", ve.Section)
+	assert.EqualError(t, ve, "invalid config: poller: poller interval must be positive")
 }
 
 func writeConfig(t *testing.T, content string) string {

@@ -5,7 +5,7 @@ package history
 import (
 	"encoding/json"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Values are stored at full precision; these JSON encoders round to two decimals for
@@ -48,16 +48,16 @@ type TotalDataPoint struct {
 
 // roundedPoint is the JSON shape of a period point with values rounded to 2 decimals.
 type roundedPoint struct {
-	Date      string                     `json:"date,omitempty"`
-	Month     string                     `json:"month,omitempty"`
-	Year      string                     `json:"year,omitempty"`
-	Value     utils.Float64With2Decimals `json:"value"`
-	RawValue  utils.Float64With2Decimals `json:"raw_value"`
-	Timestamp string                     `json:"timestamp,omitempty"`
+	Date      string                    `json:"date,omitempty"`
+	Month     string                    `json:"month,omitempty"`
+	Year      string                    `json:"year,omitempty"`
+	Value     util.Float64With2Decimals `json:"value"`
+	RawValue  util.Float64With2Decimals `json:"raw_value"`
+	Timestamp string                    `json:"timestamp,omitempty"`
 }
 
-func round(v float64) utils.Float64With2Decimals {
-	return utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v))
+func round(v float64) util.Float64With2Decimals {
+	return util.Float64With2Decimals(util.RoundTo2DecimalPlaces(v))
 }
 
 // MarshalJSON rounds values to two decimals.
@@ -87,17 +87,17 @@ func (y YearlyDataPoint) MarshalJSON() ([]byte, error) {
 // MarshalJSON rounds values to two decimals.
 func (t TotalDataPoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Value     utils.Float64With2Decimals `json:"value"`
-		RawValue  utils.Float64With2Decimals `json:"raw_value"`
-		Timestamp string                     `json:"timestamp"`
+		Value     util.Float64With2Decimals `json:"value"`
+		RawValue  util.Float64With2Decimals `json:"raw_value"`
+		Timestamp string                    `json:"timestamp"`
 	}{round(t.Value), round(t.RawValue), t.Timestamp})
 }
 
 // MarshalJSON rounds the raw value to two decimals.
 func (e ErrorDataPoint) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Timestamp   string                     `json:"timestamp"`
-		RawValue    utils.Float64With2Decimals `json:"raw_value"`
-		StringValue string                     `json:"string_value,omitempty"`
+		Timestamp   string                    `json:"timestamp"`
+		RawValue    util.Float64With2Decimals `json:"raw_value"`
+		StringValue string                    `json:"string_value,omitempty"`
 	}{e.Timestamp, round(e.RawValue), e.StringValue})
 }

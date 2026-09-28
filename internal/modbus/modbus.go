@@ -19,13 +19,14 @@ import (
 	"github.com/rs/zerolog"
 	sv "github.com/simonvetter/modbus"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
-// Reconnect backoff bounds.
+// Reconnect backoff bounds; the delay doubles per failed attempt up to MaxBackoff.
 const (
 	InitialBackoff = time.Second
 	MaxBackoff     = 30 * time.Second
+	backoffFactor  = 2
 )
 
 // Settings bounds.
@@ -154,7 +155,7 @@ func parity(p string) (uint, error) {
 type Client struct {
 	set   Settings
 	rtu   bool
-	clock utils.Clock
+	clock util.Clock
 	log   zerolog.Logger
 
 	mu        sync.Mutex // guards mc
@@ -164,7 +165,7 @@ type Client struct {
 }
 
 // New creates a disconnected client; it never fails because the device is unreachable.
-func New(set Settings, clock utils.Clock, log zerolog.Logger) (*Client, error) {
+func New(set Settings, clock util.Clock, log zerolog.Logger) (*Client, error) {
 	if err := set.Validate(); err != nil {
 		return nil, err
 	}
@@ -304,7 +305,7 @@ func (c *Client) Run(ctx context.Context, beatEvery time.Duration, beat func()) 
 		if err := c.connect(); err != nil {
 			c.log.Warn().Err(err).Dur("backoff", backoff).Msg("modbus reconnect failed")
 			c.wait(ctx, backoff, beatEvery, beat, false)
-			backoff = min(backoff*2, MaxBackoff)
+			backoff = min(backoff*backoffFactor, MaxBackoff)
 			continue
 		}
 		c.log.Debug().Msg("modbus reconnected")

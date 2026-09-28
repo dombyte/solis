@@ -21,7 +21,7 @@ import (
 	"github.com/dombyte/solis/internal/database"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/http/handlers"
+	"github.com/dombyte/solis/internal/http/httphandler"
 	"github.com/dombyte/solis/internal/http/routes"
 	"github.com/dombyte/solis/internal/http/server"
 	"github.com/dombyte/solis/internal/logging"
@@ -31,7 +31,7 @@ import (
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 	"github.com/dombyte/solis/internal/websocket"
 )
 
@@ -42,7 +42,7 @@ const probeTimeout = 2 * time.Second
 type App struct {
 	cfg   *config.AppConfig
 	log   zerolog.Logger
-	clock utils.Clock
+	clock util.Clock
 
 	lock    *maintenance.Lock
 	reg     *solis.Registry
@@ -59,7 +59,7 @@ type App struct {
 // shuts down gracefully. It returns nil on a clean shutdown and the wrapped
 // health.ErrHealthFatal (or a startup error) otherwise, so main() restarts the app.
 func Run(ctx context.Context, cfg *config.AppConfig, root zerolog.Logger) (err error) {
-	a := &App{cfg: cfg, log: logging.Component(root, "app"), clock: utils.NewRealClock()}
+	a := &App{cfg: cfg, log: logging.Component(root, "app"), clock: util.NewRealClock()}
 	defer func() { err = errors.Join(err, a.close()) }()
 	if err := a.build(ctx, root); err != nil {
 		return err
@@ -101,7 +101,7 @@ func (a *App) buildStorage(ctx context.Context, root zerolog.Logger) error {
 		return fmt.Errorf("app: prepare database: %w", err)
 	}
 	a.log.Debug().Msg("database prepared")
-	a.store, err = storage.New(StorageSettings(*st), a.reg, a.clock,
+	a.store, err = storage.New(ctx, StorageSettings(*st), a.reg, a.clock,
 		logging.Component(root, "storage"))
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
 	}
 	iv := a.cfg.Poller.Interval
 	a.sup = health.New(ctx, iv, a.clock, logging.Component(root, "health"))
-	reader := &utils.Slot[poller.Reader]{}
+	reader := &util.Slot[poller.Reader]{}
 	a.sup.Manage(nameModbus, CreateModbus(modbusSettings(a.cfg.Modbus), iv, reader, a.clock,
 		logging.Component(root, nameModbus)))
 	a.sup.Manage(namePoller, CreatePoller(poller.Deps{
@@ -160,7 +160,7 @@ func (a *App) buildSupervisor(ctx context.Context, root zerolog.Logger) error {
 }
 
 func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
-	hubs := &utils.Slot[*websocket.Hub]{}
+	hubs := &util.Slot[*websocket.Hub]{}
 	a.sup.Manage(nameHub, CreateHub(websocket.HubDeps{
 		Bus: a.bus, Cache: a.cache, Keys: a.reg,
 		Clock: a.clock, PollInterval: a.cfg.Poller.Interval,
@@ -172,8 +172,8 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 	})
 	httpLog := logging.Component(root, "http")
 	router := routes.SetupRoutes(routes.Deps{
-		Handlers: handlers.HandlerDeps{
-			Service: svc, Errors: handlers.NewErrorMapper(httpLog),
+		Handlers: httphandler.HandlerDeps{
+			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
 			Clock: a.clock, Timeout: a.cfg.App.Timeout,
 		},
 		WebSocket: websocket.NewHandler(hubs, httpLog), Log: httpLog,

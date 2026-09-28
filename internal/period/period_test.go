@@ -94,6 +94,10 @@ func TestKeyArithmetic_InvalidKeys(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidKey)
 	_, err = AddYears("x", 1)
 	assert.ErrorIs(t, err, ErrInvalidKey)
+	var ke *KeyError
+	require.ErrorAs(t, err, &ke)
+	assert.Equal(t, KeyError{Level: "year", Key: "x"}, *ke)
+	assert.EqualError(t, ke, `invalid period key: year "x"`)
 }
 
 func TestMonthsAndYearsBetween(t *testing.T) {
@@ -134,6 +138,9 @@ func TestParseRollover(t *testing.T) {
 	for _, in := range invalid {
 		_, err := ParseRollover(in)
 		assert.ErrorIs(t, err, ErrInvalidRollover, in)
+		var re *RolloverError
+		require.ErrorAs(t, err, &re, in)
+		assert.Equal(t, in, re.Value)
 	}
 }
 

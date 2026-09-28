@@ -17,7 +17,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // ErrMissingDependency is returned by New when a required dependency is nil.
@@ -79,7 +79,7 @@ type Deps struct {
 	Bus      eventbus.Publisher
 	Decoder  Decoder
 	Registry Registry
-	Clock    utils.Clock
+	Clock    util.Clock
 	// Timeout bounds storage calls.
 	Timeout  time.Duration
 	Reporter health.Reporter
@@ -122,17 +122,17 @@ func New(d Deps) (*Poller, error) {
 }
 
 func (d Deps) validate() error {
-	required := []bool{
-		d.Source != nil, d.Store != nil, d.Cache != nil, d.Bus != nil,
-		d.Decoder != nil, d.Registry != nil, d.Clock != nil, d.Reporter != nil,
-		d.Settings.Interval > 0,
-	}
-	for _, ok := range required {
-		if !ok {
-			return ErrMissingDependency
-		}
-	}
-	return nil
+	return util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "Source", OK: d.Source != nil},
+		util.Requirement{Name: "Store", OK: d.Store != nil},
+		util.Requirement{Name: "Cache", OK: d.Cache != nil},
+		util.Requirement{Name: "Bus", OK: d.Bus != nil},
+		util.Requirement{Name: "Decoder", OK: d.Decoder != nil},
+		util.Requirement{Name: "Registry", OK: d.Registry != nil},
+		util.Requirement{Name: "Clock", OK: d.Clock != nil},
+		util.Requirement{Name: "Reporter", OK: d.Reporter != nil},
+		util.Requirement{Name: "Settings.Interval", OK: d.Settings.Interval > 0},
+	)
 }
 
 // Start launches the poll loop; the first poll runs immediately.

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Pre-commit checks. golangci-lint (.golangci.yml) covers formatting (gofumpt, goimports),
 # line/function length, complexity, gosec, staticcheck, global state and the panic
-# policy; only what it cannot do runs separately (deadcode, build, tests).
+# policy; only what it cannot do runs separately (deadcode, govulncheck, build, tests).
 
 set -u
 
@@ -52,12 +52,17 @@ else
     print_result 0 "deadcode"
 fi
 
-# 4. Build
+# 4. Known vulnerabilities in dependencies and the standard library
+echo "Checking for vulnerabilities..."
+go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+print_result $? "govulncheck"
+
+# 5. Build
 echo "Building..."
 go build ./...
 print_result $? "build"
 
-# 5. Tests
+# 6. Tests
 echo "Running tests..."
 go test ./...
 print_result $? "tests"

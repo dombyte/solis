@@ -1,7 +1,10 @@
 // Package migrations provides database migration types and implementations.
 package migrations
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 // Migration represents a database schema migration that can be applied or reverted.
 type Migration interface {
@@ -13,10 +16,10 @@ type Migration interface {
 
 	// Up applies the migration to the database.
 	// This should be implemented as idempotent (safe to run multiple times).
-	Up(tx *sql.Tx) error
+	Up(ctx context.Context, tx *sql.Tx) error
 
 	// Down reverts the migration (development/debugging only).
-	Down(tx *sql.Tx) error
+	Down(ctx context.Context, tx *sql.Tx) error
 }
 
 // SchemaVersionTableSQL is the SQL to create the schema version tracking table.

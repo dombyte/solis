@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/health"
-	"github.com/dombyte/solis/internal/http/handlers"
-	"github.com/dombyte/solis/internal/http/handlers/mocks"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/http/httphandler"
+	"github.com/dombyte/solis/internal/http/httphandler/mocks"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -37,9 +37,9 @@ func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 		w.WriteHeader(http.StatusTeapot)
 	})
 	return svc, SetupRoutes(Deps{
-		Handlers: handlers.HandlerDeps{
+		Handlers: httphandler.HandlerDeps{
 			Service: svc,
-			Errors:  handlers.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
+			Errors:  httphandler.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
 		},
 		WebSocket: ws, FrontendDir: fe, DocsDir: docs, Log: zerolog.Nop(),
 	})
@@ -87,7 +87,7 @@ func TestRoutes(t *testing.T) {
 func TestRoutes_WithoutDistFolders(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
 	r := SetupRoutes(Deps{
-		Handlers:    handlers.HandlerDeps{Service: svc},
+		Handlers:    httphandler.HandlerDeps{Service: svc},
 		FrontendDir: filepath.Join(t.TempDir(), "absent"), DocsDir: "/nonexistent",
 		Log: zerolog.Nop(),
 	})

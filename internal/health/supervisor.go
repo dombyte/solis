@@ -9,8 +9,11 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
+
+// sweepsPerInterval is how many health sweeps run per poll interval.
+const sweepsPerInterval = 2
 
 // reportBuffer sizes the push channel; reports are wake-ups, state lives in the entry.
 const reportBuffer = 32
@@ -18,7 +21,7 @@ const reportBuffer = 32
 // Supervisor owns the root context and every restartable component.
 type Supervisor struct {
 	interval time.Duration
-	clock    utils.Clock
+	clock    util.Clock
 	log      zerolog.Logger
 
 	ctx    context.Context
@@ -41,7 +44,7 @@ type watched struct {
 
 // New creates a supervisor whose root context derives from parent. pollInterval scales
 // every grace period.
-func New(parent context.Context, pollInterval time.Duration, clock utils.Clock,
+func New(parent context.Context, pollInterval time.Duration, clock util.Clock,
 	log zerolog.Logger,
 ) *Supervisor {
 	ctx, cancel := context.WithCancelCause(parent)
@@ -85,7 +88,7 @@ func (s *Supervisor) Snapshot() Snapshot {
 
 // SweepInterval is poll interval / 2 with a floor of MinSweepInterval.
 func (s *Supervisor) SweepInterval() time.Duration {
-	return max(s.interval/2, MinSweepInterval)
+	return max(s.interval/sweepsPerInterval, MinSweepInterval)
 }
 
 // Run starts all components in registration order, supervises them until the root

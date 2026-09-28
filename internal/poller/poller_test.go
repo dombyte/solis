@@ -20,8 +20,8 @@ import (
 	"github.com/dombyte/solis/internal/health/mocks"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/storage"
-	"github.com/dombyte/solis/internal/utils"
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 const pollEvery = 5 * time.Second
@@ -102,7 +102,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 		Path:        filepath.Join(t.TempDir(), "s.db"),
 		Synchronous: "NORMAL", TempStore: "MEMORY",
 	}
-	st, err := storage.New(cfg, reg, clk, zerolog.Nop())
+	st, err := storage.New(context.Background(), cfg, reg, clk, zerolog.Nop())
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = st.Close() })
 	bus := eventbus.New()
@@ -114,7 +114,7 @@ func newEnv(t *testing.T, start time.Time) *env {
 		t: t, clk: clk, dev: newDevice(), st: st, cache: cache.New(bus, zerolog.Nop()), bus: bus,
 		events: events,
 	}
-	var src utils.Slot[Reader]
+	var src util.Slot[Reader]
 	src.Store(e.dev)
 	rep := mocks.NewMockReporter(t)
 	rep.EXPECT().Report(health.Recovering, mock.Anything).Maybe()
@@ -324,6 +324,7 @@ func TestPoll_SeedFailureIsRecovering(t *testing.T) {
 func TestNewAndStop(t *testing.T) {
 	_, err := New(Deps{})
 	assert.ErrorIs(t, err, ErrMissingDependency)
+	assert.EqualError(t, err, "poller: missing dependency: Source")
 	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	require.NoError(t, e.p.Stop()) // never started
 	require.NoError(t, e.p.Stop())

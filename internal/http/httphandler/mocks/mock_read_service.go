@@ -6,7 +6,6 @@ import (
 	context "context"
 
 	health "github.com/dombyte/solis/internal/health"
-
 	history "github.com/dombyte/solis/internal/history"
 
 	mock "github.com/stretchr/testify/mock"

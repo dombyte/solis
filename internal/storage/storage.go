@@ -19,7 +19,7 @@ import (
 
 	"github.com/dombyte/solis/internal/database/migrations"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 const dirPerm = 0o750
@@ -45,7 +45,7 @@ type Storage struct {
 	db    *sql.DB
 	cfg   Settings
 	keys  KeyLookup
-	clock utils.Clock
+	clock util.Clock
 	log   zerolog.Logger
 
 	// mu serializes writes and guards meta (the in-memory copy of the meta table).
@@ -56,25 +56,26 @@ type Storage struct {
 	lastVacuum time.Time
 }
 
-// New opens (and if needed creates) the database and loads the close state.
-func New(cfg Settings, keys KeyLookup, clock utils.Clock,
+// New opens (and if needed creates) the database and loads the close state; ctx bounds
+// the startup queries.
+func New(ctx context.Context, cfg Settings, keys KeyLookup, clock util.Clock,
 	log zerolog.Logger,
 ) (*Storage, error) {
-	db, err := open(cfg, log)
+	db, err := open(ctx, cfg, log)
 	if err != nil {
 		return nil, err
 	}
 	s := &Storage{db: db, cfg: cfg, keys: keys, clock: clock, log: log}
-	if err := s.initSchema(); err != nil {
+	if err := s.initSchema(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("storage: init schema: %w", err), db.Close())
 	}
-	if err := s.loadMeta(context.Background()); err != nil {
+	if err := s.loadMeta(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("storage: load meta: %w", err), db.Close())
 	}
 	return s, nil
 }
 
-func open(cfg Settings, log zerolog.Logger) (*sql.DB, error) {
+func open(ctx context.Context, cfg Settings, log zerolog.Logger) (*sql.DB, error) {
 	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, dirPerm); err != nil {
 			return nil, fmt.Errorf("storage: create directory: %w", err)
@@ -88,14 +89,14 @@ func open(cfg Settings, log zerolog.Logger) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
-	configurePragmas(db, cfg, log)
-	if err := db.Ping(); err != nil {
+	configurePragmas(ctx, db, cfg, log)
+	if err := db.PingContext(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("storage: ping database: %w", err), db.Close())
 	}
 	return db, nil
 }
 
-func configurePragmas(db *sql.DB, cfg Settings, log zerolog.Logger) {
+func configurePragmas(ctx context.Context, db *sql.DB, cfg Settings, log zerolog.Logger) {
 	var pragmas []string
 	if cfg.WalMode {
 		pragmas = append(pragmas, "PRAGMA journal_mode=WAL;")
@@ -109,7 +110,7 @@ func configurePragmas(db *sql.DB, cfg Settings, log zerolog.Logger) {
 	}
 	for _, p := range pragmas {
 		log.Debug().Str("pragma", p).Msg("applying pragma")
-		if _, err := db.Exec(p); err != nil {
+		if _, err := db.ExecContext(ctx, p); err != nil {
 			log.Warn().Err(err).Str("pragma", p).Msg("failed to apply pragma")
 		}
 	}
@@ -147,10 +148,10 @@ func schemaSQL() []string {
 	}
 }
 
-func (s *Storage) initSchema() error {
-	return s.withTx(context.Background(), func(tx *sql.Tx) error {
+func (s *Storage) initSchema(ctx context.Context) error {
+	return s.withTx(ctx, func(tx *sql.Tx) error {
 		for _, stmt := range schemaSQL() {
-			if _, err := tx.Exec(stmt); err != nil {
+			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
 			}
 		}

@@ -18,6 +18,19 @@ const noonHour = 12
 // ErrInvalidRollover is returned for anything that is not strict 24-hour HH:MM.
 var ErrInvalidRollover = errors.New("invalid rollover time")
 
+// RolloverError reports a rollover time that is not strict 24-hour HH:MM.
+type RolloverError struct {
+	// Value is the rejected input.
+	Value string
+}
+
+func (e *RolloverError) Error() string {
+	return fmt.Sprintf("%v: %q (want strict 24-hour HH:MM)", ErrInvalidRollover, e.Value)
+}
+
+// Unwrap returns ErrInvalidRollover.
+func (e *RolloverError) Unwrap() error { return ErrInvalidRollover }
+
 // Rollover is the configured daily rollover time of day.
 type Rollover struct {
 	hour   int
@@ -45,7 +58,7 @@ func ParseRollover(s string) (Rollover, error) {
 }
 
 func invalidRollover(s string) error {
-	return fmt.Errorf("%w: %q (want strict 24-hour HH:MM)", ErrInvalidRollover, s)
+	return &RolloverError{Value: s}
 }
 
 // twoDigits converts exactly two ASCII digits to an int.

@@ -21,6 +21,9 @@ import (
 // ShutdownTimeout bounds graceful shutdown.
 const ShutdownTimeout = 5 * time.Second
 
+// idleTimeoutFactor scales the request timeout to the keep-alive idle timeout.
+const idleTimeoutFactor = 2
+
 // Settings are the listen port and the request timeout.
 type Settings struct {
 	// Port is the TCP listen port.
@@ -48,7 +51,7 @@ func New(cfg Settings, handler http.Handler, log zerolog.Logger) *Server {
 			ReadTimeout:       cfg.Timeout,
 			ReadHeaderTimeout: cfg.Timeout,
 			WriteTimeout:      cfg.Timeout,
-			IdleTimeout:       cfg.Timeout * 2,
+			IdleTimeout:       cfg.Timeout * idleTimeoutFactor,
 		},
 	}
 }

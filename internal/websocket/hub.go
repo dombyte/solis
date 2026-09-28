@@ -13,7 +13,7 @@ import (
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // Hub timing constants.
@@ -48,7 +48,7 @@ type HubDeps struct {
 	Bus          eventbus.Subscriber
 	Cache        Snapshotter
 	Keys         KeySet
-	Clock        utils.Clock
+	Clock        util.Clock
 	PollInterval time.Duration
 	Reporter     health.Reporter
 	Log          zerolog.Logger
@@ -75,7 +75,7 @@ type Hub struct {
 type loopState struct {
 	clients map[*Client]*clientState
 	dirty   bool
-	flush   utils.Timer
+	flush   util.Timer
 }
 
 type clientState struct {
@@ -85,14 +85,15 @@ type clientState struct {
 
 // NewHub validates dependencies and returns a stopped hub.
 func NewHub(d HubDeps) (*Hub, error) {
-	required := []bool{
-		d.Bus != nil, d.Cache != nil, d.Keys != nil, d.Clock != nil,
-		d.Reporter != nil, d.PollInterval > 0,
-	}
-	for _, ok := range required {
-		if !ok {
-			return nil, ErrMissingDependency
-		}
+	if err := util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "Bus", OK: d.Bus != nil},
+		util.Requirement{Name: "Cache", OK: d.Cache != nil},
+		util.Requirement{Name: "Keys", OK: d.Keys != nil},
+		util.Requirement{Name: "Clock", OK: d.Clock != nil},
+		util.Requirement{Name: "Reporter", OK: d.Reporter != nil},
+		util.Requirement{Name: "PollInterval", OK: d.PollInterval > 0},
+	); err != nil {
+		return nil, err
 	}
 	return &Hub{
 		Status: health.NewStatus(d.Reporter, d.Clock), d: d,

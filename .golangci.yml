@@ -25,6 +25,7 @@ linters:
     - ineffassign
     - gocyclo
     - dupl
+    - mnd
     - wastedassign
 
     # Correctness / bug finding
@@ -61,9 +62,15 @@ linters:
     lll:
       line-length: 100
 
-    # Cyclomatic complexity linter
+    # Cyclomatic complexity linter (reports > min-complexity; Arch_Plan: < 8)
     gocyclo:
-      min-complexity: 8
+      min-complexity: 7
+
+    # Magic numbers (Arch_Plan: named constants). Register/status tables are data.
+    mnd:
+      ignored-files:
+        - internal/solis/table\.go$
+        - internal/solis/status_tables\.go$
 
     # Duplicate code linter
     dupl:
@@ -98,10 +105,10 @@ linters:
         - name: package-comments
           disabled: false
 
-        # Style: max function length (Arch_Plan: < 40 lines)
+        # Style: max function length (Arch_Plan: < 40 lines; args = max statements, max lines)
         - name: function-length
           disabled: false
-          arguments: [40, 0]
+          arguments: [40, 40]
 
         # Style: max function parameters
         - name: argument-limit
@@ -147,7 +154,7 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters: [revive, dupl, errcheck, gosec, lll, gochecknoglobals, forbidigo]
+      - linters: [revive, dupl, errcheck, gosec, lll, gochecknoglobals, forbidigo, mnd]
         path: _test\.go
       - linters: [rowserrcheck, sqlclosecheck, bodyclose]
         path: _test\.go

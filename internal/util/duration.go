@@ -1,8 +1,7 @@
-package utils
+package util
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -23,17 +22,17 @@ var ErrInvalidDuration = errors.New("invalid duration")
 func ParseDuration(s string) (time.Duration, error) {
 	in := strings.TrimSpace(s)
 	if in == "" {
-		return 0, fmt.Errorf("%w: empty", ErrInvalidDuration)
+		return 0, &DurationError{}
 	}
 	var total time.Duration
 	for rest := in; rest != ""; {
 		num, unit, tail := splitDurationToken(rest)
 		if num == "" || unit == "" {
-			return 0, fmt.Errorf("%w: %q", ErrInvalidDuration, s)
+			return 0, &DurationError{Input: s}
 		}
 		d, err := durationToken(num, unit)
 		if err != nil {
-			return 0, fmt.Errorf("%w: %q", ErrInvalidDuration, s)
+			return 0, &DurationError{Input: s}
 		}
 		total += d
 		rest = tail

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/utils/clocktest"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
 func newManager(t *testing.T, path string, clk *clocktest.Clock) *Manager {
@@ -28,7 +28,7 @@ func schemaVersion(t *testing.T, path string) int {
 	db, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = db.Close() }()
-	v, err := NewMigrationExecutor(NewMigrationRegistry(), zerolog.Nop()).GetCurrentVersion(db)
+	v, err := NewMigrationExecutor(NewMigrationRegistry(), zerolog.Nop()).GetCurrentVersion(context.Background(), db)
 	require.NoError(t, err)
 	return v
 }
@@ -136,10 +136,10 @@ func TestRegistry_DuplicateIgnored(t *testing.T) {
 
 type v1Stub struct{}
 
-func (v1Stub) Version() int        { return 1 }
-func (v1Stub) Description() string { return "stub" }
-func (v1Stub) Up(*sql.Tx) error    { return nil }
-func (v1Stub) Down(*sql.Tx) error  { return nil }
+func (v1Stub) Version() int                        { return 1 }
+func (v1Stub) Description() string                 { return "stub" }
+func (v1Stub) Up(context.Context, *sql.Tx) error   { return nil }
+func (v1Stub) Down(context.Context, *sql.Tx) error { return nil }
 
 func execSQL(t *testing.T, path string, stmts ...string) {
 	t.Helper()

@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func TestV3Migration_Up(t *testing.T) {
 	m := GetV3Migration()
 	tx, err := db.Begin()
 	require.NoError(t, err)
-	require.NoError(t, m.Up(tx), "no error_data table only creates meta")
+	require.NoError(t, m.Up(context.Background(), tx), "no error_data table only creates meta")
 	require.NoError(t, tx.Commit())
 
 	_, err = db.Exec(`CREATE TABLE error_data (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +58,7 @@ func TestV3Migration_Up(t *testing.T) {
 
 	tx, err = db.Begin()
 	require.NoError(t, err)
-	require.NoError(t, m.Up(tx))
+	require.NoError(t, m.Up(context.Background(), tx))
 	require.NoError(t, tx.Commit())
 
 	rows, err := db.Query(`SELECT CAST(timestamp AS TEXT) FROM error_data ORDER BY id`)

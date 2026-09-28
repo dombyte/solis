@@ -1,4 +1,4 @@
-package handlers
+package httphandler
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/dombyte/solis/internal/period"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/dombyte/solis/internal/util"
 )
 
 // defaultHistoryWindow is the default history range when start is omitted.
@@ -39,7 +39,7 @@ type ReadService interface {
 type HandlerDeps struct {
 	Service ReadService
 	Errors  *ErrorMapper
-	Clock   utils.Clock
+	Clock   util.Clock
 	// Timeout bounds each storage read (app.timeout) so a slow history query cannot hold
 	// the single SQLite connection the poller writes through; 0 = request context only.
 	Timeout time.Duration
@@ -189,13 +189,13 @@ func total(ctx context.Context, deps HandlerDeps, reg solis.Register) (any, erro
 
 // DataResponse is a single current or total value (values rounded to two decimals).
 type DataResponse struct {
-	Key           string                     `json:"key"`
-	Name          string                     `json:"name,omitempty"`
-	Unit          string                     `json:"unit,omitempty"`
-	Value         utils.Float64With2Decimals `json:"value"`
-	RawValue      utils.Float64With2Decimals `json:"raw_value"`
-	Timestamp     string                     `json:"timestamp,omitempty"`
-	StatusDecoded any                        `json:"status_decoded,omitempty"`
+	Key           string                    `json:"key"`
+	Name          string                    `json:"name,omitempty"`
+	Unit          string                    `json:"unit,omitempty"`
+	Value         util.Float64With2Decimals `json:"value"`
+	RawValue      util.Float64With2Decimals `json:"raw_value"`
+	Timestamp     string                    `json:"timestamp,omitempty"`
+	StatusDecoded any                       `json:"status_decoded,omitempty"`
 }
 
 // NewDataResponse renders a cached value.
@@ -207,8 +207,8 @@ func NewDataResponse(v *solis.Value) DataResponse {
 	}
 }
 
-func round(f float64) utils.Float64With2Decimals {
-	return utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(f))
+func round(f float64) util.Float64With2Decimals {
+	return util.Float64With2Decimals(util.RoundTo2DecimalPlaces(f))
 }
 
 // TimeRange is a parsed history range.

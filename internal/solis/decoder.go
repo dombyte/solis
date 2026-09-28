@@ -117,6 +117,11 @@ func (d *Decoder) DecodeStatus(key string, raw uint16) any {
 	if key == operatingStatusKey {
 		unknown = "Unknown status bit %d"
 	}
+	return activeBits(raw, names, unknown)
+}
+
+// activeBits names every set bit of raw; bits without a name use the unknown format.
+func activeBits(raw uint16, names []string, unknown string) []string {
 	var active []string
 	for i := range bitsPerRegister {
 		if raw&(1<<i) == 0 {
@@ -148,6 +153,11 @@ func decodeRaw(dt DataType, raw []uint16) float64 {
 	if len(raw) < int(dt.Count()) || len(raw) == 0 {
 		return 0
 	}
+	return decodeWords(dt, raw)
+}
+
+// decodeWords converts raw, which holds at least dt.Count() words, to a float64.
+func decodeWords(dt DataType, raw []uint16) float64 {
 	switch dt {
 	case Int16:
 		return float64(int16(raw[0])) // #nosec G115 -- two's complement reinterpretation
