@@ -72,7 +72,7 @@ storage:
   enable_backup: true
   max_backups: 3
   backup_interval: 24h
-  cleanup_interval: 20h
+  cleanup_interval: 24h
 ```
 
 ### App Settings
@@ -106,7 +106,7 @@ retried up to `block_attempts` times.
 |--------|------|---------|-------------|
 | `address` | string | tcp://192.168.1.100:502 | Connection URL: `tcp://host:port` or `rtu://<device path>` (e.g. `rtu:///dev/ttyUSB0`) |
 | `timeout` | duration | 5s | Connection/read timeout |
-| `slave_id` | byte | 1 | Modbus unit/slave ID (1-247) |
+| `slave_id` | int | 1 | Modbus unit/slave ID (1-247; anything else fails startup) |
 | `speed` | uint | 19200 (rtu default) | Serial link speed in bps (rtu only) |
 | `data_bits` | uint | 8 (rtu default) | Bits per serial character (rtu only) |
 | `parity` | string | N | Serial parity: `N`, `E`, or `O` (rtu only) |
@@ -134,7 +134,7 @@ The Modbus client never fails construction on an unreachable device: it starts i
 | `enable_backup` | bool | true | Enable periodic database backups |
 | `max_backups` | int | 3 | Maximum backup files to keep (0 = unlimited) |
 | `backup_interval` | duration | 24h | Interval for periodic online backups |
-| `cleanup_interval` | duration | 20h | Interval for retention cleanup |
+| `cleanup_interval` | duration | 24h | Interval for retention cleanup |
 
 Retention never corrupts computed values: cleanup deletes daily, monthly and yearly rows
 older than `daily_retention` only up to the start of the first period that can still be
@@ -310,10 +310,9 @@ go build -o solis ./cmd && ./solis
 ## Development
 
 ```bash
-go build -o solis ./cmd
-go test ./...
-go fmt ./...
-go mod tidy
+make build            # go build with version info (`./solis version`)
+make check            # the full pre-commit suite: lint, tests, deadcode, govulncheck, frontend
+go test -race ./...
 ```
 
 See `AGENTS.md` for the full tool list (gocyclo, gosec, ineffassign, deadcode, staticcheck,

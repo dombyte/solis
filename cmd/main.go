@@ -21,6 +21,23 @@ import (
 
 const configPath = "config.yaml"
 
+// Build information, set by the Makefile and goreleaser via -ldflags "-X main.Version=…".
+// -X can only set package-level string variables, hence the only globals in the binary.
+//
+//nolint:gochecknoglobals // written by the linker at build time, read-only afterwards
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildDate = "unknown"
+	GoVersion = "unknown"
+)
+
+// buildInfo renders the build information for the startup log and `solis version`.
+func buildInfo() string {
+	return fmt.Sprintf("solis %s (commit %s, built %s, %s)", Version, Commit, BuildDate,
+		GoVersion)
+}
+
 func main() {
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -36,6 +53,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
+	case "version", "--version":
+		_, _ = fmt.Fprintln(stdout, buildInfo())
+		return 0
 	default:
 		// #nosec G705 -- writes to the process's own stderr, not an HTTP response
 		_, _ = fmt.Fprintf(stderr, "unknown command %q\n", args[0])
@@ -48,6 +68,7 @@ func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   solis                     run the server
   solis backfill --years N  recompute monthly+yearly values (app must be stopped)
+  solis version             print the build information
 `)
 }
 
@@ -59,6 +80,8 @@ func serve(stderr io.Writer, run func(context.Context) error) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log := logging.New(stderr, "INFO", true)
+	log.Info().Str("version", Version).Str("commit", Commit).Str("built", BuildDate).
+		Str("go", GoVersion).Msg("starting")
 	if err := run(ctx); err != nil {
 		log.Error().Err(err).Msg("application stopped with an error, exiting with code 1")
 		return 1

@@ -31,15 +31,15 @@ jobs:
 
       - name: Dead code
         run: |
-          DEAD=$(go run golang.org/x/tools/cmd/deadcode@latest -test ./...)
+          DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./...)
           if [ -n "$DEAD" ]; then echo "$DEAD"; exit 1; fi
 
       - name: Vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
       - name: Mocks up to date
         run: |
-          go run github.com/vektra/mockery/v2@latest
+          go run github.com/vektra/mockery/v2@v2.53.7
           git diff --exit-code -- '*/mocks/*'
 
   golangci-lint:

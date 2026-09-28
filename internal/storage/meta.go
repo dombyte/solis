@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"maps"
 	"strconv"
@@ -128,8 +127,8 @@ func (m *metaState) applyPrefixed(k, v string) error {
 	return nil
 }
 
-func putMeta(tx *sql.Tx, k, v string) error {
-	_, err := tx.Exec(`INSERT INTO meta (key, value) VALUES (?, ?)
+func putMeta(tx *txn, k, v string) error {
+	_, err := tx.ExecContext(tx.ctx, `INSERT INTO meta (key, value) VALUES (?, ?)
 		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, k, v)
 	if err != nil {
 		return fmt.Errorf("storage: write meta %s: %w", k, err)
@@ -142,7 +141,7 @@ func formatFloat(f float64) string {
 }
 
 // advance sets watermark k to v when v is later; returns the new value.
-func advance(tx *sql.Tx, k, cur, v string) (string, error) {
+func advance(tx *txn, k, cur, v string) (string, error) {
 	if v <= cur {
 		return cur, nil
 	}
@@ -159,7 +158,7 @@ func (s *Storage) EnsureCutover(ctx context.Context, p period.Period) (string, b
 		return s.meta.cutover, false, nil
 	}
 	next := s.meta.clone()
-	err := s.withTx(ctx, func(tx *sql.Tx) error { return s.writeCutover(tx, &next, p) })
+	err := s.withTx(ctx, func(tx *txn) error { return s.writeCutover(tx, &next, p) })
 	if err != nil {
 		return "", false, err
 	}
@@ -171,7 +170,7 @@ func (s *Storage) EnsureCutover(ctx context.Context, p period.Period) (string, b
 // window can still finish yesterday.
 const cutoverMargin = -2
 
-func (s *Storage) writeCutover(tx *sql.Tx, m *metaState, p period.Period) error {
+func (s *Storage) writeCutover(tx *txn, m *metaState, p period.Period) error {
 	prevMonth, err := period.AddMonths(p.Month, -1)
 	if err != nil {
 		return err
@@ -205,7 +204,7 @@ func (s *Storage) writeCutover(tx *sql.Tx, m *metaState, p period.Period) error 
 	return s.initDayMarks(tx, m, closedDay, prevYear)
 }
 
-func (s *Storage) initDayMarks(tx *sql.Tx, m *metaState, closedDay, prevYear string) error {
+func (s *Storage) initDayMarks(tx *txn, m *metaState, closedDay, prevYear string) error {
 	var err error
 	for _, k := range s.keys.DailyKeys() {
 		if m.closedDaily[k], err = advance(tx, metaClosedDaily+k, m.closedDaily[k],

@@ -21,9 +21,9 @@ golangci-lint fmt --config .golangci.yml   # gofumpt + goimports (local prefix g
 golangci-lint run --config .golangci.yml   # incl. gocyclo (<8), revive function-length (40),
                                            # mnd, gosec, staticcheck, ineffassign, misspell,
                                            # govet, lll, gochecknoglobals, forbidigo
-go run golang.org/x/tools/cmd/deadcode@latest -test ./...   # unused exported code
-go run golang.org/x/vuln/cmd/govulncheck@latest ./...       # known vulnerabilities
-go run github.com/vektra/mockery/v2@latest   # regenerate mocks from .mockery.yaml
+go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./...   # unused exported code
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...       # known vulnerabilities
+go run github.com/vektra/mockery/v2@v2.53.7   # regenerate mocks from .mockery.yaml
 ```
 CI (`.github/workflows/checks.yml`) runs the same checks plus mock drift and the frontend
 checks; the pre-commit script is run by hand (`make check`), not installed as a git hook.
@@ -65,8 +65,9 @@ internal/
   service/               ReadService for HTTP (cache + ReadStore + health snapshot)
   http/{httphandler,middleware,router,server}/
   maintenance/   *new*   CLI jobs (backfill): flock, backup, recompute, report
+  database/migrations/   schema migrations (V3 meta table, status timestamp normalization)
   logging/, util/        zerolog constructor (no global logger); math, Clock, Slot[T],
-                         DependencyError/RequireAll
+                         DependencyError/RequireAll; util/clocktest is the fake Clock for tests
   <pkg>/mocks/           mockery-generated mocks (never hand-edit)
 frontend/                React 19 + Vite + Tailwind 4 + zustand SPA
 docs/                    Swagger UI + openapi.yaml
@@ -200,18 +201,26 @@ HTTP layer depends on service layer, not vice versa.
 Background components never reference each other; they interact only through the cache,
 the event bus and the health supervisor:
 ```
-poller     → solis, period, eventbus, health(Reporter) + own interfaces (Store, Cache, Reader)
-aggregator → aggregation, solis, period, eventbus, health(Reporter) + own Store, Cache
-websocket  → eventbus, solis, health(Reporter) + own Snapshotter
-cache      → eventbus, solis
-storage    → solis, period, history
-history    → util only (shared by storage, service, httphandler)
-config     → util only; imported only by cmd and app (every other package declares its
-             own Settings struct, mapped from config in internal/app/config_mapping.go)
-modbus     → stdlib + simonvetter + util (Clock) only (external layer: no config/health/logging)
-service    → own interfaces (ReadStore, CacheReader, HealthSnapshotter)
-app        → everything (composition root)
+poller      → solis, period, eventbus, health(Reporter), storage (store types), util
+              + own interfaces (Store, Cache, Reader)
+aggregator  → aggregation, solis, period, eventbus, health(Reporter), storage (store types),
+              util + own Store, Cache
+websocket   → eventbus, solis, health(Reporter), util + own Snapshotter
+cache       → eventbus, solis
+storage     → solis, period, history, database/migrations, util
+history     → util only (shared by storage, service, httphandler)
+config      → util only; imported only by cmd and app (every other package declares its
+              own Settings struct, mapped from config in internal/app/config_mapping.go)
+modbus      → stdlib + simonvetter + util (Clock) + an injected zerolog.Logger
+              (external layer: no config/health)
+service     → storage (ReadStore only), health, history, period, solis + own interfaces
+              (CacheReader, HealthSnapshotter)
+httphandler → service, health, period, solis, util
+app         → everything (composition root)
 ```
+"storage (store types)" means the storage interfaces, DTOs (`PollWrite`, `DailyRow`, …) and
+rejection sentinels declared in `storage/interfaces.go`; consumers never import the concrete
+`*storage.Storage`.
 Forbidden: poller ↔ aggregator, cache → websocket, httphandler → storage/modbus, anything → cmd/app.
 
 Interfaces are declared by the consumer (except the storage interfaces in

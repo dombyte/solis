@@ -112,7 +112,7 @@ paths:
                   data_type: "Uint32"
                   unit: "kWh"
                   store: "total"
-                  description: "PV Energy Total (kWh) - Use with start/end query parameters for historical data"
+                  description: "PV Energy Total (kWh)"
                 - key: "solis_status"
                   name: "Solis Status"
                   address: 33095
@@ -134,8 +134,9 @@ paths:
         - **`daily` registers**: historical daily data if `start`/`end` are given, otherwise the latest value
         - **`monthly` registers**: historical monthly data if `start`/`end` are given, otherwise the latest value
         - **`yearly` registers**: historical yearly data if `start`/`end` are given, otherwise the latest value
-        - **`total` registers**: always the lifetime/total value (ignores query params)
-        - **`status` registers** (e.g. `solis_status`, `grid_fault_1`): all historical status entries with decoded information
+        - **`total` registers**: always the lifetime/total value; `start`/`end` are rejected with 400
+        - **`status` registers** (e.g. `solis_status`, `grid_fault_1`): all historical status entries with decoded information; `start`/`end` are rejected with 400
+        - `none` registers also reject `start`/`end` with 400 (no history is stored)
 
         Values are stored at full precision; the JSON response rounds `value`/`raw_value` to two
         decimal places. There is no `?direct=true` mode - only the poller ever talks to the
@@ -256,9 +257,42 @@ paths:
                     raw_value: 152805
                     timestamp: "2026-08-04T09:19:19+02:00"
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Invalid request: a malformed `start`/`end`, `start` after `end`, or a range on a
+            register without history (`none`, `total`, `status`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                no_history:
+                  value:
+                    error: "Bad Request"
+                    message: "historical queries not supported for pv_energy_total - only periodic registers"
+                    code: 400
+                bad_range:
+                  value:
+                    error: "Bad Request"
+                    message: "invalid time range: start 2026-09-10 is after end 2026-09-01"
+                    code: 400
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Unknown register key, or a known key without a value yet (e.g. before the first poll)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Storage failure (details are logged, never returned)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The storage read exceeded `app.timeout`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /ws:
     get:
@@ -279,10 +313,14 @@ paths:
            those keys.
         3. The server pushes `update` frames (coalesced ~75ms) whenever a subscribed key's value
            or status changes - only changed keys are included, diffed per client.
-        4. Send `unsubscribe` to drop keys you no longer need.
+        4. Send `unsubscribe` to drop keys you no longer need (unknown keys are ignored
+           silently; no reply).
         5. `ping` is accepted and ignored (a `pong` is not required by the protocol).
-        6. Unknown keys in `subscribe`/`unsubscribe` never drop the connection; the server
-           replies with an `error` frame naming them.
+        6. Unknown keys in `subscribe` never drop the connection; the server replies with an
+           `error` frame naming them.
+        7. When a subscribed key disappears from the server cache (e.g. a derived value
+           after a failed poll), the next `update` lists it in `removed`; drop its value.
+           `removed` only names keys this client was previously sent.
 
         **Client → Server messages** (`ClientMessage`):
         ```json
@@ -295,7 +333,8 @@ paths:
         ```json
         { "type": "snapshot", "values": { "pv_total_power": { "value": 5230, "timestamp": "2026-08-04T09:19:19+02:00", "unit": "W" } } }
         { "type": "update",   "ts": "2026-08-04T09:19:20+02:00", "values": { "pv_total_power": { "value": 5102.5 } } }
-        { "type": "error",    "code": "unknown_keys", "message": "unknown keys", "keys": ["foo"] }
+        { "type": "update",   "ts": "2026-08-04T09:19:25+02:00", "values": {}, "removed": ["battery_power_signed"] }
+        { "type": "error",    "code": "unknown_keys", "message": "unknown keys ignored", "keys": ["foo"] }
         ```
         `snapshot` values include `timestamp` and `unit`; `update` values carry only `value` (and
         `status_decoded` for status/fault keys) to keep frames small.
@@ -314,6 +353,18 @@ paths:
               schema:
                 type: string
                 enum: [Upgrade]
+        '403':
+          description: Cross-origin upgrade rejected (the upgrader is same-origin only)
+        '503':
+          description: The WebSocket hub is restarting; retry with backoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Service Unavailable"
+                message: "websocket hub restarting"
+                code: 503
 
 components:
   schemas:
@@ -674,6 +725,12 @@ components:
           description: Map of changed register keys to their new ValueDTO
           additionalProperties:
             $ref: '#/components/schemas/ValueDTO'
+        removed:
+          type: array
+          description: Subscribed keys that disappeared from the server cache; clients drop their values
+          items:
+            type: string
+          example: ["battery_power_signed"]
 
     ErrorMessage:
       type: object
@@ -692,7 +749,7 @@ components:
           example: "unknown_keys"
         message:
           type: string
-          example: "unknown keys"
+          example: "unknown keys ignored"
         keys:
           type: array
           description: The offending keys (unknown_keys only)
@@ -715,30 +772,9 @@ components:
         message:
           type: string
           description: Error message
-          example: "historical queries are not supported for register pv_energy_daily"
+          example: "historical queries not supported for pv_energy_total - only periodic registers"
         code:
           type: integer
           description: HTTP status code
           example: 400
 
-  responses:
-    BadRequest:
-      description: Invalid request parameters
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            error: "Bad Request"
-            message: "historical queries are not supported for register pv_energy_daily"
-            code: 400
-    NotFound:
-      description: Resource not found
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            error: "Not Found"
-            message: "register 'nonexistent_key' not found"
-            code: 404

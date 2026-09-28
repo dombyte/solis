@@ -115,7 +115,8 @@ func (e *MigrationExecutor) ApplyPendingMigrations(ctx context.Context, db *sql.
 	for _, migration := range pending {
 		e.log.Debug().Int("version", migration.Version()).Msg("migration starting")
 		if err := e.ApplyMigration(ctx, db, migration); err != nil {
-			return appliedCount, fmt.Errorf("failed to apply migration %d: %w", migration.Version(), err)
+			return appliedCount, fmt.Errorf("failed to apply migration %d: %w",
+				migration.Version(), err)
 		}
 		appliedCount++
 	}

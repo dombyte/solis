@@ -137,7 +137,9 @@ func (s *ReadService) requireStore(key string, want solis.Store) error {
 		return err
 	}
 	if reg.Store != want {
-		return &KeyError{Key: key, Detail: "not a " + want.String() + " register", Err: ErrWrongKind}
+		return &KeyError{
+			Key: key, Detail: "not a " + want.String() + " register", Err: ErrWrongKind,
+		}
 	}
 	return nil
 }

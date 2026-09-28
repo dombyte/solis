@@ -1,6 +1,6 @@
 # Solis-Monitor Configuration
 # Environment variables can override any setting using SOLIS_ prefix
-# Example: SOLIS_MODBUS_HOST=192.168.1.200
+# Example: SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502
 
 app:
   debug: DEBUG

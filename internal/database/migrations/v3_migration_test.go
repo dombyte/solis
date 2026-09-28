@@ -76,3 +76,20 @@ func TestV3Migration_Up(t *testing.T) {
 	require.NoError(t, rows.Err())
 	assert.Equal(t, []string{"2026-09-27T18:58:18.612Z", "garbage"}, got)
 }
+
+func TestV3Migration_MetadataAndDown(t *testing.T) {
+	m := GetV3Migration()
+	assert.Equal(t, 3, m.Version())
+	assert.Contains(t, m.Description(), "meta table")
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "t.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	require.NoError(t, m.Up(context.Background(), tx))
+	require.NoError(t, m.Down(context.Background(), tx))
+	require.NoError(t, tx.Commit())
+	var n int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name = 'meta'`).Scan(&n))
+	assert.Zero(t, n, "Down drops the meta table")
+}

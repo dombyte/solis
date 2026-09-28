@@ -59,6 +59,7 @@ linters:
     # Line length linter - hard limit of 100 chars per Global Plan
     lll:
       line-length: 100
+      tab-width: 4
 
     # Cyclomatic complexity linter (reports > min-complexity)
     gocyclo:
@@ -138,7 +139,7 @@ linters:
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)reff/
+      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/
@@ -173,7 +174,7 @@ formatters:
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)reff/
+      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/

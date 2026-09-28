@@ -39,7 +39,7 @@ func (s *Storage) Backfill(ctx context.Context, fn func(BackfillTx) error) error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.meta.clone()
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.withTx(ctx, func(tx *txn) error {
 		return fn(&backfillTx{s: s, ctx: ctx, tx: tx, meta: &next})
 	})
 	if err != nil {
@@ -52,7 +52,7 @@ func (s *Storage) Backfill(ctx context.Context, fn func(BackfillTx) error) error
 type backfillTx struct {
 	s    *Storage
 	ctx  context.Context
-	tx   *sql.Tx
+	tx   *txn
 	meta *metaState
 }
 

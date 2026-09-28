@@ -76,7 +76,7 @@ func GetKeysHandler(deps HandlerDeps) http.Handler {
 		infos := make([]RegisterInfo, 0, len(regs))
 		for _, r := range regs {
 			desc := fmt.Sprintf("%s (%s)", r.Name, r.Unit)
-			if _, periodic := r.Store.Level(); periodic {
+			if historyCapable(r.Store) { // totals are periodic but take no range (400)
 				desc += " - Use with start/end query parameters for historical data"
 			}
 			infos = append(infos, RegisterInfo{

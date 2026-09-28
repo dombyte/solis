@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 
@@ -24,7 +23,7 @@ func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
 	defer s.mu.Unlock()
 	next := s.meta.clone()
 	var rejected []error
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.withTx(ctx, func(tx *txn) error {
 		var err error
 		rejected, err = s.applyPoll(tx, &next, w)
 		return err
@@ -42,7 +41,7 @@ func (s *Storage) WritePoll(ctx context.Context, w PollWrite) error {
 }
 
 // applyPoll writes every row of w inside tx and returns the rejected rows.
-func (s *Storage) applyPoll(tx *sql.Tx, next *metaState, w PollWrite) ([]error, error) {
+func (s *Storage) applyPoll(tx *txn, next *metaState, w PollWrite) ([]error, error) {
 	var rejected []error
 	for _, r := range w.Daily {
 		if err := collect(&rejected, s.writeDaily(tx, next, r)); err != nil {
@@ -78,7 +77,7 @@ func IsRejection(err error) bool {
 		errors.Is(err, ErrUnknownKey)
 }
 
-func (s *Storage) writeDaily(tx *sql.Tx, m *metaState, r DailyRow) error {
+func (s *Storage) writeDaily(tx *txn, m *metaState, r DailyRow) error {
 	reg, err := s.lookup(r.Key)
 	if err != nil {
 		return err
@@ -92,7 +91,7 @@ func (s *Storage) writeDaily(tx *sql.Tx, m *metaState, r DailyRow) error {
 	if closed := m.closedDaily[r.Key]; r.Day <= closed {
 		return &PeriodClosedError{Level: "daily", Key: r.Key, Period: r.Day, ClosedThrough: closed}
 	}
-	_, err = tx.Exec(`INSERT INTO daily_values (date, register_key, value, raw_value)
+	_, err = tx.ExecContext(tx.ctx, `INSERT INTO daily_values (date, register_key, value, raw_value)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(register_key, date) DO UPDATE
 		SET value = excluded.value, raw_value = excluded.raw_value
@@ -103,7 +102,7 @@ func (s *Storage) writeDaily(tx *sql.Tx, m *metaState, r DailyRow) error {
 	return nil
 }
 
-func (s *Storage) writeStatus(tx *sql.Tx, r StatusRow) error {
+func (s *Storage) writeStatus(tx *txn, r StatusRow) error {
 	reg, err := s.lookup(r.Key)
 	if err != nil {
 		return err
@@ -113,7 +112,7 @@ func (s *Storage) writeStatus(tx *sql.Tx, r StatusRow) error {
 	}
 	// Two changes of one key within a millisecond keep the later value instead of
 	// failing the whole poll transaction on UNIQUE(register_key, timestamp).
-	if _, err := tx.Exec(`INSERT INTO error_data (timestamp, register_key, raw_value,
+	if _, err := tx.ExecContext(tx.ctx, `INSERT INTO error_data (timestamp, register_key, raw_value,
 		string_value) VALUES (?, ?, ?, '')
 		ON CONFLICT(register_key, timestamp) DO UPDATE SET raw_value = excluded.raw_value`,
 		statusTimestamp(r.At), r.Key, r.Raw); err != nil {
@@ -123,7 +122,7 @@ func (s *Storage) writeStatus(tx *sql.Tx, r StatusRow) error {
 }
 
 // closeDay advances the closed-day watermark of one poller-owned (non-net daily) key.
-func (s *Storage) closeDay(tx *sql.Tx, m *metaState, c DayClose) error {
+func (s *Storage) closeDay(tx *txn, m *metaState, c DayClose) error {
 	reg, err := s.lookup(c.Key)
 	if err != nil {
 		return err

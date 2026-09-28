@@ -61,7 +61,7 @@ func (s *Storage) cleanupPeriods(ctx context.Context, wanted string) (int64, err
 		{"yearly_values", `DELETE FROM yearly_values WHERE year < ?`, year},
 	}
 	var deleted int64
-	err = s.withTx(ctx, func(tx *sql.Tx) error {
+	err = s.withTx(ctx, func(tx *txn) error {
 		for _, st := range stmts {
 			n, err := execCount(ctx, tx, st.sql, st.arg)
 			if err != nil {

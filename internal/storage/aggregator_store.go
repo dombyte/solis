@@ -53,7 +53,7 @@ func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
 	defer s.mu.Unlock()
 	next := s.meta.clone()
 	var rejected []error
-	err := s.withTx(ctx, func(tx *sql.Tx) error {
+	err := s.withTx(ctx, func(tx *txn) error {
 		var err error
 		rejected, err = s.applyComputed(tx, &next, w)
 		return err
@@ -67,7 +67,7 @@ func (s *Storage) WriteComputed(ctx context.Context, w ComputedWrite) error {
 }
 
 // applyComputed writes rows, freezes and folds inside tx and returns the rejected rows.
-func (s *Storage) applyComputed(tx *sql.Tx, next *metaState, w ComputedWrite) (
+func (s *Storage) applyComputed(tx *txn, next *metaState, w ComputedWrite) (
 	[]error, error,
 ) {
 	var rejected []error
@@ -90,7 +90,7 @@ func (s *Storage) applyComputed(tx *sql.Tx, next *metaState, w ComputedWrite) (
 	return rejected, nil
 }
 
-func (s *Storage) writeComputedRow(tx *sql.Tx, m metaState, r PeriodRow, at time.Time) error {
+func (s *Storage) writeComputedRow(tx *txn, m metaState, r PeriodRow, at time.Time) error {
 	reg, err := s.lookup(r.Key)
 	if err != nil {
 		return err
@@ -127,27 +127,31 @@ func checkAggregatorDomain(reg solis.Register, l period.Level) error {
 }
 
 // upsertPeriod writes one row with REPLACE semantics (latest computation wins).
-func upsertPeriod(tx *sql.Tx, reg solis.Register, r PeriodRow, at time.Time) error {
+func upsertPeriod(tx *txn, reg solis.Register, r PeriodRow, at time.Time) error {
 	raw := rawOf(reg, r.Value)
 	var err error
 	switch r.Level {
 	case period.Daily:
-		_, err = tx.Exec(`INSERT INTO daily_values (date, register_key, value, raw_value)
+		_, err = tx.ExecContext(tx.ctx,
+			`INSERT INTO daily_values (date, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, date) DO UPDATE
 			SET value = excluded.value, raw_value = excluded.raw_value`,
 			r.Period, r.Key, r.Value, raw)
 	case period.Monthly:
-		_, err = tx.Exec(`INSERT INTO monthly_values (month, register_key, value, raw_value)
+		_, err = tx.ExecContext(tx.ctx,
+			`INSERT INTO monthly_values (month, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, month) DO UPDATE
 			SET value = excluded.value, raw_value = excluded.raw_value`,
 			r.Period, r.Key, r.Value, raw)
 	case period.Yearly:
-		_, err = tx.Exec(`INSERT INTO yearly_values (year, register_key, value, raw_value)
+		_, err = tx.ExecContext(tx.ctx,
+			`INSERT INTO yearly_values (year, register_key, value, raw_value)
 			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, year) DO UPDATE
 			SET value = excluded.value, raw_value = excluded.raw_value`,
 			r.Period, r.Key, r.Value, raw)
 	default:
-		_, err = tx.Exec(`INSERT INTO total_values (register_key, value, raw_value, timestamp)
+		_, err = tx.ExecContext(tx.ctx,
+			`INSERT INTO total_values (register_key, value, raw_value, timestamp)
 			VALUES (?, ?, ?, ?) ON CONFLICT(register_key) DO UPDATE
 			SET value = excluded.value, raw_value = excluded.raw_value,
 			timestamp = excluded.timestamp`, r.Key, r.Value, raw, at.Format(time.RFC3339))
@@ -158,7 +162,7 @@ func upsertPeriod(tx *sql.Tx, reg solis.Register, r PeriodRow, at time.Time) err
 	return nil
 }
 
-func applyFreezes(tx *sql.Tx, m *metaState, freezes []Freeze) error {
+func applyFreezes(tx *txn, m *metaState, freezes []Freeze) error {
 	for _, f := range freezes {
 		k, err := frozenKey(f.Level)
 		if err != nil {
@@ -172,7 +176,7 @@ func applyFreezes(tx *sql.Tx, m *metaState, freezes []Freeze) error {
 }
 
 // applyFold adds a closed year to the baseline once (years <= baseline_year are no-ops).
-func applyFold(tx *sql.Tx, m *metaState, f BaselineFold) error {
+func applyFold(tx *txn, m *metaState, f BaselineFold) error {
 	if f.Year <= m.baselineYear {
 		return nil
 	}

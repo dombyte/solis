@@ -244,3 +244,9 @@ func TestLastEnded(t *testing.T) {
 	w = r2.LastEnded(time.Date(2026, 8, 7, 0, 30, 0, 0, loc))
 	assert.Equal(t, "2026-08-06", w.Opening)
 }
+
+func TestRolloverError_Message(t *testing.T) {
+	_, err := ParseRollover("24:00")
+	assert.ErrorIs(t, err, ErrInvalidRollover)
+	assert.Contains(t, err.Error(), `"24:00" (want strict 24-hour HH:MM)`)
+}

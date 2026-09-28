@@ -149,7 +149,7 @@ func schemaSQL() []string {
 }
 
 func (s *Storage) initSchema(ctx context.Context) error {
-	return s.withTx(ctx, func(tx *sql.Tx) error {
+	return s.withTx(ctx, func(tx *txn) error {
 		for _, stmt := range schemaSQL() {
 			if _, err := tx.ExecContext(ctx, stmt); err != nil {
 				return err
@@ -159,12 +159,20 @@ func (s *Storage) initSchema(ctx context.Context) error {
 	})
 }
 
+// txn is one transaction bound to its caller's context: every statement inside it uses
+// the …Context variants with ctx, so a cancelled request or shutdown aborts it.
+type txn struct {
+	*sql.Tx
+	ctx context.Context //nolint:containedctx // scoped to one transaction
+}
+
 // withTx runs fn in a transaction, committing on success.
-func (s *Storage) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Storage) withTx(ctx context.Context, fn func(*txn) error) error {
+	sqlTx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("storage: begin transaction: %w", err)
 	}
+	tx := &txn{Tx: sqlTx, ctx: ctx}
 	if err := fn(tx); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
 			return errors.Join(err, fmt.Errorf("storage: rollback: %w", rbErr))

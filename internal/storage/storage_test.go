@@ -398,6 +398,13 @@ func TestBackfillTx_FirstDailyDayAndCutover(t *testing.T) {
 	}))
 }
 
+// A corrupt baseline row fails loading loudly instead of starting with a zero baseline.
+func TestLoadMeta_CorruptBaselineIsAnError(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-09-27"))
+	insertRows(t, s, `INSERT INTO meta (key, value) VALUES ('baseline:pv_energy_total', 'x')`)
+	assert.ErrorContains(t, s.loadMeta(ctx), "baseline:pv_energy_total")
+}
+
 func TestHistoryAndJSONRounding(t *testing.T) {
 	s, _, _ := newStore(t, day("2026-08-05"))
 	require.NoError(t, s.WriteComputed(ctx, ComputedWrite{Rows: []PeriodRow{

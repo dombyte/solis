@@ -342,3 +342,9 @@ func TestRecompute_SkipsPeriodsWithoutCompleteDailyHistory(t *testing.T) {
 	assert.Equal(t, "skipped  yearly   2026     no daily history; stored value kept",
 		rep.Skipped[9].String())
 }
+
+func TestPurgedHistoryError_Message(t *testing.T) {
+	err := error(&PurgedHistoryError{PurgedBefore: "2025-01-01"})
+	assert.ErrorIs(t, err, ErrPurgedHistory)
+	assert.Contains(t, err.Error(), "daily rows before 2025-01-01 were removed")
+}

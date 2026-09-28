@@ -34,6 +34,10 @@ func TestDispatch_HelpAndUnknown(t *testing.T) {
 	var out, errOut bytes.Buffer
 	assert.Equal(t, 0, dispatch([]string{"help"}, &out, &errOut))
 	assert.Contains(t, out.String(), "solis backfill --years N")
+	out.Reset()
+	assert.Equal(t, 0, dispatch([]string{"version"}, &out, &errOut))
+	assert.Equal(t, buildInfo()+"\n", out.String())
+	assert.Contains(t, out.String(), "solis dev (commit unknown")
 	assert.Equal(t, 1, dispatch([]string{"frobnicate"}, &out, &errOut))
 	assert.Contains(t, errOut.String(), `unknown command "frobnicate"`)
 }
