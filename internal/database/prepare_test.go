@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -161,6 +162,43 @@ func TestPrepare_V2DatabaseIsMigrated(t *testing.T) {
 	require.NoError(t, m.Prepare(context.Background()))
 	assert.Equal(t, CurrentSchemaVersion, schemaVersion(t, path))
 	assert.True(t, hasTable(t, path, "meta"))
+}
+
+// Migrations rewrite data in place: without a verified backup nothing is migrated, and
+// the backup is taken even when periodic backups are disabled (review DB-M2).
+func TestPrepare_NoBackupNoMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "solis.db")
+	require.NoError(t, createTestDB(path))
+	// A file where the backups directory should be makes every backup fail.
+	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(path), "backups"), nil, 0o600))
+	err := newManager(t, path, clocktest.New(time.Now())).Prepare(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pre-migration backup failed, not migrating")
+	assert.False(t, hasTable(t, path, "meta"), "nothing migrated")
+}
+
+func TestPrepare_BackupEvenWhenBackupsDisabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "solis.db")
+	require.NoError(t, createTestDB(path))
+	m := NewManager(Settings{Path: path}, &BackupConfig{Enabled: false}, clocktest.New(time.Now()),
+		zerolog.Nop())
+	require.NoError(t, m.Prepare(context.Background()))
+	backups, err := ListBackups(path)
+	require.NoError(t, err)
+	assert.Len(t, backups, 1)
+}
+
+// A schema written by a newer release is refused instead of treated as up to date
+// (review DB-M4).
+func TestPrepare_NewerSchemaIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "solis.db")
+	execSQL(t, path, SchemaVersionTableSQL,
+		`INSERT INTO schema_version (version, success) VALUES (2, 1), (3, 1), (4, 1)`)
+	err := newManager(t, path, clocktest.New(time.Now())).Prepare(context.Background())
+	require.ErrorIs(t, err, ErrSchemaTooNew)
+	var tooNew *SchemaTooNewError
+	require.ErrorAs(t, err, &tooNew)
+	assert.Equal(t, 4, tooNew.Version)
 }
 
 func TestPrepare_TooOldDatabaseIsRejected(t *testing.T) {

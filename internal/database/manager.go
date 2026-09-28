@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"time"
 
@@ -56,8 +57,10 @@ func NewManager(cfg Settings, backup *BackupConfig, clock util.Clock,
 // afterwards.
 func (m *Manager) Prepare(ctx context.Context) (err error) {
 	m.log.Debug().Str("path", m.cfg.Path).Msg("database prepare starting")
-	_, statErr := os.Stat(m.cfg.Path)
-	exists := statErr == nil
+	exists, err := fileExists(m.cfg.Path)
+	if err != nil {
+		return err
+	}
 	db, err := openMigrationDB(ctx, m.cfg.Path)
 	if err != nil {
 		return err
@@ -68,11 +71,20 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 		}
 	}()
 
+	return m.upgrade(ctx, db, exists)
+}
+
+// upgrade migrates db to CurrentSchemaVersion; a newer schema (written by a later
+// release) is refused instead of being treated as up to date.
+func (m *Manager) upgrade(ctx context.Context, db *sql.DB, exists bool) error {
 	current, err := m.executor.GetCurrentVersion(ctx, db)
 	if err != nil {
 		return fmt.Errorf("database: current schema version: %w", err)
 	}
-	if current >= CurrentSchemaVersion {
+	switch {
+	case current > CurrentSchemaVersion:
+		return &SchemaTooNewError{Version: current}
+	case current == CurrentSchemaVersion:
 		m.log.Info().Int("version", current).Msg("database schema is up to date")
 		return nil
 	}
@@ -86,6 +98,21 @@ func (m *Manager) Prepare(ctx context.Context) (err error) {
 	m.cleanupBackups()
 	m.log.Debug().Msg("database prepare completed")
 	return nil
+}
+
+// fileExists reports whether path exists; any error other than "not found" (permission,
+// I/O) is returned instead of being mistaken for a missing database, which would skip
+// the pre-migration backup.
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, fmt.Errorf("database: stat %s: %w", path, err)
+	}
 }
 
 func openMigrationDB(ctx context.Context, path string) (*sql.DB, error) {
@@ -106,7 +133,9 @@ func (m *Manager) migrate(ctx context.Context, db *sql.DB, current int, exists b
 		return err
 	}
 	if exists {
-		m.backupBeforeMigration(ctx)
+		if err := m.backupBeforeMigration(ctx); err != nil {
+			return err
+		}
 	}
 	n, err := m.executor.ApplyPendingMigrations(ctx, db, current)
 	if err != nil {
@@ -135,17 +164,20 @@ func checkCompatible(ctx context.Context, db *sql.DB, current int) error {
 	return &SchemaTooOldError{Version: current}
 }
 
-func (m *Manager) backupBeforeMigration(ctx context.Context) {
-	path, err := CreateBackup(ctx, m.cfg.Path, m.backup, m.clock.Now(), m.log)
+// backupBeforeMigration always takes a verified backup (whatever enable_backup says):
+// migrations rewrite data in place and cannot be undone, so no backup means no
+// migration.
+func (m *Manager) backupBeforeMigration(ctx context.Context) error {
+	path, err := WriteBackup(ctx, m.cfg.Path, m.clock.Now(), m.log)
 	if err != nil {
-		m.log.Error().Err(err).Msg("pre-migration backup failed, proceeding without backup")
-		return
+		return fmt.Errorf("database: pre-migration backup failed, not migrating: %w", err)
 	}
 	m.log.Info().Str("file", path).Msg("pre-migration backup created")
+	return nil
 }
 
 func (m *Manager) cleanupBackups() {
-	if !m.backup.Enabled || m.backup.MaxBackups <= 0 {
+	if m.backup.MaxBackups <= 0 {
 		return
 	}
 	if err := CleanupBackups(m.cfg.Path, m.backup.MaxBackups, m.log); err != nil {

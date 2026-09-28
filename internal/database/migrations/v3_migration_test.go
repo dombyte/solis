@@ -51,9 +51,12 @@ func TestV3Migration_Up(t *testing.T) {
 		timestamp DATETIME NOT NULL, register_key TEXT NOT NULL, raw_value REAL NOT NULL,
 		string_value TEXT, UNIQUE(register_key, timestamp))`)
 	require.NoError(t, err)
+	// Row 3 is row 1's status change stored again in another legacy format: after
+	// normalization both collide on UNIQUE(register_key, timestamp) (review DB-M3).
 	_, err = db.Exec(`INSERT INTO error_data (timestamp, register_key, raw_value) VALUES
 		('2026-09-27 20:58:18.612840635 +0200 CEST m=+0.000546397', 'a', 1),
-		('garbage', 'a', 2)`)
+		('garbage', 'a', 2),
+		('2026-09-27T18:58:18.612840635Z', 'a', 1)`)
 	require.NoError(t, err)
 
 	tx, err = db.Begin()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,9 @@ func runBackfill(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	years := fs.Int("years", 0, "closed years to recompute in addition to the current year")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0 // -h/--help printed the usage
+		}
 		return 1
 	}
 	if err := backfill(*years, stdout, stderr); err != nil {
@@ -46,7 +50,11 @@ func backfill(years int, stdout, stderr io.Writer) error {
 	return maintenance.RunBackfill(context.Background(), maintenance.Env{
 		DBPath: st.Path,
 		Backup: func(ctx context.Context) (string, error) {
-			return database.CreateBackup(ctx, st.Path, backupCfg, clock.Now(), log)
+			path, err := database.WriteBackup(ctx, st.Path, clock.Now(), log)
+			if err == nil { // rotate like the server does, so repeated jobs don't pile up
+				err = database.CleanupBackups(st.Path, st.MaxBackups, log)
+			}
+			return path, err
 		},
 		OpenStore: func(ctx context.Context) (maintenance.Store, func() error, error) {
 			mgr := database.NewManager(app.DatabaseSettings(*st), backupCfg, clock, log)

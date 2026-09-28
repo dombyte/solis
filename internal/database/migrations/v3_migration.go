@@ -68,7 +68,10 @@ func legacyTimestampLayouts() []string {
 }
 
 // normalizeStatusTimestamps rewrites every parseable error_data timestamp into
-// StatusTimestampLayout (UTC); unparseable values stay untouched.
+// StatusTimestampLayout (UTC); unparseable values stay untouched. A row whose normalized
+// timestamp collides with an existing row of the same key (the same status change stored
+// twice in two formats) is deleted, so no legacy-format row is left behind to break the
+// fixed-width ordering.
 func normalizeStatusTimestamps(ctx context.Context, tx *sql.Tx) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master
@@ -83,10 +86,26 @@ func normalizeStatusTimestamps(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 	for id, ts := range rows {
-		if _, err := tx.ExecContext(ctx, `UPDATE OR IGNORE error_data SET timestamp = ? WHERE id = ?`,
-			ts, id); err != nil {
-			return fmt.Errorf("rewrite error_data %d: %w", id, err)
+		if err := rewriteStatusTimestamp(ctx, tx, id, ts); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// rewriteStatusTimestamp normalizes one row, or deletes it when its normalized twin
+// already exists.
+func rewriteStatusTimestamp(ctx context.Context, tx *sql.Tx, id int64, ts string) error {
+	res, err := tx.ExecContext(ctx,
+		`UPDATE OR IGNORE error_data SET timestamp = ? WHERE id = ?`, ts, id)
+	if err != nil {
+		return fmt.Errorf("rewrite error_data %d: %w", id, err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM error_data WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("drop duplicate error_data %d: %w", id, err)
 	}
 	return nil
 }

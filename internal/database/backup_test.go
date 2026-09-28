@@ -25,9 +25,10 @@ func TestGenerateBackupFilename(t *testing.T) {
 }
 
 func TestExtractBackupInfo(t *testing.T) {
+	// Legacy stamps (no "Z") were written in local time.
 	info, err := ExtractBackupInfo("/path/to/backups/solis.db.20260627_143022.backup")
 	require.NoError(t, err)
-	assert.True(t, info.Timestamp.Equal(time.Date(2026, 6, 27, 14, 30, 22, 0, time.UTC)))
+	assert.True(t, info.Timestamp.Equal(time.Date(2026, 6, 27, 14, 30, 22, 0, time.Local)))
 
 	for _, name := range []string{
 		"/path/to/backups/solis.db.backup",               // no timestamp
@@ -110,13 +111,82 @@ func TestVerifyBackupFile_RejectsCorruptFile(t *testing.T) {
 func TestBackupFilename_MillisecondsRoundTrip(t *testing.T) {
 	at := time.Date(2026, 6, 27, 14, 30, 22, 7_000_000, time.UTC)
 	name := GenerateBackupFilename("/db/solis.db", at)
-	assert.Equal(t, filepath.Join("/db", "backups", "solis.db.20260627_143022_007.backup"), name)
+	assert.Equal(t, filepath.Join("/db", "backups", "solis.db.20260627_143022_007Z.backup"), name)
 	info, err := ExtractBackupInfo(name)
 	require.NoError(t, err)
 	assert.True(t, info.Timestamp.Equal(at))
 	assert.NotEqual(t, name, GenerateBackupFilename("/db/solis.db", at.Add(time.Millisecond)))
 	_, err = ExtractBackupInfo("/db/backups/solis.db.20260627_143022_x.backup")
 	assert.Error(t, err)
+}
+
+// New stamps are UTC ("Z"), so the DST fall-back hour can no longer make a newer backup
+// sort as older (review DB-L2); legacy local stamps still order by their real instant.
+func TestBackupStamps_UTCAndLegacyLocalOrder(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Berlin")
+	require.NoError(t, err)
+	// 2026-10-25 02:30 happens twice in Berlin; one hour apart in UTC.
+	first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC)
+	second := first.Add(time.Hour)
+	assert.Equal(t, first.In(loc).Format(backupStampLayout),
+		second.In(loc).Format(backupStampLayout), "local stamps collide")
+	a, err := ExtractBackupInfo(GenerateBackupFilename("/db/s.db", first.In(loc)))
+	require.NoError(t, err)
+	b, err := ExtractBackupInfo(GenerateBackupFilename("/db/s.db", second.In(loc)))
+	require.NoError(t, err)
+	assert.True(t, b.Timestamp.After(a.Timestamp))
+	assert.True(t, a.Timestamp.Equal(first))
+}
+
+// A backup of a WAL-mode database leaves no -wal/-shm files behind (review DB-M1): the
+// copy is switched to a rollback journal before it is verified.
+func TestCreateBackup_WALSourceLeavesNoSidecars(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "wal.db")
+	src, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer func() { _ = src.Close() }()
+	for _, q := range []string{
+		"PRAGMA journal_mode=WAL", "CREATE TABLE t (v TEXT)",
+		"INSERT INTO t VALUES ('x')",
+	} {
+		_, err := src.Exec(q)
+		require.NoError(t, err)
+	}
+	path, err := WriteBackup(context.Background(), dbPath, time.Now(), zerolog.Nop())
+	require.NoError(t, err)
+	entries, err := os.ReadDir(filepath.Dir(path))
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "only the backup file itself")
+	assert.Equal(t, filepath.Base(path), entries[0].Name())
+
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	var mode, v string
+	require.NoError(t, db.QueryRow("PRAGMA journal_mode").Scan(&mode))
+	assert.Equal(t, "delete", mode)
+	require.NoError(t, db.QueryRow("SELECT v FROM t").Scan(&v))
+	assert.Equal(t, "x", v)
+}
+
+// Rotation removes the sidecars older versions left and never touches the backups of
+// another database in the same directory (review DB-L1).
+func TestCleanupBackups_SidecarsAndOtherDatabases(t *testing.T) {
+	dbPath := writeBackups(t,
+		"test.db.20260627_100000.backup", "test.db.20260627_100000.backup-wal",
+		"test.db.20260627_100000.backup-shm", "test.db.20260627_110000.backup",
+		"other.db.20260101_000000.backup", "other.db.20260102_000000.backup")
+	require.NoError(t, CleanupBackups(dbPath, 1, zerolog.Nop()))
+	entries, err := os.ReadDir(filepath.Join(filepath.Dir(dbPath), "backups"))
+	require.NoError(t, err)
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	assert.ElementsMatch(t, []string{
+		"test.db.20260627_110000.backup",
+		"other.db.20260101_000000.backup", "other.db.20260102_000000.backup",
+	}, names)
 }
 
 func TestCleanupBackups(t *testing.T) {

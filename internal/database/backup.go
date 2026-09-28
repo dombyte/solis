@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -38,19 +39,25 @@ type BackupInfo struct {
 // "_mmm" so two backups within one second never share a file name.
 const backupStampLayout = "20060102_150405"
 
+// utcStampSuffix marks a stamp written in UTC. Older backups carry local time without
+// it; local stamps repeat in the DST fall-back hour and could sort a newer backup as
+// older, so rotation might delete the newest one.
+const utcStampSuffix = "Z"
+
 // backupDirPerm is the permission of created backup directories (owner rwx, group rx).
 const backupDirPerm = 0o750
 
 // msPerSecond scales the millisecond suffix.
 const msPerSecond = int(time.Second / time.Millisecond)
 
-// GenerateBackupFilename generates a backup filename for the instant now.
-// Format: backups/{name}.{YYYYMMDD_HHMMSS_mmm}.backup
+// GenerateBackupFilename generates a backup filename for the instant now, stamped in UTC.
+// Format: backups/{name}.{YYYYMMDD_HHMMSS_mmm}Z.backup
 func GenerateBackupFilename(dbPath string, now time.Time) string {
 	dbName := filepath.Base(dbPath)
 	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	now = now.UTC()
 	ms := now.Nanosecond() / int(time.Millisecond) % msPerSecond
-	stamp := fmt.Sprintf("%s_%03d", now.Format(backupStampLayout), ms)
+	stamp := fmt.Sprintf("%s_%03d%s", now.Format(backupStampLayout), ms, utcStampSuffix)
 	return filepath.Join(backupsDir, fmt.Sprintf("%s.%s.backup", dbName, stamp))
 }
 
@@ -72,13 +79,18 @@ func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 	return nil, fmt.Errorf("could not parse timestamp in backup filename: %s", filename)
 }
 
-// parseBackupStamp parses "YYYYMMDD_HHMMSS" with an optional "_mmm" suffix.
+// parseBackupStamp parses "YYYYMMDD_HHMMSS" with an optional "_mmm" suffix; a trailing
+// "Z" means UTC, anything else is a legacy local-time stamp.
 func parseBackupStamp(stamp string) (time.Time, bool) {
+	loc := time.Local
+	if s, ok := strings.CutSuffix(stamp, utcStampSuffix); ok {
+		stamp, loc = s, time.UTC
+	}
 	secs, msPart := stamp, ""
 	if len(stamp) > len(backupStampLayout) {
 		secs, msPart = stamp[:len(backupStampLayout)], stamp[len(backupStampLayout):]
 	}
-	t, err := time.Parse(backupStampLayout, secs)
+	t, err := time.ParseInLocation(backupStampLayout, secs, loc)
 	if err != nil {
 		return time.Time{}, false
 	}
@@ -132,7 +144,42 @@ func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
 	}
+	if err := useRollbackJournal(ctx, destPath); err != nil {
+		return err
+	}
 	return verifyBackupFile(ctx, destPath, log)
+}
+
+// useRollbackJournal switches the finished copy out of WAL mode. The backup API copies
+// the source's WAL header, so every later open of the copy (the integrity check, a
+// restore test) would leave -wal/-shm files next to it that rotation never deletes; a
+// standalone backup file needs no WAL. Closing the connection removes the sidecars.
+func useRollbackJournal(ctx context.Context, path string) (err error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open backup: %w", err)
+	}
+	defer closeInto(&err, db, "backup database")
+	var mode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		return fmt.Errorf("set backup journal mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		return fmt.Errorf("set backup journal mode: got %q", mode)
+	}
+	return nil
+}
+
+// removeBackupFiles deletes a backup file and any sidecar files next to it; files that
+// are already gone are not an error.
+func removeBackupFiles(path string) error {
+	var err error
+	for _, p := range append([]string{path}, path+"-wal", path+"-shm") {
+		if rmErr := os.Remove(p); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			err = errors.Join(err, rmErr)
+		}
+	}
+	return err
 }
 
 // closeInto closes c and records its error in *err unless an earlier error is set.
@@ -214,7 +261,7 @@ func verifyBackupFile(ctx context.Context, destPath string, log zerolog.Logger) 
 	if err == nil {
 		return nil
 	}
-	if removeErr := os.Remove(destPath); removeErr != nil && !os.IsNotExist(removeErr) {
+	if removeErr := removeBackupFiles(destPath); removeErr != nil {
 		log.Warn().Err(removeErr).Msg("failed to remove invalid backup file")
 	}
 	return fmt.Errorf("backup verification failed: %w", err)
@@ -243,19 +290,28 @@ func checkBackupIntegrity(ctx context.Context, path string) (err error) {
 	return nil
 }
 
-// CreateBackup creates an integrity-checked backup copy of the database file; now names
-// the file.
+// CreateBackup creates an integrity-checked backup copy of the database file when
+// backups are enabled ("" and no error when disabled); now names the file.
 func CreateBackup(ctx context.Context, dbPath string, config *BackupConfig, now time.Time,
 	log zerolog.Logger,
 ) (string, error) {
 	if !config.Enabled {
-		log.Info().Msg("Backup disabled, skipping backup creation")
+		log.Info().Msg("backup disabled, skipping backup creation")
 		return "", nil
 	}
+	return WriteBackup(ctx, dbPath, now, log)
+}
 
-	// Check if source file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("database file does not exist: %s", dbPath)
+// WriteBackup always creates an integrity-checked backup copy of the database file,
+// regardless of the backup setting (pre-migration and maintenance backups).
+func WriteBackup(ctx context.Context, dbPath string, now time.Time, log zerolog.Logger) (
+	string, error,
+) {
+	if _, err := os.Stat(dbPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("database file does not exist: %s", dbPath)
+		}
+		return "", fmt.Errorf("stat database file: %w", err)
 	}
 
 	// Ensure the backups subdirectory (and its parent) exists
@@ -304,8 +360,14 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 		return nil, fmt.Errorf("failed to read backups directory: %w", err)
 	}
 
+	// Only this database's backups: another database (or a renamed one) sharing the
+	// backups directory must never be rotated away by this one.
+	prefix := filepath.Base(dbPath) + "."
 	backups := make([]BackupInfo, 0)
 	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
 		if info, ok := backupEntry(backupsDir, entry); ok {
 			backups = append(backups, *info)
 		}
@@ -363,9 +425,9 @@ func CleanupBackups(dbPath string, maxBackups int, log zerolog.Logger) error {
 
 	log.Info().Int("to_remove", toRemove).Int("keeping", maxBackups).Msg("cleaning up old backups")
 
-	// Remove the oldest backups
+	// Remove the oldest backups (with any sidecar files left by older versions)
 	for _, backup := range backupsToRemove {
-		if err := os.Remove(backup.Filename); err != nil {
+		if err := removeBackupFiles(backup.Filename); err != nil {
 			log.Error().Err(err).Str("file", backup.Filename).Msg("failed to remove backup")
 			// Continue with cleanup even if one file fails
 			continue
