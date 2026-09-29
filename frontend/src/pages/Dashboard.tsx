@@ -1,12 +1,14 @@
 import React from 'react';
 import { DataCard } from '../components/dashboard/DataCard';
 import { EnergyCard } from '../components/dashboard/EnergyCards';
+import { EnergyCarousel } from '../components/dashboard/EnergyCarousel';
 import { PowerFlow } from '../components/dashboard/flow';
 import { dashboardGroups } from '../lib/config/groups';
 import { useSubscription } from '../lib/hooks/useSubscription';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { apiDataObjects } from '../lib/config/data';
 import { useMobile } from '../hooks/useMobile';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SkeletonCard } from '../components/ui/skeleton';
 
 // Dashboard shows every register, so it subscribes to the full key set.
@@ -16,6 +18,10 @@ export function Dashboard(): React.ReactElement {
   useSubscription(ALL_KEYS);
   const isLoading = useRegisterStore(state => state.isLoading);
   const isMobile = useMobile();
+  // Same phone rule as the power-flow diagram: coarse pointer and narrow viewport.
+  // Tablets keep the grid.
+  const isNarrow = useMediaQuery('(max-width: 767px)');
+  const isPhone = isMobile && isNarrow;
 
   // Sort groups by order
   const sortedGroups = [...dashboardGroups].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -54,11 +60,15 @@ export function Dashboard(): React.ReactElement {
             <div className="sm:col-span-2 min-w-0">
               <PowerFlow />
             </div>
-            {energyGroups.map(group =>
-              isLoading ? (
-                <SkeletonCard key={group.id} className="w-full" />
-              ) : (
-                <EnergyCard key={group.id} group={group} />
+            {isPhone ? (
+              <EnergyCarousel groups={energyGroups} isLoading={isLoading} className="sm:col-span-2" />
+            ) : (
+              energyGroups.map(group =>
+                isLoading ? (
+                  <SkeletonCard key={group.id} className="w-full" />
+                ) : (
+                  <EnergyCard key={group.id} group={group} />
+                )
               )
             )}
           </div>

@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, Info } from 'lucide-react';
+import React from 'react';
+import { Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
-import { useMobile } from '../../hooks/useMobile';
 import { SkeletonCard } from '../ui/skeleton';
 import { ValueDisplay } from './ValueDisplay';
 import type { GroupConfig } from '../../types';
@@ -13,13 +12,10 @@ interface EnergyCardProps {
   className?: string;
 }
 
-// Mobile-collapsible energy card: mobile shows the first dataId
-// (always PV Energy, per groups.ts ordering) by default, the rest expand on tap.
-// Desktop is unaffected and always shows every dataId, same as DataCard.
+// Energy card (Today / Month / Year / Total): always shows every dataId. On phones the
+// cards sit side by side in EnergyCarousel instead of being collapsed.
 export function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement | null {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
-  const isMobile = useMobile();
-  const [expanded, setExpanded] = useState(false);
 
   const validDataIds = group.dataIds.filter((dataId: string) => registerMetadata.get(dataId) !== undefined);
 
@@ -28,10 +24,6 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
   }
 
   const gridClass = group.layout === 'grid' ? 'grid-cols-4-custom' : 'grid-cols-1';
-
-  const [primaryId, ...restIds] = validDataIds;
-  const showAll = !isMobile || expanded;
-  const visibleIds = showAll ? validDataIds : [primaryId];
 
   return (
     <Card className={`w-full min-w-0 ${className}`}>
@@ -58,7 +50,7 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
       </CardHeader>
       <CardContent>
         <div className={`grid gap-4 ${gridClass}`}>
-          {visibleIds.map((dataId: string) => (
+          {validDataIds.map((dataId: string) => (
             <ValueDisplay
               key={dataId}
               dataId={dataId}
@@ -68,19 +60,6 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
             />
           ))}
         </div>
-        {isMobile && restIds.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setExpanded(e => !e)}
-            className="mt-3 flex w-full items-center justify-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {expanded ? (
-              <>Show less <ChevronUp className="h-3.5 w-3.5" /></>
-            ) : (
-              <>Show {restIds.length} more <ChevronDown className="h-3.5 w-3.5" /></>
-            )}
-          </button>
-        )}
       </CardContent>
     </Card>
   );
