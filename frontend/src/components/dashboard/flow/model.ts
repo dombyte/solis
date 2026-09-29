@@ -380,7 +380,7 @@ export function buildFlowViewModel(
  */
 export function getBackupSubStatus(backupPower: number | null): string {
   if (backupPower === null) return 'standby · ready';
-  return backupPower > 0 ? 'supplying essential loads' : 'standby · ready';
+  return backupPower > 0 ? 'supplying loads' : 'standby · ready';
 }
 
 /**

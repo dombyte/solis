@@ -86,17 +86,8 @@
     --flow-inv-title: var(--foreground);
     --flow-inv-sub: var(--muted-foreground);
 
-    /* Battery gauge colors */
-    --flow-batt-low: var(--destructive);     /* Low SOC: red */
-    --flow-batt-mid: var(--warning);        /* Mid SOC: amber */
-    --flow-batt-high: var(--success);       /* High SOC: green */
-
     /* Edge/track colors - a step darker than --border so stopped edges stay visible */
     --flow-track: #cbd5e1;
-
-    /* SOC color variants for battery segments */
-    --flow-batt-icon-bg: var(--muted);
-    --flow-batt-icon-stroke: var(--foreground);
 
     /* Status colors */
     --flow-status-ok: var(--success);
@@ -218,17 +209,8 @@
     --flow-inv-title: var(--foreground);
     --flow-inv-sub: var(--muted-foreground);
     
-    /* Battery gauge colors */
-    --flow-batt-low: var(--destructive);     /* Low SOC: red */
-    --flow-batt-mid: var(--warning);        /* Mid SOC: amber */
-    --flow-batt-high: var(--success);       /* High SOC: green */
-    
     /* Edge/track colors - brighter than --border so stopped edges stay visible */
     --flow-track: #3a4f80;
-    
-    /* SOC color variants for battery segments */
-    --flow-batt-icon-bg: var(--muted);      /* More distinct background for battery gauge */
-    --flow-batt-icon-stroke: var(--foreground);
     
     /* Status colors */
     --flow-status-ok: var(--success);
@@ -354,11 +336,6 @@
     --color-flow-inv-title: var(--flow-inv-title);
     --color-flow-inv-sub: var(--flow-inv-sub);
     --color-flow-track: var(--flow-track);
-    --color-flow-batt-low: var(--flow-batt-low);
-    --color-flow-batt-mid: var(--flow-batt-mid);
-    --color-flow-batt-high: var(--flow-batt-high);
-    --color-flow-batt-icon-bg: var(--flow-batt-icon-bg);
-    --color-flow-batt-icon-stroke: var(--flow-batt-icon-stroke);
     --color-flow-status-ok: var(--flow-status-ok);
     --color-flow-status-warning: var(--flow-status-warning);
     --color-flow-status-error: var(--flow-status-error);

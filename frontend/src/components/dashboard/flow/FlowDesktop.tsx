@@ -1,41 +1,41 @@
 import React from 'react';
+import { Factory, Home, ShieldCheck, Sun } from 'lucide-react';
 import type { FlowViewModel } from './model';
-import { buildFlowSummary } from './model';
+import { buildFlowSummary, getBackupSubStatus, getBatterySubStatus, getGridSubStatus } from './model';
 import { FlowEdge } from './FlowEdge';
-import { CircleNode, CircleBatteryNode } from './CircleNode';
-import { BatteryGauge } from './BatteryGauge';
+import { TileNode, TILE_H } from './TileNode';
+import { getBatteryIcon } from './batteryIcon';
 import { InverterStatus } from './InverterStatus';
 
 /**
- * Desktop flow diagram with circles + inverter box
+ * Desktop flow diagram with node tiles + inverter box
  */
 interface FlowDesktopProps {
   viewModel: FlowViewModel;
 }
 
-// Geometry: SVG 1000x850 (wider and taller for better visibility)
+// Geometry: SVG 1000x800
 const SVG_WIDTH = 1000;
-const SVG_HEIGHT = 850;  // Increased for more backup space
+const SVG_HEIGHT = 800;
 
 // Inverter box (center)
 const C = { x: 500, y: 340 };
-const INV = { 
-  x: C.x - 115, 
-  y: C.y - 85, 
-  w: 230, 
-  h: 170 
+const INV = {
+  x: C.x - 130,
+  y: C.y - 90,
+  w: 260,
+  h: 180,
 };
-const INV_RX = 20;
 
-// Node positions - scaled for larger SVG
-const PV = { x: 150, y: 90 };
-const GRID = { x: 850, y: 90 };
-const BAT = { x: 150, y: 500 };
-const HH = { x: 850, y: 480 };
-const BK = { x: 500, y: 750 };  // Positioned below inverter
+// Tile centers; the side tiles' centers line up over the edge risers
+const PV = { x: 180, y: 90 };
+const GRID = { x: 820, y: 90 };
+const BAT = { x: 180, y: 590 };
+const HH = { x: 820, y: 590 };
+const BK = { x: 500, y: 730 };  // Below the inverter
 
-// Node radius - increased for better visibility
-const R = 58;
+// Half tile height: edges start/end on the tile border
+const HALF_H = TILE_H / 2;
 
 // Mid Y for edge calculations
 const MID_Y = C.y;
@@ -58,7 +58,7 @@ function buildVEdge(nx: number, ny: number, side: number): string {
  */
 function buildBkEdge(bx: number, by: number): string {
   // BK is centered below inverter, so path is straight down from inverter bottom to BK
-  return `M ${C.x} ${INV.y + INV.h} L ${bx} ${INV.y + INV.h} L ${bx} ${by - R}`;
+  return `M ${C.x} ${INV.y + INV.h} L ${bx} ${INV.y + INV.h} L ${bx} ${by - HALF_H}`;
 }
 
 export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement {
@@ -69,15 +69,14 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
 
   // Edge paths
   const edgePaths = {
-    pv_to_inverter: buildVEdge(PV.x, PV.y + R, -1),
-    grid_to_inverter: buildVEdge(GRID.x, GRID.y + R, 1),
-    battery_to_inverter: buildVEdge(BAT.x, BAT.y - R, -1),
-    inverter_to_household: buildVEdge(HH.x, HH.y - R, 1),
+    pv_to_inverter: buildVEdge(PV.x, PV.y + HALF_H, -1),
+    grid_to_inverter: buildVEdge(GRID.x, GRID.y + HALF_H, 1),
+    battery_to_inverter: buildVEdge(BAT.x, BAT.y - HALF_H, -1),
+    inverter_to_household: buildVEdge(HH.x, HH.y - HALF_H, 1),
     inverter_to_backup: buildBkEdge(BK.x, BK.y),
   };
 
-  // Battery gauge element
-  const batteryGauge = <BatteryGauge soc={nodes.battery.soc ?? 0} />;
+  const soc = nodes.battery.soc === undefined ? '–' : `${Math.round(nodes.battery.soc)}%`;
 
   return (
     <div className="w-full">
@@ -122,67 +121,41 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
       />
 
       {/* Nodes */}
-      <CircleNode 
-        node={own(nodes.pv)}
-        cx={PV.x}
-        cy={PV.y}
-        r={R}
-        icon="sun"
-        labelPos="above"
-      />
-      <CircleNode 
+      <TileNode node={own(nodes.pv)} cx={PV.x} cy={PV.y} icon={Sun} />
+      <TileNode
         node={own(nodes.grid)}
         cx={GRID.x}
         cy={GRID.y}
-        r={R}
-        icon="factory"
-        labelPos="above"
+        icon={Factory}
+        sub={getGridSubStatus(nodes.grid.value)}
       />
-      <CircleNode 
-        node={own(nodes.household)}
-        cx={HH.x}
-        cy={HH.y}
-        r={R}
-        icon="house"
-      />
-      <CircleNode 
-        node={own(nodes.backup)}
-        cx={BK.x}
-        cy={BK.y}
-        r={R}
-        icon="shield"
-      />
-      <CircleBatteryNode 
+      <TileNode
         node={own(nodes.battery)}
         cx={BAT.x}
         cy={BAT.y}
-        r={R}
-        batteryGauge={batteryGauge}
+        icon={getBatteryIcon(nodes.battery.soc, nodes.battery.value)}
+        title={`Battery · ${soc}`}
+        sub={getBatterySubStatus(nodes.battery.value)}
+      />
+      <TileNode node={own(nodes.household)} cx={HH.x} cy={HH.y} icon={Home} />
+      <TileNode
+        node={own(nodes.backup)}
+        cx={BK.x}
+        cy={BK.y}
+        icon={ShieldCheck}
+        sub={getBackupSubStatus(nodes.backup.value)}
       />
 
-      {/* Inverter box at center - use flow-inv-bg for distinct appearance */}
-      <g
-        transform={`translate(${C.x}, ${C.y})`}
-        role="img"
-        aria-label={`Inverter: ${inverter.status}, ${inverter.operatingStatus}`}
-      >
-        <rect
-          x={INV.x - C.x}
-          y={INV.y - C.y}
-          width={INV.w}
-          height={INV.h}
-          rx={INV_RX}
-          fill="var(--color-flow-inv-bg)"  // Use distinct inverter background
-          stroke="var(--color-border)"  // Add border for definition
-          strokeWidth={1.5}
-        />
-        <InverterStatus
-          status={inverter.status}
-          operatingStatus={inverter.operatingStatus}
-          alert={inverter.alert}
-          showIcon={true}
-        />
-      </g>
+      {/* Inverter hub at center */}
+      <InverterStatus
+        x={INV.x}
+        y={INV.y}
+        width={INV.w}
+        height={INV.h}
+        status={inverter.status}
+        operatingStatus={inverter.operatingStatus}
+        alert={inverter.alert}
+      />
     </svg>
     <div className="sr-only" role="note">
       {buildFlowSummary(viewModel)}
