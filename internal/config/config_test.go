@@ -144,8 +144,8 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	assert.Equal(t, "23:59", cfg.Rollover.Time)
 	assert.Equal(t, "./data/solis.db", cfg.Storage.Path)
 	assert.Equal(t, 30*time.Second, cfg.Poller.Interval)
-	assert.Equal(t, 365*24*time.Hour, cfg.Storage.DailyRetention)
-	assert.Equal(t, 365*24*time.Hour, cfg.Storage.ErrorRetention)
+	assert.Equal(t, 10*365*24*time.Hour, cfg.Storage.DailyRetention)
+	assert.Equal(t, 10*365*24*time.Hour, cfg.Storage.ErrorRetention)
 }
 
 func TestLoadConfig_LongDurationUnits(t *testing.T) {

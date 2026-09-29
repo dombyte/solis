@@ -44,9 +44,9 @@ storage:
   path: ./data/solis.db
   # Retention of daily rows; monthly and yearly rows follow it. Only periods of already
   # frozen years are deleted. Units: s, m, h, d, w, y, combinable (e.g. "1y6w").
-  daily_retention: 1y
+  daily_retention: 10y
   # Retention of status/fault change rows
-  error_retention: 1y
+  error_retention: 10y
   wal_mode: true
   synchronous: NORMAL # OFF, NORMAL, FULL, EXTRA
   temp_store: MEMORY # DEFAULT, FILE, MEMORY

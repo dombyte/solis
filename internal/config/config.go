@@ -180,7 +180,7 @@ func setDefaults(v *viper.Viper) {
 		"modbus.speed": 0, "modbus.data_bits": 0, "modbus.parity": "", "modbus.stop_bits": 0,
 		"rollover.time":           "23:59",
 		"storage.path":            "./data/solis.db",
-		"storage.daily_retention": "1y", "storage.error_retention": "1y",
+		"storage.daily_retention": "10y", "storage.error_retention": "10y",
 		"storage.wal_mode": true, "storage.synchronous": "NORMAL",
 		"storage.temp_store":    "MEMORY",
 		"storage.enable_backup": true, "storage.max_backups": defaultMaxBackups,

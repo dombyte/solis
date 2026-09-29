@@ -66,8 +66,8 @@ rollover:
 
 storage:
   path: ./data/solis.db
-  daily_retention: 1y
-  error_retention: 1y
+  daily_retention: 10y
+  error_retention: 10y
   wal_mode: true
   synchronous: NORMAL
   temp_store: MEMORY
@@ -130,8 +130,8 @@ The Modbus client never fails construction on an unreachable device: it starts i
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `path` | string | ./data/solis.db | Database file path |
-| `daily_retention` | duration | 1y | Retention for daily values; monthly and yearly values follow it |
-| `error_retention` | duration | 1y | Retention for error/fault data |
+| `daily_retention` | duration | 10y | Retention for daily values; monthly and yearly values follow it |
+| `error_retention` | duration | 10y | Retention for error/fault data |
 | `wal_mode` | bool | true | Enable Write-Ahead Logging |
 | `synchronous` | string | NORMAL | Sync mode: OFF, NORMAL, FULL, EXTRA |
 | `temp_store` | string | MEMORY | Temp storage: DEFAULT, FILE, MEMORY |

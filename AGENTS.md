@@ -667,8 +667,8 @@ rollover:
 
 storage:
   path: ./data/solis.db
-  daily_retention: 1y  # monthly/yearly rows follow it; only frozen years are ever deleted
-  error_retention: 1y  # durations accept d (24h), w (7d), y (365d) on top of s/m/h
+  daily_retention: 10y # monthly/yearly rows follow it; only frozen years are ever deleted
+  error_retention: 10y # durations accept d (24h), w (7d), y (365d) on top of s/m/h
   # WAL, backup and cleanup settings unchanged from v2
 ```
 
