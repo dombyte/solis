@@ -139,7 +139,6 @@ linters:
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/
@@ -174,7 +173,6 @@ formatters:
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/
