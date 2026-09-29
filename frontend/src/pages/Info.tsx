@@ -161,13 +161,13 @@ export function Info() {
           </div>
           {lastCheckTime && (
             <div className={`mt-3 p-3 rounded-lg transition-all duration-300 ${
-              checkStatus === 'update-available' ? 'bg-amber-500/10 border border-amber-500/20' :
-              checkStatus === 'up-to-date' ? 'bg-emerald-500/10 border border-emerald-500/20' :
+              checkStatus === 'update-available' ? 'bg-warning/10 border border-warning/20' :
+              checkStatus === 'up-to-date' ? 'bg-success/10 border border-success/20' :
               'bg-muted/50'
             }`}>
               <p className={`text-sm flex items-center gap-2 ${
-                checkStatus === 'update-available' ? 'text-amber-500' :
-                checkStatus === 'up-to-date' ? 'text-emerald-500' :
+                checkStatus === 'update-available' ? 'text-warning' :
+                checkStatus === 'up-to-date' ? 'text-success' :
                 'text-muted-foreground'
               } ${checkStatus === 'checking' ? 'animate-pulse' : ''}`}>
                 {checkStatus === 'checking' && (

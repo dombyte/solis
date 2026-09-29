@@ -12,53 +12,54 @@
    ========================================================================== */
 
 :root {
-    /* Light Mode - Base Color Palette */
-    /* Optimized for vibrant green primary with pleasing contrast */
-    
-    /* Background - Clean white for maximum contrast with green */
-    --background: oklch(100% 0 0);
-    
-    /* Foreground - Deep charcoal for excellent text readability */
-    --foreground: oklch(15% 0.02 240);
-    
-    /* Primary - Vibrant Green (consistent with dark mode theme) */
-    --primary: #0FDE41;
-    
-    /* Secondary - Light neutral gray for surfaces */
-    --secondary: oklch(96% 0.01 0);
-    
-    /* Muted - Very light neutral gray */
-    --muted: oklch(98% 0.005 0);
-    
-    /* Accent - Soft teal that complements primary green */
-    --accent: oklch(70% 0.15 180);
-    
-    /* Destructive - Modern Coral Red */
-    --destructive: oklch(58% 0.24 20);
-    
-    /* Success/Confirm - Vibrant Green (matches primary) */
-    --success: #0FDE41;
-    
-    /* Warning - Amber */
-    --warning: oklch(65% 0.18 70);
-    
+    /* Light Mode - "Daylight Slate": cool slate neutrals that mirror the navy dark theme.
+       Every text token reaches WCAG AA (4.5:1) on --card and --background; chart colors
+       reach 3:1 on white. The neon brand green is dark-mode only: on white it fails as
+       text, so light mode uses a deeper green. */
+
+    /* Background - light slate so white cards stand out */
+    --background: #f4f6fa;
+
+    /* Foreground - slate 900 (17.9:1 on card) */
+    --foreground: #0f172a;
+
+    /* Primary - deep green (5.0:1 on white, white text on it 5.0:1) */
+    --primary: #15803d;
+
+    /* Secondary - light slate surface */
+    --secondary: #e8edf4;
+
+    /* Muted - slate 100 */
+    --muted: #f1f5f9;
+
+    /* Accent - deep cyan (5.4:1 on white) */
+    --accent: #0e7490;
+
+    /* Destructive - red 700 (6.5:1 on white) */
+    --destructive: #b91c1c;
+
+    /* Success/Confirm - matches primary */
+    --success: #15803d;
+
+    /* Warning - amber 700 (5.0:1 on white) */
+    --warning: #b45309;
+
     /* Border radius base */
     --radius: 0.875rem;
-    
+
     /* ====================================================================
-       CHART COLORS - 9 Distinct Vibrant Colors
-       All distinct and visible on light background
+       CHART COLORS - 9 distinct colors, each at least 3:1 on white
        ==================================================================== */
-    --chart-1: #0FDE41;   /* Primary Green */
-    --chart-2: oklch(65% 0.22 250);   /* Sky Blue */
-    --chart-3: oklch(60% 0.20 180);   /* Teal - distinct from green */
-    --chart-4: oklch(68% 0.18 70);    /* Golden Amber */
-    --chart-5: oklch(60% 0.20 340);   /* Hot Pink */
-    --chart-6: oklch(65% 0.20 200);   /* Cyan */
-    --chart-7: oklch(65% 0.20 10);    /* Red-Orange - distinct from green */
-    --chart-8: oklch(65% 0.22 50);    /* Vibrant Orange */
-    --chart-9: oklch(55% 0.20 320);   /* Deep Grape */
-    
+    --chart-1: #16a34a;   /* Green */
+    --chart-2: #2563eb;   /* Blue */
+    --chart-3: #0d9488;   /* Teal */
+    --chart-4: #d97706;   /* Amber */
+    --chart-5: #db2777;   /* Pink */
+    --chart-6: #0891b2;   /* Cyan */
+    --chart-7: #dc2626;   /* Red */
+    --chart-8: #ea580c;   /* Orange */
+    --chart-9: #7c3aed;   /* Violet */
+
     /* Chart background colors with transparency (20% opacity) */
     --chart-bg-1: color-mix(in oklch, var(--chart-1), transparent 80%);
     --chart-bg-2: color-mix(in oklch, var(--chart-2), transparent 80%);
@@ -69,92 +70,81 @@
     --chart-bg-7: color-mix(in oklch, var(--chart-7), transparent 80%);
     --chart-bg-8: color-mix(in oklch, var(--chart-8), transparent 80%);
     --chart-bg-9: color-mix(in oklch, var(--chart-9), transparent 80%);
-    
+
     /* ====================================================================
        FLOW DIAGRAM COLORS - Power flow visualization colors
-       Based on prototype palette, matched to existing theme
        ==================================================================== */
     /* Node colors - sources and consumers */
-    --flow-pv: var(--chart-4);         /* PV: amber/gold (#fbbf24 in prototype light) */
-    --flow-grid: var(--chart-2);        /* Grid: blue (#60a5fa in prototype dark) */
-    --flow-batt: var(--chart-1);        /* Battery: green (#34d399 in prototype dark) */
-    --flow-hh: var(--chart-5);          /* Household: purple/pink (#a78bfa in prototype light) */
-    --flow-bk: var(--chart-7);          /* Backup: gray/slate (#94a3b8 in prototype light) */
-    
+    --flow-pv: var(--chart-4);         /* PV: amber */
+    --flow-grid: var(--chart-2);        /* Grid: blue */
+    --flow-batt: var(--chart-1);        /* Battery: green */
+    --flow-hh: var(--chart-5);          /* Household: pink */
+    --flow-bk: var(--chart-7);          /* Backup: red */
+
     /* Inverter box colors */
-    --flow-inv-bg: var(--muted);         /* Inverter background - slightly darker than card */
+    --flow-inv-bg: var(--muted);
     --flow-inv-title: var(--foreground);
     --flow-inv-sub: var(--muted-foreground);
-    
+
     /* Battery gauge colors */
     --flow-batt-low: var(--destructive);     /* Low SOC: red */
-    --flow-batt-mid: var(--warning);        /* Mid SOC: yellow/amber */
+    --flow-batt-mid: var(--warning);        /* Mid SOC: amber */
     --flow-batt-high: var(--success);       /* High SOC: green */
-    
-    /* Edge/track colors */
-    --flow-track: var(--border);            /* Track/background edge color */
-    
+
+    /* Edge/track colors - a step darker than --border so stopped edges stay visible */
+    --flow-track: #cbd5e1;
+
     /* SOC color variants for battery segments */
-    --flow-batt-icon-bg: var(--muted);      /* More distinct background for battery gauge */
+    --flow-batt-icon-bg: var(--muted);
     --flow-batt-icon-stroke: var(--foreground);
-    
+
     /* Status colors */
     --flow-status-ok: var(--success);
     --flow-status-warning: var(--warning);
     --flow-status-error: var(--destructive);
 
     /* ====================================================================
-       DERIVED COLORS - Calculated from base palette
-       Using transparency for modern glassmorphism effect
+       DERIVED COLORS
        ==================================================================== */
-    
-    /* Card - Classic light gray (#F2F2F2) */
-    --card: #F2F2F2;
+
+    /* Card - white on the slate background */
+    --card: #ffffff;
     --card-foreground: var(--foreground);
-    
-    /* Popover - Same as card for consistency */
-    --popover: #F2F2F2;
+
+    /* Popover - same as card */
+    --popover: #ffffff;
     --popover-foreground: var(--foreground);
-    
-    /* Primary foreground - Automatic high contrast */
-    --primary-foreground: color-mix(in oklch, white, black 90%);
-    
-    /* Secondary foreground - Mix with foreground for readability */
-    --secondary-foreground: color-mix(in oklch, var(--secondary), var(--foreground) 25%);
-    
-    /* Muted foreground - Subtle text on muted backgrounds */
-    --muted-foreground: color-mix(in oklch, var(--muted), var(--foreground) 35%);
-    
-    /* Accent foreground - Dark text for light accent */
-    --accent-foreground: color-mix(in oklch, var(--accent), black 30%);
-    
-    /* Success foreground */
-    --success-foreground: color-mix(in oklch, white, black 90%);
-    
-    /* Warning foreground */
-    --warning-foreground: color-mix(in oklch, white, black 90%);
-    
-    /* Destructive foreground */
-    --destructive-foreground: color-mix(in oklch, white, black 90%);
-    
-    /* Border - Light neutral gray border for contrast */
-    --border: oklch(90% 0.01 0);
-    
-    /* Input - Clean white input background */
-    --input: var(--background);
-    
-    /* Ring - Focus ring color with green tint */
-    --ring: color-mix(in oklch, var(--primary), transparent 40%);
-    
-    /* Sidebar - Light gray (#F2F2F2) */
-    --sidebar: #F2F2F2;
+
+    /* Foregrounds on filled backgrounds - white on the deep fills */
+    --primary-foreground: #ffffff;
+    --secondary-foreground: #1e293b;
+    --accent-foreground: #ffffff;
+    --success-foreground: #ffffff;
+    --warning-foreground: #ffffff;
+    --destructive-foreground: #ffffff;
+
+    /* Muted foreground - slate 600 (7.6:1 on card, 7.0:1 on background) */
+    --muted-foreground: #475569;
+
+    /* Border - slate 300 */
+    --border: #d5dbe5;
+
+    /* Input - white */
+    --input: #ffffff;
+
+    /* Ring - focus ring in primary green */
+    --ring: color-mix(in oklch, var(--primary), transparent 50%);
+
+    /* Sidebar - white panel next to the slate content area */
+    --sidebar: #ffffff;
     --sidebar-foreground: var(--foreground);
-    --sidebar-primary: color-mix(in oklch, var(--primary), transparent 15%);
+    /* Solid primary: any transparency drops white text below 4.5:1 */
+    --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-accent: color-mix(in oklch, var(--accent), transparent 25%);
-    --sidebar-accent-foreground: color-mix(in oklch, var(--accent-foreground), var(--primary) 40%);
-    --sidebar-border: color-mix(in oklch, var(--border), transparent 30%);
-    --sidebar-ring: color-mix(in oklch, var(--ring), transparent 20%);
+    --sidebar-accent: var(--muted);
+    --sidebar-accent-foreground: var(--foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--ring);
 }
 
 .dark {
@@ -179,8 +169,8 @@
     /* Accent - Vibrant Cyan glow (complements primary green) */
     --accent: oklch(80% 0.22 220);
     
-    /* Destructive - Bright Coral for contrast */
-    --destructive: oklch(65% 0.24 20);
+    /* Destructive - Bright Coral (5.9:1 on card) */
+    --destructive: #ff5c77;
     
     /* Success - Bright Emerald (similar to primary but distinct) */
     --success: #0FDE41;
@@ -233,8 +223,8 @@
     --flow-batt-mid: var(--warning);        /* Mid SOC: amber */
     --flow-batt-high: var(--success);       /* High SOC: green */
     
-    /* Edge/track colors */
-    --flow-track: var(--border);            /* Track/background edge color */
+    /* Edge/track colors - brighter than --border so stopped edges stay visible */
+    --flow-track: #3a4f80;
     
     /* SOC color variants for battery segments */
     --flow-batt-icon-bg: var(--muted);      /* More distinct background for battery gauge */

@@ -237,7 +237,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             },
             ticks: { 
               font: { 
-                size: isMobile ? 10 : 10,
+                size: 11,
                 family: 'Inter Variable, sans-serif'
               },
               color: mutedForeground,
@@ -377,7 +377,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             text positioned from the chart's own scale: it is never clipped, and the
             invisible copy of the labels sizes the column to the widest one. */}
         <div
-          className="relative flex-shrink-0 pr-1 text-[10px] leading-none text-muted-foreground tabular-nums text-right"
+          className="relative flex-shrink-0 pr-1 text-[11px] leading-none text-muted-foreground tabular-nums text-right"
           style={{ height: '400px' }}
           aria-hidden="true"
         >

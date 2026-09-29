@@ -139,7 +139,7 @@ export function ValueDisplay({
   return (
     <div className={`flex flex-wrap items-center gap-1.5 sm:gap-2 ${className}`}>
       {showLabel && (
-        <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
+        <span className="text-xs sm:text-sm font-medium text-muted-foreground truncate min-w-0">{register.name}:</span>
       )}
       <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
         <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
