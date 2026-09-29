@@ -40,6 +40,39 @@ checks; the pre-commit script is run by hand (`make check`), not installed as a 
 
 ---
 
+## Commits
+
+Subjects follow [Conventional Commits](https://www.conventionalcommits.org); the release
+changelog (`.goreleaser.yaml` `changelog.groups`) is grouped by the type, so a subject
+without a valid type lands in "Other changes".
+
+```
+<type>[(<scope>)][!]: <imperative, lowercase subject>
+feat(ui): show the energy cards as a swipe carousel on phones
+fix: apply SQLite pragmas through the DSN on every connection
+refactor!: remove V1/V2 migrations and refuse pre-V2 databases
+```
+
+| Type | Use for | Changelog group |
+|---|---|---|
+| `feat` | new or changed user-visible behaviour | Features |
+| `fix` | bug fixes, incl. security hardening | Bug fixes |
+| `perf` | performance improvements | Performance |
+| `refactor` | code restructuring without behaviour change | Refactoring |
+| `docs` | README, AGENTS.md, openapi, comments-only changes | Documentation |
+| `chore`, `build`, `ci`, `test`, `style` | tooling, CI, tests, formatting, repo hygiene | Maintenance |
+| `<type>(deps)` | dependency and toolchain bumps (Renovate/Dependabot emit `chore(deps)`/`fix(deps)`) | Dependencies |
+
+- `!` before the colon marks a breaking change for users upgrading (API/WebSocket
+  protocol, removed config or migration paths, changed runtime requirements); it goes to
+  "Breaking changes" instead of its type's group. A `BREAKING CHANGE:` footer alone is not
+  enough — goreleaser only reads the subject line.
+- Scope is optional and short: `ui`, `api`, `ws`, `poller`, `storage`, `modbus`, `release`, …
+- Subject: imperative, lowercase first word, no trailing period, aim for ≤ 72 characters.
+- Merge commits keep git's default message (`Merge branch '…'`); the changelog skips them.
+
+---
+
 ## Project Structure
 
 Package layout (packages marked *new* were added in v3):
@@ -417,7 +450,8 @@ Formatting, lint, deadcode and govulncheck: see "Tools" above (`make check`).
   `cmd`/`app`); SQL uses the `…Context` variants
 - Receivers: single letter (`s`, `p`, `c`, `h`); acronyms stdlib-style (`ID`, `URL`, `HTTP`)
 - Line length < 100, cyclomatic complexity < 8, no magic numbers (named constants)
-- Commits: short imperative subject, **no AI signatures / `Co-Authored-By` trailers**
+- Commits: **no AI signatures / `Co-Authored-By` trailers**; subjects follow Conventional
+  Commits (see "Commits" above)
 - Imports grouped: standard library, third-party, project
 
 ---

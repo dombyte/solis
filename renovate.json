@@ -19,7 +19,8 @@
     ":enableVulnerabilityAlertsWithLabel('security')",
     ":preserveSemverRanges",
     ":rebaseStalePrs",
-    "group:recommended"
+    "group:recommended",
+    ":semanticCommits"
   ],
   "labels": ["renovate"],
   "ignoreUnstable": true,
