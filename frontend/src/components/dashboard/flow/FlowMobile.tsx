@@ -1,8 +1,9 @@
 import React from 'react';
-import { Sun, Factory, Home, ShieldCheck, BatteryCharging, BatteryMedium } from 'lucide-react';
+import { Sun, Factory, Home, ShieldCheck } from 'lucide-react';
 import type { FlowViewModel } from './model';
 import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus, buildFlowSummary } from './model';
 import { ANIMATION_DURATION } from './FlowEdge';
+import { getBatteryIcon } from './batteryIcon';
 
 /**
  * Mobile flow diagram with card list and flow rail
@@ -58,7 +59,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       color: 'var(--color-flow-batt)',
       active: nodes.battery.active,
       stale: nodes.battery.stale,
-      Icon: nodes.battery.value !== null && nodes.battery.value > 0 ? BatteryCharging : BatteryMedium,
+      Icon: getBatteryIcon(nodes.battery.soc, nodes.battery.value),
       connector: {
         active: nodes.battery.active,
         reverse: nodes.battery.value !== null ? nodes.battery.value < 0 : false,

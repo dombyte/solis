@@ -1,100 +1,84 @@
 import React from 'react';
+import { Zap } from 'lucide-react';
 
 /**
- * Inverter status display for the center of the flow diagram
- * Shows solis_status and operating_status with a colored dot
- * Positioned at (0, 0) with Inverter text at y=24, status at y=44, etc.
+ * Inverter hub of the desktop flow diagram: box + icon badge, title, a status pill for
+ * solis_status and the operating status below. The content is HTML in a foreignObject so
+ * long status strings wrap inside the box instead of overflowing it.
  */
 interface InverterStatusProps {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
   status: string;
   operatingStatus: string;
   alert: boolean;
-  showIcon?: boolean;
 }
+
+const BOX_RX = 20;
+const BADGE = 52;
+// lucide has no inverter glyph; Zap reads as power conversion
+const ICON_SIZE = 30;
+const DOT = 8;
 
 /**
- * SVG Inverter Icon - outline only for consistent appearance
- * Larger icon for better visibility
+ * Tint a color token for badge/pill backgrounds
  */
-function SvgInverterIcon({ color }: { color: string }): React.ReactElement {
-  return (
-    <g transform="translate(-18, -18)">
-      <rect x={6} y={6} width={12} height={18} rx={2} fill="none" stroke={color} strokeWidth={2.5} />
-      <path d="M12 2v5M12 20v3" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-      <path d="M8 12h2.5M13.5 12h2.5" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-      <path d="M10 16h4" stroke={color} strokeWidth={2.5} strokeLinecap="round" fill="none" />
-    </g>
-  );
+function tint(color: string, percent: number): string {
+  return `color-mix(in oklab, ${color} ${percent}%, transparent)`;
 }
 
-/**
- * Get the status color based on alert state
- */
-function getStatusColor(alert: boolean): string {
-  if (alert) return 'var(--color-flow-status-error)';
-  return 'var(--color-flow-status-ok)';
-}
-
-export function InverterStatus({ 
-  status, 
+export function InverterStatus({
+  x,
+  y,
+  width,
+  height,
+  status,
   operatingStatus,
   alert,
-  showIcon = true 
 }: InverterStatusProps): React.ReactElement {
-  const statusColor = getStatusColor(alert);
-  
+  const statusColor = alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
+  const iconColor = alert ? statusColor : 'var(--color-primary)';
+
   return (
-    <g>
-      {/* Inverter icon at top center (0, -30) - only on desktop */}
-      {showIcon && (
-        <g transform="translate(0, -30)">
-          <SvgInverterIcon color="var(--color-primary)" />
-        </g>
-      )}
-      
-      {/* "Inverter" label at y=22 (below icon) */}
-      <text 
-        x={0} 
-        y={22} 
-        textAnchor="middle" 
-        fill="var(--color-flow-inv-title)" 
-        style={{
-          fontSize: 18, 
-          fontWeight: 700,
-          transition: 'opacity 0.5s ease'
-        }}
-      >
-        Inverter
-      </text>
-      
-      {/* Status dot + solis_status at y=50 */}
-      <text 
-        x={0} 
-        y={50} 
-        textAnchor="middle" 
-        fill={statusColor}
-        style={{
-          fontSize: 14, 
-          fontWeight: 600,
-          transition: 'opacity 0.5s ease'
-        }}
-      >
-        ● Solis: {status}
-      </text>
-      
-      {/* Operating status at y=70 */}
-      <text 
-        x={0} 
-        y={70} 
-        textAnchor="middle" 
-        fill="var(--color-flow-inv-sub)" 
-        style={{
-          fontSize: 12,
-          transition: 'opacity 0.5s ease'
-        }}
-      >
-        Operating: {operatingStatus}
-      </text>
+    <g role="img" aria-label={`Inverter: ${status}, ${operatingStatus}`}>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={BOX_RX}
+        fill="var(--color-flow-inv-bg)"
+        stroke={alert ? statusColor : 'var(--color-border)'}
+        strokeWidth={alert ? 2.5 : 2}
+      />
+      <foreignObject x={x} y={y} width={width} height={height}>
+        <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center">
+          <div
+            className="flex items-center justify-center rounded-xl"
+            style={{ width: BADGE, height: BADGE, background: tint(iconColor, 16) }}
+          >
+            <Zap size={ICON_SIZE} color={iconColor} strokeWidth={2.25} aria-hidden="true" />
+          </div>
+          <div style={{ color: 'var(--color-flow-inv-title)', fontSize: 20, fontWeight: 700 }}>
+            Inverter
+          </div>
+          <div
+            className="flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-0.5"
+            style={{ background: tint(statusColor, 16), color: statusColor, fontSize: 14, fontWeight: 600 }}
+          >
+            <span
+              className="shrink-0 rounded-full"
+              style={{ width: DOT, height: DOT, background: statusColor }}
+            />
+            <span className="truncate">{status}</span>
+          </div>
+          <div className="leading-tight" style={{ color: 'var(--color-flow-inv-sub)', fontSize: 14 }}>
+            {operatingStatus}
+          </div>
+        </div>
+      </foreignObject>
     </g>
   );
 }
