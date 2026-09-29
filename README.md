@@ -260,7 +260,7 @@ changed, subscribed values are pushed (diffed per client), coalesced into one fr
 them instead of showing a stale value.
 
 `ping` from the client is accepted and ignored. Unknown keys never drop the connection. History
-stays on REST — there is no history over WebSocket. At most 64 clients are accepted (the next
+stays on REST — there is no history over WebSocket. At most 256 clients are accepted (the next
 one is closed with code 1013, "try again later") and at most 256 keys per message.
 
 ## Security

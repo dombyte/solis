@@ -580,7 +580,7 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
   compared). This is a LAN app without authentication: it does not defend against DNS
   rebinding, and REST has no CORS. Do not expose it to the internet without a reverse proxy
   that authenticates. No history over WebSocket — history is REST only.
-- Limits: at most 64 clients (the 65th is closed with 1013), at most 256 keys per frame.
+- Limits: at most 256 clients (the 257th is closed with 1013), at most 256 keys per frame.
 - New UI-driven registers need no new endpoint/message: define the register in `solis`, clients subscribe.
 
 ---

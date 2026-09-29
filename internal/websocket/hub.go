@@ -151,7 +151,7 @@ func (h *Hub) Stop() error {
 // everyone (review HTTP-L6). A dashboard needs one connection and ~60 keys.
 const (
 	// MaxClients is the number of concurrent WebSocket clients.
-	MaxClients = 64
+	MaxClients = 256
 	// MaxKeysPerMessage bounds the keys of one subscribe/unsubscribe frame.
 	MaxKeysPerMessage = 256
 )
