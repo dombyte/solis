@@ -57,7 +57,7 @@ jobs:
       # length, complexity, magic numbers, global state and the panic policy.
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13
+          version: v2.14
           args: --config .golangci.yml
 
   frontend:
