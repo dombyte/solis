@@ -70,6 +70,23 @@ restore: stop the app, copy the backup over `solis.db`, delete `solis.db-wal` an
 **Retention** never breaks computed values: the current year and anything still needed to
 recompute totals are always kept.
 
+## Upgrading
+
+The database is migrated on startup after a verified pre-migration backup. v3 only
+migrates from the v2 schema:
+
+| Running now | Schema | Upgrade path |
+|---|---|---|
+| nothing (fresh install) | – | v3 directly |
+| v2.0.0, v2.1.0 | 2 | v3 directly |
+| v1.4.0 | 1 | start v2.1.0 once, stop it, then v3 |
+| v1.0.0 – v1.3.x | none | start v2.1.0 once, stop it, then v3 |
+| a newer release | > 3 | refused; run the newer release or restore a backup |
+
+An older database makes v3 exit with `schema version N is older than 2; upgrade with a v2
+release first`. The v2 step also renames the register keys (e.g. `pv_today_energy` →
+`pv_energy_daily`), which v3 relies on.
+
 ## Registers
 
 `GET /api/keys` lists every register with its metadata.
