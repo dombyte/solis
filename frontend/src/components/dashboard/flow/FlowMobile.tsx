@@ -108,107 +108,94 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
       }} 
       className="w-full min-w-0"  // Responsive width like DataCard
     >
-      <div className="relative">
-        {/* Rail on the left */}
-        <svg
-          className="absolute left-0 top-[56px]"
-          width={44}
-          style={{
-            pointerEvents: 'none',
-            height: 'calc(100% - 56px)',
-            overflow: 'visible'
-          }}
-          preserveAspectRatio="none"
-        >
-          <line 
-            x1={22} 
-            y1={0} 
-            x2={22} 
-            y2="100%" 
-            stroke="var(--color-flow-track)" 
-            strokeWidth={10} 
-            strokeLinecap="round" 
-          />
-        </svg>
-
+      <div>
         {/* Cards */}
         <div className="flex flex-col gap-2">
           {/* Inverter header card - full width, no battery icon */}
           <div 
-            className="rounded-xl px-3.5 py-2.5 text-center flex items-center justify-center gap-2"
+            className="rounded-xl px-3.5 py-2.5 text-center flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5"
             style={{ 
               background: 'var(--color-flow-inv-bg)',
               border: '1.5px solid var(--color-border)'
             }}
           >
-            <span style={{ color: 'var(--color-flow-inv-title)', fontSize: 13, fontWeight: 700 }}>Inverter</span>
-            <span style={{ color: statusColor, fontSize: 10, fontWeight: 600 }}>● Solis: {inverter.status}</span>
-            <span style={{ color: 'var(--color-flow-inv-sub)', fontSize: 9 }}>Operating: {inverter.operatingStatus}</span>
+            <span style={{ color: 'var(--color-flow-inv-title)', fontSize: 14, fontWeight: 700 }}>Inverter</span>
+            <span style={{ color: statusColor, fontSize: 12, fontWeight: 600 }}>● Solis: {inverter.status}</span>
+            <span style={{ color: 'var(--color-flow-inv-sub)', fontSize: 11 }}>Operating: {inverter.operatingStatus}</span>
           </div>
 
-          {/* Node cards */}
-          {cards.map((card) => (
-            <div key={card.key} className="relative" style={{ height: CARD_H }}>
-              {/* Connector from rail to card */}
-              <svg 
-                className="absolute left-0" 
-                style={{ top: 0, width: '100%', height: CARD_H }}
-              >
-                <RailConnector
-                  y={CARD_H / 2}
-                  active={card.connector.active}
-                  reverse={card.connector.reverse}
-                  color={card.connector.color}
-                />
-              </svg>
+          {/* Node cards with the rail on the left. The rail lives inside this column, so
+              it always starts below the inverter header (keeping the gap-2 spacing) however
+              many lines the header wraps to. */}
+          <div className="relative flex flex-col gap-2">
+            <div
+              aria-hidden="true"
+              className="absolute top-0 bottom-0 rounded-full pointer-events-none"
+              style={{ left: 17, width: 10, background: 'var(--color-flow-track)' }}
+            />
+            {cards.map((card) => (
+              <div key={card.key} className="relative" style={{ height: CARD_H }}>
+                {/* Connector from rail to card */}
+                <svg 
+                  className="absolute left-0" 
+                  style={{ top: 0, width: '100%', height: CARD_H }}
+                >
+                  <RailConnector
+                    y={CARD_H / 2}
+                    active={card.connector.active}
+                    reverse={card.connector.reverse}
+                    color={card.connector.color}
+                  />
+                </svg>
 
-              {/* Card */}
-              <div
-                className="flex items-center justify-between rounded-xl px-3 h-full ml-auto"
-                style={{
-                  background: 'var(--color-card)',
-                  border: `1.5px solid ${card.color}`,
-                  width: '70%',
-                  // the container already dims a stale diagram: dim once (FE-L3)
-                  opacity: card.stale && !stale ? 0.35 : 1,
-                  transition: 'opacity 0.5s ease'
-                }}
-                role="img"
-                aria-label={`${card.name}: ${card.stale ? 'no data' : card.value}${card.sub ? ` (${card.sub})` : ''}`}
-              >
-                <div className="flex items-center gap-3">
-                  <card.Icon size={22} color={card.color} strokeWidth={2.25} aria-hidden="true" />
-                  <div>
-                    <div style={{ 
-                      color: 'var(--color-muted-foreground)', 
-                      fontSize: 11, 
-                      fontWeight: 500 
-                    }}>
-                      {card.name}
-                    </div>
-                    <div style={{ 
-                      color: 'var(--color-foreground)', 
-                      fontSize: 15, 
-                      fontWeight: 700 
-                    }}>
-                      {card.value}
-                    </div>
-                    {card.sub && (
+                {/* Card */}
+                <div
+                  className="flex items-center justify-between rounded-xl px-3 h-full ml-auto"
+                  style={{
+                    background: 'var(--color-card)',
+                    border: `1.5px solid ${card.color}`,
+                    width: '70%',
+                    // the container already dims a stale diagram: dim once (FE-L3)
+                    opacity: card.stale && !stale ? 0.35 : 1,
+                    transition: 'opacity 0.5s ease'
+                  }}
+                  role="img"
+                  aria-label={`${card.name}: ${card.stale ? 'no data' : card.value}${card.sub ? ` (${card.sub})` : ''}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <card.Icon size={22} color={card.color} strokeWidth={2.25} aria-hidden="true" />
+                    <div>
                       <div style={{ 
                         color: 'var(--color-muted-foreground)', 
-                        fontSize: 9 
+                        fontSize: 12, 
+                        fontWeight: 500 
                       }}>
-                        {card.sub}
+                        {card.name}
                       </div>
-                    )}
+                      <div style={{ 
+                        color: 'var(--color-foreground)', 
+                        fontSize: 15, 
+                        fontWeight: 700 
+                      }}>
+                        {card.value}
+                      </div>
+                      {card.sub && (
+                        <div style={{ 
+                          color: 'var(--color-muted-foreground)', 
+                          fontSize: 11 
+                        }}>
+                          {card.sub}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Flow badge */}
-                <FlowBadge color={card.color} active={card.active} />
+                  {/* Flow badge */}
+                  <FlowBadge color={card.color} active={card.active} />
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
       <div className="sr-only" role="note">

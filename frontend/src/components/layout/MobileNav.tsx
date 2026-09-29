@@ -30,18 +30,22 @@ export function MobileNav() {
                 variant="ghost"
                 asChild
                 size="icon"
-                className="h-16 w-16 rounded-full touch-target relative"
+                className="h-16 w-16 flex-col gap-1 rounded-full touch-target relative"
               >
-                <Link to={item.path} aria-current={active ? 'page' : undefined}>
+                <Link
+                  to={item.path}
+                  aria-current={active ? 'page' : undefined}
+                  className={active ? 'text-primary' : 'text-muted-foreground'}
+                >
                   {active && (
                     <div className="absolute -top-5 left-0 w-full h-1 bg-primary rounded-full" />
                   )}
-                  <LineAwesomeIcon 
-                    icon={item.icon} 
-                    size="2xl" 
-                    className={`-mt-[26px] text-3xl ${active ? 'text-primary' : 'text-muted-foreground'}`}
+                  <LineAwesomeIcon
+                    icon={item.icon}
+                    size="2xl"
+                    className="-mt-[20px] text-3xl leading-none"
                   />
-                  <span className="sr-only">{item.label}</span>
+                  <span className="text-[11px] font-medium leading-none">{item.label}</span>
                 </Link>
               </Button>
             );
