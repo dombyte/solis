@@ -126,7 +126,8 @@ example/                 docker-compose (TCP, RTU) and config.yaml templates for
 - Solis inverter-specific register definitions (single table, `Store` enum, `Net` flag)
 - Computed register definitions (daily→monthly/yearly/total maps, net export/import pairs)
 - Read-block planning from addressed registers (`PlanBlocks`)
-- Decoding (`DecodeRegister`, status/fault maps) and derived values (`DeriveValues`, e.g. `battery_power_signed`)
+- Decoding (`Decoder.Decode`/`DecodeBlock`, status/fault maps) and derived values
+  (`Decoder.Derive`, e.g. `battery_power_signed`)
 - everything not Solis specific which is more generic should be in util
 - **Do NOT** contain Modbus client logic (belongs in modbus package)
 
@@ -350,7 +351,7 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
   beats while waiting in backoff. Initial grace after (re)start is 5× the poll interval.
 - **Modbus wiring:** construction never fails on connectivity; the client is published through a
   `util.Slot` so the poller always reads the current client after a restart.
-- **Derived values:** `battery_power_signed` is produced by `solis.DeriveValues` after a full
+- **Derived values:** `battery_power_signed` is produced by `Decoder.Derive` after a full
   poll (it needs two registers).
 - **Read plan:** 3 Modbus reads (grid power at 33130 so it falls inside an existing block),
   pinned by the block-plan golden test.
@@ -360,7 +361,7 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
 - **Process restarts belong to the container runtime:** the app never restarts itself
   in-process (a hung goroutine can only be ended by a process exit).
 - **Grid power sign** (positive = export) and the battery direction values are as verified on
-  the device; if a firmware changes them, flip in `DeriveValues`, not in the UI.
+  the device; if a firmware changes them, flip in `Decoder.Derive`, not in the UI.
 
 ## Naming Conventions
 
@@ -390,53 +391,14 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
 
 ## Build and Test
 
-### Build
 ```bash
-# Build the application
-go build -o server ./cmd
-
-# Run the application (server mode)
-go run ./cmd
-
-# Maintenance mode (v3): runs a job against the DB and exits 0/1; app must be stopped
-go run ./cmd backfill --years 0
-
-# Build with race detector
-go build -race -o server ./cmd
+go run ./cmd                          # server
+go run ./cmd backfill --years 0       # maintenance job (app must be stopped), exits 0/1
+make build                            # binary with version info
+go test -race ./...                   # all tests, as in CI
+go test ./internal/solis -run TestBlockPlanGolden
 ```
-
-### Test
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with coverage
-go test -cover ./...
-
-# Run tests with race detector
-go test -race ./...
-
-# Run specific test
-go test ./internal/solis -run TestDecoder
-
-# Run with verbose output
-go test -v ./...
-```
-
-### Quality Checks
-```bash
-# Format code
-go fmt ./...
-
-# Check for formatting issues
-gofmt -l .
-
-# Run vet for suspicious constructs
-go vet ./...
-
-# Check for dependency vulnerabilities
-go vuln ./...
-```
+Formatting, lint, deadcode and govulncheck: see "Tools" above (`make check`).
 
 ---
 
@@ -465,14 +427,14 @@ Handler functions **must** return `http.Handler` (not `http.HandlerFunc`) for mi
 
 ```go
 // GOOD
-func GetHealthHandler() http.Handler {
+func GetHealthHandler(deps HandlerDeps) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
         // handler logic
     })
 }
 
 // ALSO GOOD (direct return)
-func GetHealthHandler() http.Handler {
+func GetHealthHandler(deps HandlerDeps) http.Handler {
     return http.HandlerFunc(healthHandler)
 }
 
@@ -482,75 +444,33 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 ```
 
 ### Dependency Injection
-Use `HandlerDeps` struct to pass all dependencies to handlers.
+Handlers take `httphandler.HandlerDeps` (`Service` = the handler-declared `ReadService`
+interface, `Errors` = the central `*ErrorMapper`, `Clock`, `Timeout` = `app.timeout` for
+storage reads):
 
 ```go
-type HandlerDeps struct {
-    Config  *config.AppConfig
-    Service *service.Service
-    Logger  *slog.Logger
-}
-
-func NewRegistersHandler(deps HandlerDeps) http.Handler {
+func GetKeysHandler(deps HandlerDeps) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // use deps.Service, deps.Config, deps.Logger
+        WriteJSON(w, http.StatusOK, toKeys(deps.Service.Keys()))
     })
 }
 ```
 
 ### Middleware Pattern
-Implement middleware as functions that return `func(http.Handler) http.Handler`
-
-```go
-func LoggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // before
-            next.ServeHTTP(w, r)
-            // after
-        })
-    }
-}
-```
+Middleware lives in `internal/http/middleware` as `func(http.Handler) http.Handler`, built
+with an injected `zerolog.Logger` where it logs (`Recover(log)`, `Logger(log)`,
+`SecurityHeaders`).
 
 ### Route Management
-Centralize route definitions in `internal/http/router/router.go`
-
-```go
-func SetupRoutes(deps HandlerDeps) *chi.Mux {
-    r := chi.NewRouter()
-    
-    r.Use(middleware.Recoverer)
-    r.Use(middleware.Logger)
-    
-    r.Get("/api/health", handler.GetHealthHandler())
-    r.Route("/api/v1", func(r chi.Router) {
-        r.Get("/registers", handler.GetRegistersHandler(deps))
-    })
-    
-    return r
-}
-```
+All routes are in `internal/http/router/router.go` (`SetupRoutes(Deps)`): `/health`,
+`/api/keys`, `/api/data/{key}`, `/ws`, `/docs/`, and the SPA. No CORS middleware.
 
 ### Error Responses
-Use consistent error response format:
+One JSON shape, documented in `docs/src/openapi.yaml`; errors are mapped to a status by the
+`ErrorMapper` (`errors.Is` over sentinels) and written with `WriteError(w, status, msg)`:
 
-```go
-type ErrorResponse struct {
-    Error   string `json:"error"`
-    Message string `json:"message"`
-    Code    int    `json:"code"`
-}
-
-func WriteError(w http.ResponseWriter, msg string, code int) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(code)
-    json.NewEncoder(w).Encode(ErrorResponse{
-        Error:   http.StatusText(code),
-        Message: msg,
-        Code:    code,
-    })
-}
+```json
+{ "error": "Bad Request", "message": "…", "code": 400 }
 ```
 
 ### Health Endpoint (v3, fail-closed)
@@ -587,137 +507,34 @@ func WriteError(w http.ResponseWriter, msg string, code int) {
 
 ## Service Layer Guidelines
 
-### Service Initialization
-Use constructor pattern with dependency injection:
+`service.NewReadService(service.Deps{Store, Cache, Health, Registry, Decoder, Log})` —
+every dependency is required (`util.RequireAll`). `Store` is `storage.ReadStore`; the rest
+are service-declared interfaces (`CacheReader`, `HealthSnapshotter`, `Registry`,
+`StatusDecoder`). The service never receives a Modbus client, poller or aggregator.
 
-```go
-type ReadService struct {
-    store  ReadStore         // read-only view; history
-    cache  CacheReader       // current values
-    health HealthSnapshotter // /health
-    log    zerolog.Logger
-}
-
-func NewReadService(
-    store ReadStore, ca CacheReader, h HealthSnapshotter, log zerolog.Logger,
-) *ReadService {
-    return &ReadService{store: store, cache: ca, health: h, log: log}
-}
-```
-The service never receives a Modbus client, poller or aggregator (v3).
-
-### Business Logic
-Keep handlers thin, put logic in service layer:
-
-```go
-// In handler
-func GetDataHandler(svc *service.Service) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        data, err := svc.GetAllRegisters(r.Context())
-        if err != nil {
-            WriteError(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
-        json.NewEncoder(w).Encode(data)
-    })
-}
-
-// In service
-func (s *Service) GetAllRegisters(ctx context.Context) (*solis.SolisData, error) {
-    // Business logic here
-    // Call modbus client, apply caching, transform data
-}
-```
+Handlers stay thin: parse the request, call `Service.Data`/`Keys`/`Health`, map errors,
+write JSON. Range parsing, key/level checks and history lookups live in the service.
 
 ---
 
 ## Configuration Guidelines
 
-Use Viper for YAML configuration with environment variable overrides:
+Viper YAML config with `SOLIS_` env overrides (e.g. `SOLIS_MODBUS_ADDRESS`).
+`example/config.yaml` is the commented reference of every key; README has the defaults table.
 
-Env overrides use the `SOLIS_` prefix (e.g. `SOLIS_MODBUS_ADDRESS`). v3 shape (abridged):
-
-```yaml
-# config.yaml
-app:
-  debug: INFO          # DEBUG, INFO, WARN, ERROR, FATAL
-  port: 8080
-  timeout: 30s
-
-poller:
-  interval: 5s         # also drives aggregator debounce (4x), heartbeat (5x), health graces
-  block_attempts: 2
-  block_retry_delay: 1s
-  block_interval: 0s
-  poll_timeout: 5s
-
-modbus:
-  # Address selects the transport via URL scheme: tcp://host:port or rtu://<device path>
-  address: "tcp://192.168.1.100:502"   # or "rtu:///dev/ttyUSB0"
-  timeout: 2s
-  slave_id: 1
-  # speed/data_bits/parity/stop_bits apply to rtu only (defaults: 19200 8N2)
-  speed: 9600
-  data_bits: 8
-  parity: "N"
-  stop_bits: 1
-
-rollover:
-  time: "23:59"        # strict 24h HH:MM; anything else fails startup
-
-storage:
-  path: ./data/solis.db
-  daily_retention: 10y # monthly/yearly rows follow it; only frozen years are ever deleted
-  error_retention: 10y # durations accept d (24h), w (7d), y (365d) on top of s/m/h
-  # WAL, backup and cleanup settings unchanged from v2
-```
-
-- Removed in v3: `app.serve_only`, the whole `aggregator` section (incl.
-  `backfill_current_year_monthly` → use the `backfill` CLI), `storage.monthly_retention`,
-  `storage.yearly_retention` (follow `daily_retention`) and `storage.enable_migrations`
-  (migrations always run).
-- Cross-field rule: `poller.poll_timeout` < 3 × `poller.interval` (health healthy grace).
-- Durations must be strings with a unit (`30s`, `1y`); a bare number is rejected (it would
-  otherwise decode as nanoseconds). `poller.interval` and `app.timeout` are at least 1 s,
-  `modbus.slave_id` is 1–247, block delays are ≥ 0.
+- Removed in v3 (ignored with a warning): `app.serve_only`, the whole `aggregator` section
+  (use the `backfill` CLI), `storage.monthly_retention`, `storage.yearly_retention` (follow
+  `daily_retention`) and `storage.enable_migrations` (migrations always run).
+- Cross-field rule: `poller.poll_timeout + modbus.timeout` < 3 × `poller.interval` (health
+  healthy grace; a read in flight can overrun `poll_timeout` by up to `modbus.timeout`).
+- Durations must be strings with a unit (`30s`, `1y`; `d`, `w`, `y` added on top of Go
+  units); a bare number is rejected (it would otherwise decode as nanoseconds).
+  `poller.interval` and `app.timeout` are at least 1 s, `modbus.slave_id` is 1–247, block
+  delays are ≥ 0.
 - Every config key has a default in `setDefaults` (zero values included) — viper only
   applies `SOLIS_*` overrides to keys it knows; `TestSetDefaults_CoversEveryKey` enforces it.
 - Timezone comes from the `TZ` env var (`time.Local`), never from config. Pin `TZ` in
   docker-compose; the image ships zoneinfo.
-
-```go
-// In config/models.go
-type AppConfig struct {
-    Debug bool   `mapstructure:"debug"`
-}
-
-type ModbusConfig struct {
-    Host    string `mapstructure:"host"`
-    Port    int    `mapstructure:"port"`
-    Timeout string `mapstructure:"timeout"`
-    UnitID  byte   `mapstructure:"unit_id"`
-}
-
-// In config/config.go
-func LoadConfig(path string) (*AppConfig, error) {
-    viper.SetConfigFile(path)
-    viper.AutomaticEnv()
-    viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-    
-    if err := viper.ReadInConfig(); err != nil {
-        return nil, fmt.Errorf("failed to read config: %w", err)
-    }
-    
-    var config AppConfig
-    if err := viper.Unmarshal(&config); err != nil {
-        return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-    }
-    
-    return &config, nil
-}
-```
-
-
 
 ---
 
@@ -744,44 +561,20 @@ func LoadConfig(path string) (*AppConfig, error) {
 - Storage tests must cover closed-period rejection and write-domain guards.
 
 ### HTTP Tests
+Drive handlers with `httptest` and a mockery `ReadService` mock:
+
 ```go
-func TestHealthHandler(t *testing.T) {
-    handler := handler.GetHealthHandler()
-    
-    req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
-    w := httptest.NewRecorder()
-    
-    handler.ServeHTTP(w, req)
-    
-    if w.Code != http.StatusOK {
-        t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
-    }
-}
+svc := mocks.NewMockReadService(t)
+svc.EXPECT().Health().Return(health.Snapshot{Status: health.StatusOK})
+rec := httptest.NewRecorder()
+GetHealthHandler(HandlerDeps{Service: svc}).
+    ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+require.Equal(t, http.StatusOK, rec.Code)
 ```
 
 ### Mocking Dependencies
-Use mockery-generated mocks (`.mockery.yaml`, output in `internal/<pkg>/mocks/`) with testify for
-all interfaces. The hand-written example below shows the shape only:
-```go
-type MockModbusClient struct {
-    readRegisterFunc func(address uint16, count uint16) ([]byte, error)
-}
-
-func (m *MockModbusClient) ReadRegisters(address, count uint16) ([]byte, error) {
-    return m.readRegisterFunc(address, count)
-}
-
-func TestService_ReadRegister(t *testing.T) {
-    mockClient := &MockModbusClient{
-        readRegisterFunc: func(address, count uint16) ([]byte, error) {
-            return []byte{0x00, 0x01}, nil
-        },
-    }
-    
-    svc := service.NewService(mockClient, nil, nil, nil)
-    // test service methods
-}
-```
+Use mockery-generated mocks (`.mockery.yaml`, output in `internal/<pkg>/mocks/`) with testify
+for all interfaces; never hand-write or hand-edit mocks. CI fails on mock drift.
 
 ---
 
@@ -803,7 +596,7 @@ func TestService_ReadRegister(t *testing.T) {
 
 ### Dependencies
 - Keep dependencies updated (`go mod tidy`, `go get -u`)
-- Regularly check for vulnerabilities (`go vuln ./...`)
+- Check for vulnerabilities with govulncheck (part of `make check` and CI)
 - Prefer well-maintained, popular libraries
 
 
@@ -812,29 +605,31 @@ func TestService_ReadRegister(t *testing.T) {
 ## Register Development Guidelines
 
 ### Adding New Registers
-All registers live in one table in `internal/solis/registers.go` (v3 model):
+All registers are built in `internal/solis/table.go` (v3 model); `Register` fields:
 
 ```go
-{
+solis.Register{
     Key:      "grid_power",
     Name:     "Grid Power",
-    Address:  33130,          // 0 = computed/derived, never part of the poll plan
-    DataType: solis.Int32,    // register count is derived from the type
+    Address:  33130,           // 0 = computed/derived, never part of the poll plan
+    DataType: solis.Int32,     // register count is derived from the type
     Scale:    1,
     Unit:     "W",
     Store:    solis.StoreNone, // none | daily | monthly | yearly | total | status
-},
+}
 ```
 
 - `Store` decides the destination: `none` = cache only (live values), `status` = `error_data`
   on change, `daily/monthly/yearly/total` = the matching table. `Net: true` marks export−import
   registers (latest-value rule); net registers are always computed.
-- Computed registers (monthly/yearly/total/net) have **no address**; add their edge to the
-  daily→monthly/yearly/total maps or the net pair list instead.
-- Derived live values (e.g. `battery_power_signed`) have no address and are produced in
-  `solis.DeriveValues` after a full poll is decoded.
-- `solis.Validate()` must pass (unique keys/addresses, valid `Store`, map edges consistent);
-  the block-plan golden test must be updated when addresses change.
+- The eight energy series are listed once in `energyKinds()`; each gets its daily (polled)
+  register plus computed monthly/yearly/total registers and the daily→level edges.
+- Computed registers (monthly/yearly/total/net) have **no address**; add their edge or net
+  pair instead.
+- Derived live values (e.g. `battery_power_signed`) have no address and are produced by
+  `Decoder.Derive` after a full poll is decoded.
+- `solis.NewRegistry()` validates the table (unique keys/addresses, valid `Store`, edges
+  consistent) and fails startup otherwise; update `TestBlockPlanGolden` when addresses change.
 - Do not add `Stability` or new `IsXxxRegister` lists — switch on `reg.Store`.
 
 ### Read Planning
@@ -844,12 +639,12 @@ existing block over adding a new round-trip (e.g. `grid_power` at 33130 instead 
 
 ### Decoding
 ```go
-value := solis.DecodeRegister(reg, raw) // raw []uint16 for exactly this register
-values := solis.DecodeRange(startAddr, blockRaw)
-solis.DeriveValues(values, pollStart)
+d := solis.NewDecoder(registry, log)
+value := d.Decode(reg, raw, pollStart)          // raw []uint16 for exactly this register
+values := d.DecodeBlock(block, blockRaw, pollStart)
+d.Derive(values, pollStart)
 ```
-Decoded values are full precision; rounding to 2 decimals happens only in JSON serialization
-(v3 change: the v2 `RoundTo2DecimalPlaces` call inside `DecodeRegister` is removed).
+Decoded values are full precision; rounding to 2 decimals happens only in JSON serialization.
 
 ---
 
@@ -913,204 +708,16 @@ When refactoring existing code:
 
 ---
 
-## Performance Pitfalls and Lessons Learned
+## Lessons Learned (v2 → v3)
 
-### 1. Shared Modbus Connection Blocking HTTP Requests
-
-**Problem:**
-After integrating SQLite storage and background polling, direct HTTP reads (`?direct=true`) became ~2x slower (600-700ms → 1.5s). The poller and HTTP handlers shared the same Modbus client connection. Since the Solis inverter is sequential-only, when the poller was reading registers, HTTP requests had to wait for the poller to finish before their Modbus reads could execute.
-
-**Root Cause:**
-The simonvetter/modbus library serializes requests at the TCP level. With a single shared connection, all requests (poller + HTTP) are queued through the same pipe. If the poller is reading 33 registers (grouped into ranges) taking ~800ms, an HTTP request arriving during that time must wait.
-
-**Solution:**
-Create **separate Modbus clients** for the poller and HTTP service in `cmd/main.go`. This allows both to queue requests independently at the device level:
-AND NEVER IMPLEMENT DIRECT AGAIN
-```go
-// Create separate modbus client for the poller
-pollerClient, err := createClient(cfg)
-if err != nil {
-    log.Fatalf("Failed to create poller modbus client: %v", err)
-}
-defer pollerClient.Close()
-
-// Create poller with its own client
-pl = poller.NewPoller(pollerClient, st, scheduler, nil)
-
-// HTTP service uses the original client
-readService := service.NewReadService(cfg, client, st, pl)
-```
-
-**Lesson:** When dealing with sequential-only devices, separate connections prevent one subsystem from blocking another, even though the device itself processes requests sequentially.
-
-**v3 note:** The HTTP layer no longer has a Modbus client at all (no direct reads, no `PollNow`);
-the poller is the only Modbus user, so there is exactly one connection and nothing to block on.
-Lessons #1 and #4 are kept as history — the "never implement direct again" rule still applies.
-
----
-
-### 2. Unnecessary Mutex Overhead in Modbus Wrapper
-
-**Problem:**
-The modbus wrapper (`internal/modbus/tcp.go`) used `sync.RWMutex` with `RLock/RUnlock` on every read operation, adding ~1-2μs of lock overhead per register read.
-
-**Root Cause:**
-Over-cautious synchronization. The simonvetter/modbus library already handles its own concurrency control at the TCP level (as documented in old commit messages: "simonvetter/modbus handles connection serialization at the TCP level").
-
-**Solution:**
-Remove the mutex for normal read operations. Keep mutex only for reconnection logic which modifies handler state (`c.handler`, `c.isConnected`):
-
-```go
-// Read path - no mutex needed
-rawBytes, err := c.client.ReadInputRegisters(ctx, addr, count)
-
-// Reconnect path - mutex needed
-if err != nil {
-    c.mu.Lock()
-    if reconnectErr := c.reconnect(ctx); reconnectErr != nil {
-        c.mu.Unlock()
-        return nil, fmt.Errorf("modbus read failed: %w", err)
-    }
-    c.mu.Unlock()
-    // Retry outside mutex
-    rawBytes, err = c.client.ReadInputRegisters(ctx, addr, count)
-}
-```
-
-**Lesson:** Don't add synchronization on top of libraries that already handle it. Profile before adding locks.
-
----
-
-### 3. Redundant Context Creation
-
-**Problem:**
-Both the modbus wrapper and solis reader created new contexts with timeouts for every register read, adding ~50-100ns of allocation overhead per call.
-
-**Root Cause:**
-The grid-x handler already has a configured `Timeout` (set in `NewTCP`), so creating a new context per-call was redundant. The handler-level timeout applies to all operations on that handler.
-
-**Solution:**
-Use `context.Background()` instead of `context.WithTimeout` for normal reads. The handler's timeout still applies:
-
-```go
-// In modbus wrapper
-ctx := context.Background()
-rawBytes, err := c.client.ReadInputRegisters(ctx, addr, count)
-
-// In solis reader
-ctx := context.Background()
-rawBytes, err := client.ReadInputRegisters(ctx, reg.Address, reg.Count)
-```
-
-**Lesson:** When a library already has timeout configuration, don't duplicate it at the caller level unless you need per-call override capability.
-
----
-
-### 4. `?direct=true` Flag Not Respected for All Registers
-
-**Problem:**
-`GET /api/registers?direct=true` (without `?keys=`) was ignoring the `direct=true` flag and always reading from storage with fallback to individual direct reads instead of batched reads.
-
-**Root Cause:**
-`GetAllValues()` hardcoded `forceDirect=false`:
-```go
-func (s *ReadService) GetAllValues() (map[string]*solis.Value, error) {
-    return s.GetValues(s.GetKeys(), false)  // <-- hardcoded false
-}
-```
-
-**Solution:**
-Pass the `forceDirect` parameter through:
-```go
-// In service.go
-func (s *ReadService) GetAllValues(forceDirect bool) (map[string]*solis.Value, error) {
-    return s.GetValues(s.GetKeys(), forceDirect)
-}
-
-// In handler.go
-values, err := h.readService.GetAllValues(forceDirect)
-```
-
-**Lesson:** When adding new parameters to handle special cases (like `forceDirect`), ensure all code paths that call the function are updated to pass the parameter through.
-
----
-
-### 5. Byte-to-Uint16 Conversion Overhead
-
-**Problem:**
-Switching from `github.com/grid-x/modbus` to `github.com/simonvetter/modbus` introduced byte-to-uint16 conversion overhead. The old library returned `[]uint16` directly; the new one returns `[]byte`.
-
-**Root Cause:**
-Library API change. The simonvetter library was chosen for better maintenance, but its API returns raw bytes requiring manual conversion:
-```go
-results := make([]uint16, len(rawBytes)/2)
-for i := 0; i < len(results); i++ {
-    results[i] = uint16(rawBytes[i*2])<<8 | uint16(rawBytes[i*2+1])
-}
-```
-
-**Solution:**
-This overhead is unavoidable (~10-20ns per read) but minimal compared to network latency. Accept as a tradeoff for using a maintained library.
-
-**Lesson:** Library migrations may introduce small performance regressions. Ensure the benefits (maintenance, features, bug fixes) outweigh the costs.
-
----
-
-### 6. Inefficient GetValues Fetching All Registers
-
-**Problem:**
-API endpoint `/api/v1/data/{key}` (without query params) was ~14x slower than `?interval=raw` for the same key. Both should return similar data (latest value vs all history), but no-params was much slower.
-
-**Root Cause:**
-`Service.GetValues([]string{key})` → `getAllFromStorage()` → `Storage.GetLatestDynamicValues()` which ran:
-```sql
-SELECT register_key, raw_value, decoded_value, unit, timestamp 
-FROM raw_data 
-WHERE register_key IN (all_dynamic_registers)
-ORDER BY timestamp DESC
-```
-This fetched **ALL historical rows** for **ALL dynamic registers** (millions of rows), then Go filtered to keep only the latest per register. For a single key request, this was wasteful.
-
-**Solution:**
-Added targeted storage methods:
-- `Storage.GetLatestValues(keys []string)` - fetches only latest row per requested key using subquery
-- `Storage.GetStableValues(keys []string)` - fetches only requested stable registers
-
-Updated `Service.GetValues()` to:
-1. Separate requested keys by stability (stable vs dynamic)
-2. Call the appropriate storage method for each group
-3. Merge results
-
-New query for dynamic registers:
-```sql
-SELECT rd.register_key, rd.raw_value, rd.decoded_value, rd.unit, rd.timestamp
-FROM raw_data rd
-INNER JOIN (
-    SELECT register_key, MAX(timestamp) as max_timestamp
-    FROM raw_data
-    WHERE register_key IN (requested_keys)
-    GROUP BY register_key
-) latest ON rd.register_key = latest.register_key AND rd.timestamp = latest.max_timestamp
-ORDER BY rd.register_key
-```
-
-**Performance Impact:**
-- Before: Fetched ALL rows for ALL N dynamic registers
-- After: Fetched only latest row for requested keys
-- Improvement: ~N× faster (14× with 14 dynamic registers)
-
-**Lesson:** Always fetch only the data you need. Filtering in Go after a broad database query is a common anti-pattern that causes performance issues at scale.
-
----
-
-
-### Baseline Performance Expectations
-
-| Operation | Expected Latency | Notes |
-|-----------|-----------------|-------|
-| Direct single register read | 600-700ms | Device-dependent, no blocking |
-| Batched register read (n registers) | 600-700ms + (n-1)*~50ms | Grouped by contiguous addresses |
-| Storage read (cached) | <1ms | SQLite query |
-| HTTP overhead | ~100-200μs | JSON encoding, routing |
-
----
+1. **No direct Modbus reads from HTTP — never implement `?direct=true` again.** In v2 the
+   HTTP path shared (then duplicated) the Modbus connection; the sequential-only inverter
+   made HTTP reads wait behind the poller (600–700 ms → 1.5 s), and `?direct=true` was not
+   passed through every code path. v3: the poller is the only Modbus user (one connection);
+   HTTP reads cache and SQLite only.
+2. **Don't add locks on top of the Modbus library.** simonvetter/modbus serializes requests
+   itself; lock only state you own (e.g. the reconnect path).
+3. **Fetch only the data you need.** v2 fetched all history rows and filtered in Go (~14×
+   slower for one key). Query per requested key with SQL bounds; period sums run in SQL.
+4. **Library migrations cost a little.** simonvetter returns `[]byte`, so words are
+   converted by hand (~10–20 ns per read) — negligible next to network latency.

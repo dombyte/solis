@@ -20,7 +20,7 @@ poller:
   block_retry_delay: 1s
   # Delay between successive block reads (0 = immediate)
   block_interval: 0s
-  # Maximum duration of a full poll cycle; must be < 3 x interval
+  # Maximum duration of a full poll cycle; poll_timeout + modbus.timeout must be < 3 x interval
   poll_timeout: 5s
 
 modbus:
