@@ -20,8 +20,8 @@ export function MobileNav() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 glassy-nav-mobile z-50 safe-area-inset-bottom w-full">
-      <div className="flex justify-around items-center pt-5 pb-0 px-2 w-full">
+    <nav className="mobile-nav fixed bottom-0 left-0 right-0 glassy-nav-mobile z-50 w-full">
+      <div className="flex justify-around items-start pt-2 px-2 w-full">
           {navItems.map((item) => {
             const active = isActive(item.path);
             return (
@@ -30,7 +30,7 @@ export function MobileNav() {
                 variant="ghost"
                 asChild
                 size="icon"
-                className="h-16 w-16 flex-col gap-1 rounded-full touch-target relative"
+                className="h-16 w-16 flex-col justify-start gap-1.5 pt-2 rounded-xl touch-target relative"
               >
                 <Link
                   to={item.path}
@@ -38,12 +38,12 @@ export function MobileNav() {
                   className={active ? 'text-primary' : 'text-muted-foreground'}
                 >
                   {active && (
-                    <div className="absolute -top-5 left-0 w-full h-1 bg-primary rounded-full" />
+                    <div className="absolute -top-2 left-2 right-2 h-1 bg-primary rounded-full" />
                   )}
                   <LineAwesomeIcon
                     icon={item.icon}
                     size="2xl"
-                    className="-mt-[20px] text-3xl leading-none"
+                    className="text-3xl leading-none"
                   />
                   <span className="text-[11px] font-medium leading-none">{item.label}</span>
                 </Link>

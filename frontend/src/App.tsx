@@ -19,7 +19,7 @@ export function App() {
 
   return (
         <BrowserRouter>
-          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'pb-24' : 'pb-0'}`}>
+          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'mobile-nav-spacer' : 'pb-0'}`}>
             {!isMobile && <DesktopNav />}
             <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
               {isMobile && <MobileHeader />}
