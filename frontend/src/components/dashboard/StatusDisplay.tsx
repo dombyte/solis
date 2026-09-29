@@ -1,8 +1,8 @@
 import React from 'react';
-import { AlertTriangle, Info } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { Badge } from '../ui/badge';
-import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
+import { InfoPopover } from '../ui/info-popover';
 
 import { formatVoltage, formatCurrent, formatPower, formatEnergy, formatPercentage, formatValue } from '../../lib/utils/format';
 import { isAlertStatus } from '../../lib/utils/status';
@@ -111,22 +111,9 @@ export function StatusDisplay({
         <AlertTriangle className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
       )}
       {showTooltip && register.description && (
-        <div className="flex-shrink-0">
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
-                aria-label={`Info about ${register.name}`}
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
-              <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
-            </PopoverContent>
-          </Popover>
-        </div>
+        <InfoPopover label={register.name}>
+          <p>{register.description}</p>
+        </InfoPopover>
       )}
     </div>
   );

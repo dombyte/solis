@@ -4,8 +4,7 @@ import { Label } from '../ui/label';
 
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { historyDataGroups } from '../../lib/config/groups';
-import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
-import { Info } from 'lucide-react';
+import { InfoPopover } from '../ui/info-popover';
 import type { Period } from '../../types';
 
 interface RegisterSelectorProps {
@@ -47,6 +46,9 @@ export function RegisterSelector({
           const isSelected = selectedIds.includes(id);
           
           if (!register) return null;
+          const name = resolvedRegister?.name || register.name;
+          const description = resolvedRegister?.description || register.description;
+          const unit = resolvedRegister?.unit || register.unit;
           
           return (
             <div 
@@ -59,40 +61,21 @@ export function RegisterSelector({
                 onCheckedChange={() => onToggle(id)}
                 className="h-5 w-5"
               />
-              <Label htmlFor={`register-${id}`} className="flex-1 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{resolvedRegister?.name || register.name}</span>
-                  {showTooltips && (resolvedRegister?.description || register.description) && (
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <button
-                          type="button"
-                          className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
-                          aria-label={`Info about ${resolvedRegister?.name || register.name}`}
-                        >
-                          <Info className="h-3.5 w-3.5" />
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-72 max-w-[300px]" align="start" sideOffset={8}>
-                        <div className="whitespace-normal break-words">
-                          <p className="text-sm font-medium">{resolvedRegister?.name || register.name}</p>
-                          <p className="text-sm">{resolvedRegister?.description || register.description}</p>
-                          {(resolvedRegister?.unit || register.unit) && (
-                            <p className="text-xs text-muted-foreground">
-                              Unit: {resolvedRegister?.unit || register.unit}
-                            </p>
-                          )}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  )}
-                </div>
-                {resolvedRegister?.unit || register.unit ? (
-                  <span className="text-xs text-muted-foreground mt-1 block">
-                    {resolvedRegister?.unit || register.unit}
-                  </span>
-                ) : null}
-              </Label>
+              <div className="flex flex-1 items-start gap-2">
+                <Label htmlFor={`register-${id}`} className="min-w-0 text-sm">
+                  <span className="font-medium">{name}</span>
+                  {unit ? (
+                    <span className="text-xs text-muted-foreground mt-1 block">{unit}</span>
+                  ) : null}
+                </Label>
+                {showTooltips && description && (
+                  <InfoPopover label={name} align="start">
+                    <p className="font-medium">{name}</p>
+                    <p>{description}</p>
+                    {unit && <p className="text-xs text-muted-foreground">Unit: {unit}</p>}
+                  </InfoPopover>
+                )}
+              </div>
             </div>
           );
         })}
