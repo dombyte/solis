@@ -395,6 +395,8 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
 go run ./cmd                          # server
 go run ./cmd backfill --years 0       # maintenance job (app must be stopped), exits 0/1
 make build                            # binary with version info
+make assets                           # frontend/dist + docs/dist (make frontend / make docs);
+                                      # goreleaser runs the same targets in its before hooks
 go test -race ./...                   # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
 ```

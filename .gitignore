@@ -46,3 +46,6 @@ ref/
 
 # Local deployment files (templates live in example/)
 /docker-compose.yaml
+
+# goreleaser output
+/dist/

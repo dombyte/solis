@@ -1,20 +1,9 @@
-FROM node:26-alpine AS frontend
-WORKDIR /frontend
-ARG VITE_GIT_COMMIT_HASH
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ .
-RUN npm run build
-
-FROM node:26-alpine AS docs
-WORKDIR /docs
-COPY docs/package.json docs/package-lock.json ./
-RUN npm ci
-COPY docs/ .
-RUN npm run build
-
-FROM alpine:latest AS builder
-RUN apk --update add ca-certificates tzdata
+# Built by goreleaser: the binary, frontend/dist and docs/dist are prebuilt
+# (see before.hooks in .goreleaser.yaml) and copied into the build context.
+# ca-certificates and zoneinfo are arch-independent: this stage runs natively on the
+# build host, so no step here needs QEMU (release.yml still sets it up, as goreleaser requires).
+FROM --platform=$BUILDPLATFORM alpine:3.24.2 AS builder
+RUN apk --no-cache add ca-certificates tzdata
 
 FROM scratch
 WORKDIR /app
@@ -23,8 +12,8 @@ COPY --from=ghcr.io/tarampampam/microcheck:1 /bin/httpcheck /bin/httpcheck
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY $TARGETPLATFORM/solis /app
-COPY --from=frontend /frontend/dist /app/frontend/dist
-COPY --from=docs /docs/dist /app/docs/dist
+COPY frontend/dist /app/frontend/dist
+COPY docs/dist /app/docs/dist
 
 EXPOSE 8080
 ENTRYPOINT ["/app/solis"]
