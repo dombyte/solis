@@ -7,6 +7,14 @@ import type { ChartData } from '../../types';
 // Register all Chart.js components
 Chart.register(...registerables);
 
+// Pinned y-axis label font and spacing (px); shared by the axis chart and the
+// measurement that sizes its column.
+const Y_AXIS_FONT_SIZE = 10;
+const Y_AXIS_FONT_FAMILY = 'Inter Variable, sans-serif';
+const Y_AXIS_PADDING = 4;
+// Extra room so glyph rounding and canvas scaling never shave off the last digit.
+const Y_AXIS_SLACK = 6;
+
 interface HistoryChartProps {
   data: ChartData | null;
   className?: string;
@@ -310,6 +318,22 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     const tickValues = mainYScale.ticks.map(t => t.value);
     const xAxisHeight = mainXScale.height;
 
+    // Size the pinned column from the real tick labels (measured in the axis font), not
+    // an estimate from the data: decimals ("0.5"), minus signs and thousands separators
+    // otherwise got clipped. Set on the DOM here, before the axis chart is created, so it
+    // is right on the first draw; then let the main chart pick up its narrower width.
+    yAxisCtx.font = `${Y_AXIS_FONT_SIZE}px ${Y_AXIS_FONT_FAMILY}`;
+    const labelWidth = Math.max(0, ...mainYScale.ticks.map(t => {
+      const label = Array.isArray(t.label) ? t.label.join(' ') : String(t.label ?? t.value);
+      return yAxisCtx.measureText(label).width;
+    }));
+    const yAxisWidth = Math.ceil(labelWidth) + Y_AXIS_PADDING + Y_AXIS_SLACK;
+    const yAxisContainer = yAxisRef.current.parentElement;
+    if (yAxisContainer) {
+      yAxisContainer.style.width = `${yAxisWidth}px`;
+      chartInstanceRef.current.resize();
+    }
+
     yAxisInstanceRef.current = new Chart(yAxisCtx, {
       type: 'bar',
       data: { labels: [''], datasets: [] },
@@ -342,18 +366,20 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             afterBuildTicks: (scale) => {
               scale.ticks = tickValues.map(value => ({ value }));
             },
+            // Take the whole column: Chart.js otherwise caps a vertical axis at half
+            // the canvas width, which cut labels off in this narrow canvas. Labels
+            // stay right-aligned (default crossAlign), i.e. next to the bars.
+            afterFit: (scale) => {
+              scale.width = yAxisWidth;
+            },
             grid: { display: false },
             ticks: {
               font: {
-                size: 10,
-                family: 'Inter Variable, sans-serif'
+                size: Y_AXIS_FONT_SIZE,
+                family: Y_AXIS_FONT_FAMILY
               },
               color: mutedForeground,
-              // Pull labels toward the right edge of this narrow pinned column (i.e.
-              // toward the chart) instead of Chart.js's default of hugging the left
-              // edge, which otherwise leaves a wide gap before the bars start.
-              crossAlign: 'far',
-              padding: 4,
+              padding: Y_AXIS_PADDING,
             },
             border: {
               display: false
@@ -393,17 +419,6 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const pointWidth = Math.min(160, Math.max(60, 40 + datasetCount * 14));
   const minWidth = Math.min(dataPointCount * pointWidth, 4000);
 
-  // Estimate the pinned y-axis column's width straight from the raw data rather than
-  // from Chart.js's own computed scale: reading that back out only after the chart
-  // renders means the column is sized one render late (and briefly wrong/clipped)
-  // every time the value range changes. Chart.js rounds its axis max up to a "nice"
-  // number, so pad the raw max by ~15% to estimate that headroom for sizing purposes.
-  const allValues = data.datasets.flatMap(ds => ds.data).filter((v): v is number => v !== null && v !== undefined);
-  const maxAbsValue = allValues.length > 0 ? Math.max(...allValues.map(v => Math.abs(v))) : 0;
-  const estimatedTickMax = Math.ceil(maxAbsValue * 1.15);
-  const maxLabelLength = estimatedTickMax.toLocaleString().length;
-  const yAxisWidth = Math.max(24, maxLabelLength * 10 + 8);
-
   // Function to get color for a dataset by index
   const getColorForDataset = (datasetIndex: number): string => {
     const index = datasetIndex % 9; // We have 9 chart colors defined
@@ -431,7 +446,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     <div className={`relative w-full ${className}`}>
       <div className="flex w-full" style={{ minHeight: '200px', maxHeight: '500px' }}>
         {/* Pinned y-axis - lives outside the scroll container so it never scrolls */}
-        <div className="flex-shrink-0" style={{ width: `${yAxisWidth}px`, height: '400px' }}>
+        {/* Width is set from the measured tick labels in the chart effect. */}
+        <div className="flex-shrink-0 w-6" style={{ height: '400px' }}>
           <canvas ref={yAxisRef} aria-hidden="true" />
         </div>
         <div
