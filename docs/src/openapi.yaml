@@ -9,7 +9,7 @@ info:
     **API Base URL:** The API is served from the root of the application. All API endpoints are under `/api/`.
     
     **Documentation URL:** API documentation (Swagger UI) is available at `/docs/`.
-  version: 2.0.0
+  version: 3.0.0
   contact:
     name: API Support
 
@@ -32,26 +32,63 @@ paths:
       tags:
         - Health
       summary: Health check
-      description: Returns the current health status of the service, modbus connection, and database
+      description: |
+        Returns the supervisor's snapshot of every restartable/watched component
+        (modbus, poller, aggregator, websocket hub, storage, event bus, HTTP server).
+        This endpoint never blocks on a component - it only reads the last published
+        snapshot, and fails closed. A restartable component's first failure is `degraded`
+        (200) while the supervisor restarts it; **503** once a restart of it failed (the
+        restarted instance failed or went silent again - it stays 503 until an instance
+        kept beating for the healthy grace), when its restart budget is exhausted, when a
+        non-restartable part failed, or when the snapshot is stale (supervisor stalled).
+        When the budget is exhausted the process exits 1 and the container runtime
+        restarts it.
       operationId: getHealth
       responses:
         '200':
-          description: Service is healthy
+          description: All components are healthy (ok), or a component is recovering, failed for the first time or restarted and not yet proven healthy (degraded)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
               example:
-                status: "ok"
+                status: "degraded"
                 timestamp: "2026-08-03T10:00:00Z"
-                modbus: "connected"
+                components:
+                  modbus:
+                    state: "recovering"
+                    last_beat: "2026-08-03T09:59:58Z"
+                    restarts: 0
+                    restartable: true
+                  poller:
+                    state: "healthy"
+                    last_beat: "2026-08-03T10:00:00Z"
+                    restarts: 0
+                    restartable: true
+        '503':
+          description: A restart of a component failed or its restart budget is exhausted, a non-restartable part (storage, event bus, HTTP server) failed, or the supervisor snapshot is stale
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: "failed"
+                component: "modbus"
+                reason: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
+                timestamp: "2026-08-03T10:00:00Z"
+                components:
+                  modbus:
+                    state: "failed"
+                    reason: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
+                    restarts: 3
+                    restartable: true
 
   /api/keys:
     get:
       tags:
         - Registers
       summary: List all register keys
-      description: Returns metadata for all enabled registers including their address, data type, unit, count, and stability classification
+      description: Returns metadata for every register, including its `store` destination and (when polled) its Modbus address.
       operationId: getKeys
       responses:
         '200':
@@ -66,27 +103,23 @@ paths:
                 - key: "pv_energy_daily"
                   name: "PV Energy Daily"
                   address: 33035
-                  count: 1
                   data_type: "Uint16"
                   unit: "kWh"
-                  stability: "dynamic"
-                  description: "PV Energy Daily (kWh)"
+                  store: "daily"
+                  description: "PV Energy Daily (kWh) - Use with start/end query parameters for historical data"
                 - key: "pv_energy_total"
                   name: "PV Energy Total"
-                  address: 33029
-                  count: 2
                   data_type: "Uint32"
                   unit: "kWh"
-                  stability: "dynamic"
+                  store: "total"
                   description: "PV Energy Total (kWh)"
                 - key: "solis_status"
                   name: "Solis Status"
                   address: 33095
-                  count: 1
                   data_type: "Uint16"
                   unit: ""
-                  stability: "dynamic"
-                  description: "Solis Status"
+                  store: "status"
+                  description: "Solis Status ()"
 
   /api/data/{key}:
     get:
@@ -94,22 +127,25 @@ paths:
         - Registers
       summary: Get register data
       description: |
-        Returns data for a specific register key.
+        Returns data for a specific register key. Behavior depends on the register's `store`
+        (see `/api/keys`), not on its data type:
 
-        **Behavior varies by register key type (not the stability field):**
-        - **Dynamic/Stable registers** (e.g., most energy registers): Returns latest cached value (no query params)
-        - **Daily registers** (keys ending in _daily): Returns historical daily data if `start` and `end` params provided, otherwise returns latest value
-        - **Monthly registers** (keys ending in _monthly): Returns historical monthly data if `start` and `end` params provided, otherwise returns latest value
-        - **Yearly registers** (keys ending in _yearly): Returns historical yearly data if `start` and `end` params provided, otherwise returns latest value
-        - **Total registers** (keys ending in _total): Always returns lifetime/total value (ignores query params)
-        - **Status registers** (e.g., solis_status, grid_fault_1): Returns all historical status entries with decoded information
+        - **`none` registers** (live cache-only values, e.g. `pv_total_power`): latest cached value (no query params)
+        - **`daily` registers**: historical daily data if `start`/`end` are given, otherwise the latest value
+        - **`monthly` registers**: historical monthly data if `start`/`end` are given, otherwise the latest value
+        - **`yearly` registers**: historical yearly data if `start`/`end` are given, otherwise the latest value
+        - **`total` registers**: always the lifetime/total value; `start`/`end` are rejected with 400
+        - **`status` registers** (e.g. `solis_status`, `grid_fault_1`): all historical status entries with decoded information; `start`/`end` are rejected with 400
+        - `none` registers also reject `start`/`end` with 400 (no history is stored)
+
+        Values are stored at full precision; the JSON response rounds `value`/`raw_value` to two
+        decimal places. There is no `?direct=true` mode - only the poller ever talks to the
+        inverter, so `/api/data` always reads from the cache or SQLite.
 
         **Time range formats:**
         - Date: `YYYY-MM-DD` (e.g., `2026-08-01`)
         - Month: `YYYY-MM` (e.g., `2026-08`)
         - Year: `YYYY` (e.g., `2026`)
-        
-        **Note:** The `stability` field in the register metadata is either "stable" or "dynamic" and is separate from the functional key type classification.
       operationId: getData
       parameters:
         - name: key
@@ -169,15 +205,15 @@ paths:
                     key: "solis_status"
                     name: "Solis Status"
                     history:
-                      - timestamp: "2026-08-04T09:21:55+02:00"
+                      - timestamp: "2026-08-04T07:21:55.000Z"
                         status_decoded:
                           name: "Generating"
                           description: "Initializing / Generating"
-                      - timestamp: "2026-07-31T11:27:45.783344473+02:00"
+                      - timestamp: "2026-07-31T09:27:45.783Z"
                         status_decoded:
                           name: "Generating"
                           description: "Initializing / Generating"
-                      - timestamp: "2026-07-31T11:27:35.182599087+02:00"
+                      - timestamp: "2026-07-31T09:27:35.182Z"
                         status_decoded:
                           name: "StandbySynch"
                           description: "Standby synchronize"
@@ -221,9 +257,42 @@ paths:
                     raw_value: 152805
                     timestamp: "2026-08-04T09:19:19+02:00"
         '400':
-          $ref: '#/components/responses/BadRequest'
+          description: |
+            Invalid request: a malformed `start`/`end`, `start` after `end`, or a range on a
+            register without history (`none`, `total`, `status`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                no_history:
+                  value:
+                    error: "Bad Request"
+                    message: "unsupported for register: pv_energy_total (historical queries (start/end) are only supported for daily, monthly and yearly registers)"
+                    code: 400
+                bad_range:
+                  value:
+                    error: "Bad Request"
+                    message: "invalid time range: start 2026-09-10 is after end 2026-09-01"
+                    code: 400
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: Unknown register key, or a known key without a value yet (e.g. before the first poll)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Storage failure (details are logged, never returned)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The storage read exceeded `app.timeout`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /ws:
     get:
@@ -231,20 +300,44 @@ paths:
         - WebSocket
       summary: WebSocket for real-time updates
       description: |
-        Establishes a WebSocket connection for receiving real-time register value updates.
+        Establishes a WebSocket connection for a per-client key subscription. Same-origin only
+        (the upgrader rejects cross-origin requests). There is no history over WebSocket - only
+        the latest values for subscribed keys; use the REST `/api/data/{key}` endpoints for
+        history.
 
         **To connect:** Use a WebSocket client with URL `ws://{host}:{port}/ws`
 
-        **Connection Protocol:**
-        1. Connect to the WebSocket endpoint
-        2. Optionally send `{"type": "request_initial_data"}` to receive all current register values
-        3. Receive `cache_update` messages whenever register values are polled and updated
+        **Protocol:**
+        1. Connect to the WebSocket endpoint.
+        2. Send `subscribe` with the keys you need; the server replies with a `snapshot` of just
+           those keys.
+        3. The server pushes `update` frames (coalesced ~75ms) whenever a subscribed key's value
+           or status changes - only changed keys are included, diffed per client.
+        4. Send `unsubscribe` to drop keys you no longer need (unknown keys are ignored
+           silently; no reply).
+        5. `ping` is accepted and ignored (a `pong` is not required by the protocol).
+        6. Unknown keys in `subscribe` never drop the connection; the server replies with an
+           `error` frame naming them.
+        7. When a subscribed key disappears from the server cache (e.g. a derived value
+           after a failed poll), the next `update` lists it in `removed`; drop its value.
+           `removed` only names keys this client was previously sent.
 
-        **Message Format:**
-        - **Client to Server:** `{"type": "request_initial_data"}`
-        - **Server to Client:** `{"type": "cache_update", "timestamp": "...", "data": {...}}`
+        **Client → Server messages** (`ClientMessage`):
+        ```json
+        { "type": "subscribe",   "keys": ["pv_total_power", "solis_status"] }
+        { "type": "unsubscribe", "keys": ["solis_status"] }
+        { "type": "ping" }
+        ```
 
-        The `data` field contains a map of register keys to their current values, matching the SolisValue schema.
+        **Server → Client messages:**
+        ```json
+        { "type": "snapshot", "values": { "pv_total_power": { "value": 5230, "timestamp": "2026-08-04T09:19:19+02:00", "unit": "W" } } }
+        { "type": "update",   "ts": "2026-08-04T09:19:20+02:00", "values": { "pv_total_power": { "value": 5102.5 } } }
+        { "type": "update",   "ts": "2026-08-04T09:19:25+02:00", "values": {}, "removed": ["battery_power_signed"] }
+        { "type": "error",    "code": "unknown_keys", "message": "unknown keys ignored", "keys": ["foo"] }
+        ```
+        `snapshot` values include `timestamp` and `unit`; `update` values carry only `value` (and
+        `status_decoded` for status/fault keys) to keep frames small.
 
         **Note:** This endpoint cannot be tested directly through Swagger UI. Use a dedicated WebSocket client.
       operationId: connectWebSocket
@@ -260,19 +353,85 @@ paths:
               schema:
                 type: string
                 enum: [Upgrade]
+        '403':
+          description: Cross-origin upgrade rejected (the upgrader is same-origin only)
+        '503':
+          description: The WebSocket hub is restarting; retry with backoff
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Service Unavailable"
+                message: "websocket hub restarting"
+                code: 503
 
 components:
   schemas:
     # Health Check
+    ComponentStatus:
+      type: object
+      description: One supervised component's entry in the health snapshot
+      required:
+        - state
+        - restarts
+        - restartable
+      properties:
+        state:
+          type: string
+          enum: [healthy, recovering, failed]
+          example: "healthy"
+        reason:
+          type: string
+          description: Explains a non-healthy state
+          example: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
+        last_beat:
+          type: string
+          format: date-time
+          description: Last heartbeat (restartable components only)
+          example: "2026-08-03T10:00:00Z"
+        restarts:
+          type: integer
+          description: Consecutive-failure counter
+          example: 0
+        restartable:
+          type: boolean
+          description: True for managed components (modbus, poller, aggregator, websocket); false for watched parts (storage, cache, bus, http server)
+          example: true
+
     HealthResponse:
       type: object
-      description: Health check response containing service status information
-      additionalProperties:
-        type: string
-      example:
-        status: "ok"
-        timestamp: "2026-08-03T10:00:00Z"
-        modbus: "connected"
+      description: |
+        Fail-closed supervisor snapshot. Never blocks on a component. `status` is `ok` or
+        `degraded` (HTTP 200), or `failed` (HTTP 503) once a restart failed, the restart budget
+        is exhausted, a non-restartable part failed or the snapshot is stale.
+      required:
+        - status
+        - components
+        - timestamp
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded, failed]
+          example: "ok"
+        component:
+          type: string
+          description: Name of the failed component (only set when status is failed)
+          example: "modbus"
+        reason:
+          type: string
+          description: Human-readable failure reason (only set when status is failed)
+          example: "restart budget exhausted: no heartbeat for 31s (grace 30s)"
+        components:
+          type: object
+          description: Every supervised component/part, keyed by name
+          additionalProperties:
+            $ref: '#/components/schemas/ComponentStatus'
+        timestamp:
+          type: string
+          format: date-time
+          description: When the snapshot was taken
+          example: "2026-08-03T10:00:00Z"
 
     # Register Metadata
     RegisterInfo:
@@ -280,11 +439,9 @@ components:
       required:
         - key
         - name
-        - address
-        - count
         - data_type
         - unit
-        - stability
+        - store
         - description
       properties:
         key:
@@ -299,14 +456,8 @@ components:
           type: integer
           format: uint16
           minimum: 0
-          description: Modbus register address
+          description: Modbus register address; omitted for computed registers (monthly/yearly/total, net values, derived live values), which have no address
           example: 33057
-        count:
-          type: integer
-          format: uint16
-          minimum: 1
-          description: Number of consecutive registers this value occupies (1 for Uint16/Int16/Bool, 2 for Uint32/Int32/Float32, N for String)
-          example: 2
         data_type:
           type: string
           enum: [Uint16, Int16, Uint32, Int32, Float32, String, Bool]
@@ -316,14 +467,16 @@ components:
           type: string
           description: Unit of measurement
           example: "W"
-        stability:
+        store:
           type: string
-          enum: [stable, dynamic]
-          description: How often this value changes (stable = rarely changes, dynamic = changes frequently)
-          example: "dynamic"
+          enum: [none, daily, monthly, yearly, total, status]
+          description: |
+            Where the value is stored: `none` = cache only (live values), `status` = written to
+            error_data on change, `daily`/`monthly`/`yearly`/`total` = the matching history table
+          example: "daily"
         description:
           type: string
-          description: Combined name and unit for display
+          description: Combined name and unit for display; ends with a note on start/end query parameters for daily, monthly and yearly registers
           example: "PV Power Total (W)"
 
     # Data Responses
@@ -375,8 +528,8 @@ components:
         timestamp:
           type: string
           format: date-time
-          description: When this status was recorded
-          example: "2026-08-04T09:21:55+02:00"
+          description: When this status was recorded (UTC, millisecond precision)
+          example: "2026-08-04T07:21:55.000Z"
         status_decoded:
           type: object
           description: Decoded status information - for solis_status is a map with name and description, for bitmask faults is an array of active fault names
@@ -491,35 +644,42 @@ components:
           example: "2026-08-04T09:19:19+02:00"
 
     # WebSocket Messages
-    SolisValue:
+    ClientMessage:
       type: object
-      description: Represents a decoded register value as sent via WebSocket. Only fields with data are included.
+      description: Client → server frame
+      required:
+        - type
       properties:
-        key:
+        type:
           type: string
-          description: Register key
-          example: "pv_energy_total"
-        name:
-          type: string
-          description: Human-readable register name
-          example: "PV Energy Total"
-        unit:
-          type: string
-          description: Unit of measurement
-          example: "kWh"
+          enum: [subscribe, unsubscribe, ping]
+          example: "subscribe"
+        keys:
+          type: array
+          description: Register keys to subscribe/unsubscribe (omitted for ping)
+          items:
+            type: string
+          example: ["pv_total_power", "solis_status"]
+
+    ValueDTO:
+      type: object
+      description: One key's value on the wire, rounded to 2 decimal places. Snapshots include timestamp/unit; updates carry only value (and status_decoded for status/fault keys).
+      required:
+        - value
+      properties:
         value:
           type: number
           description: Decoded/scaled value, rounded to 2 decimal places
           example: 15280.5
-        raw_value:
-          type: number
-          description: Raw value from the device before scaling
-          example: 152805
         timestamp:
           type: string
           format: date-time
-          description: When the value was last updated
+          description: When the value was last updated (snapshots only)
           example: "2026-08-04T09:19:19+02:00"
+        unit:
+          type: string
+          description: Unit of measurement (snapshots only)
+          example: "kWh"
         status_decoded:
           type: object
           description: For status/fault registers - decoded status bits
@@ -528,28 +688,74 @@ components:
             name: "Generating"
             description: "Initializing / Generating"
 
-    WebSocketCacheUpdate:
+    SnapshotMessage:
       type: object
-      description: WebSocket message sent by server on cache updates
+      description: Server reply to subscribe, with the current values of the newly subscribed keys
       required:
         - type
-        - timestamp
-        - data
+        - values
       properties:
         type:
           type: string
-          description: Message type
-          example: "cache_update"
-        timestamp:
+          example: "snapshot"
+        values:
+          type: object
+          description: Map of register keys to their current ValueDTO
+          additionalProperties:
+            $ref: '#/components/schemas/ValueDTO'
+
+    UpdateMessage:
+      type: object
+      description: Server push of changed, subscribed keys only, coalesced roughly every 75ms
+      required:
+        - type
+        - ts
+        - values
+      properties:
+        type:
+          type: string
+          example: "update"
+        ts:
           type: string
           format: date-time
-          description: When the cache was last updated
-          example: "2026-08-03T10:00:00.000000+00:00"
-        data:
+          description: Frame time
+          example: "2026-08-04T09:19:20+02:00"
+        values:
           type: object
-          description: Map of register keys to their current SolisValue objects
+          description: Map of changed register keys to their new ValueDTO
           additionalProperties:
-            $ref: '#/components/schemas/SolisValue'
+            $ref: '#/components/schemas/ValueDTO'
+        removed:
+          type: array
+          description: Subscribed keys that disappeared from the server cache; clients drop their values
+          items:
+            type: string
+          example: ["battery_power_signed"]
+
+    ErrorMessage:
+      type: object
+      description: Reports a protocol problem; the connection stays open
+      required:
+        - type
+        - code
+        - message
+      properties:
+        type:
+          type: string
+          example: "error"
+        code:
+          type: string
+          enum: [unknown_keys, bad_request]
+          example: "unknown_keys"
+        message:
+          type: string
+          example: "unknown keys ignored"
+        keys:
+          type: array
+          description: The offending keys (unknown_keys only)
+          items:
+            type: string
+          example: ["foo"]
 
     # Error Responses
     Error:
@@ -566,30 +772,9 @@ components:
         message:
           type: string
           description: Error message
-          example: "historical queries are not supported for register pv_energy_daily"
+          example: "unsupported for register: pv_energy_total (historical queries (start/end) are only supported for daily, monthly and yearly registers)"
         code:
           type: integer
           description: HTTP status code
           example: 400
 
-  responses:
-    BadRequest:
-      description: Invalid request parameters
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            error: "Bad Request"
-            message: "historical queries are not supported for register pv_energy_daily"
-            code: 400
-    NotFound:
-      description: Resource not found
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            error: "Not Found"
-            message: "register 'nonexistent_key' not found"
-            code: 404

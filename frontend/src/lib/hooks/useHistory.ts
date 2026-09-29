@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { parseISO } from 'date-fns';
 import { api } from '../api/client';
 import { getSourceById, apiDataObjects } from '../config/data';
 import type { Period, HistoryDataPoint, ChartData, ChartDataset } from '../../types';
@@ -7,7 +8,9 @@ import type { Period, HistoryDataPoint, ChartData, ChartDataset } from '../../ty
  * Get timestamp label based on period
  */
 function getTimestampLabel(ts: string, period: Period): string {
-  const date = new Date(ts);
+  // parseISO reads "2026-09-01" / "2026-09" as local time; new Date() would read them as
+  // UTC midnight and show the previous day/month west of UTC.
+  const date = parseISO(ts);
   
   switch (period) {
     case 'daily':
@@ -21,27 +24,32 @@ function getTimestampLabel(ts: string, period: Period): string {
   }
 }
 
-export interface UseHistoryOptions {
-  startDate?: string;
-  endDate?: string;
-}
-
 export interface UseHistoryResult {
   data: ChartData | null;
   isLoading: boolean;
   error: string | null;
   loadHistory: (registerIds: string[], startDate?: string, endDate?: string) => Promise<void>;
+  /** Aborts any request in flight and clears the chart data and error. */
+  clearHistory: () => void;
 }
 
 export function useHistory(): UseHistoryResult {
   const [data, setData] = useState<ChartData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const loadHistory = useCallback(async (registerIds: string[], startDate?: string, endDate?: string) => {
+    // Cancel any in-flight request so a slower, stale response can never overwrite a
+    // newer one (e.g. rapid period/checkbox changes firing overlapping requests).
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       // Map internal IDs to source paths using the helper function
       const sources = registerIds.map(id => getSourceById(id)).filter(Boolean) as string[];
@@ -56,21 +64,28 @@ export function useHistory(): UseHistoryResult {
       const timestampToLabel: Map<string, string> = new Map();
       const datasetDataMap: Map<string, Map<string, number>> = new Map();
       const datasets: ChartDataset[] = [];
+      const failed: string[] = [];
 
       // Fetch data for each source
       for (const source of sources) {
+        if (signal.aborted) return;
+
         const dataObj = apiDataObjects.find(o => o.source === source);
         let historyData: HistoryDataPoint[] = [];
-        
+
         try {
           // The source already contains the full path including period
           const params: Record<string, string> = {};
           if (startDate) params.start = startDate;
           if (endDate) params.end = endDate;
-          
-          historyData = await api.get(source, params) as HistoryDataPoint[];
+
+          const body = await api.get(source, params, { signal });
+          if (!Array.isArray(body)) throw new Error('unexpected history response');
+          historyData = body as HistoryDataPoint[];
         } catch (err) {
+          if (signal.aborted) return;
           console.error(`Failed to fetch history for ${source}:`, err);
+          failed.push(dataObj?.name ?? source);
           continue;
         }
 
@@ -102,6 +117,19 @@ export function useHistory(): UseHistoryResult {
         }
       }
 
+      if (signal.aborted) return;
+
+      // A failed source must not look like "no data": all failed -> error; some failed
+      // -> chart the rest and say which ones are missing.
+      if (failed.length === sources.length) {
+        setError(`Failed to load history (${failed.join(', ')})`);
+        setData(null);
+        return;
+      }
+      if (failed.length > 0) {
+        setError(`Some series failed to load: ${failed.join(', ')}`);
+      }
+
       // Build final chart data
       if (datasets.length > 0) {
         const sortedTimestamps = Array.from(allTimestamps).sort();
@@ -119,12 +147,22 @@ export function useHistory(): UseHistoryResult {
         setData(null);
       }
     } catch (err) {
+      if (signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Failed to load history');
       setData(null);
     } finally {
-      setIsLoading(false);
+      if (!signal.aborted) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
-  return { data, isLoading, error, loadHistory };
+  const clearHistory = useCallback(() => {
+    abortControllerRef.current?.abort();
+    setData(null);
+    setError(null);
+    setIsLoading(false);
+  }, []);
+
+  return { data, isLoading, error, loadHistory, clearHistory };
 }

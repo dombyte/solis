@@ -5,8 +5,7 @@ import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { SkeletonCard } from '../ui/skeleton';
 import { ValueDisplay } from './ValueDisplay';
 import { StatusDisplay } from './StatusDisplay';
-import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
-import { Info } from 'lucide-react';
+import { InfoPopover } from '../ui/info-popover';
 import type { GroupConfig } from '../../types';
 
 interface DataCardProps {
@@ -44,20 +43,9 @@ export function DataCard({ group, className = '' }: DataCardProps): React.ReactE
         <div className="flex items-center gap-2">
           <CardTitle className="text-base sm:text-lg">{group.title}</CardTitle>
           {showTooltips && group.description && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-0.5"
-                  aria-label={`Info about ${group.title}`}
-                >
-                  <Info className="h-4 w-4" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
-                <p className="text-sm text-popover-foreground whitespace-normal break-words">{group.description}</p>
-              </PopoverContent>
-            </Popover>
+            <InfoPopover label={group.title} iconClassName="h-4 w-4">
+              <p>{group.description}</p>
+            </InfoPopover>
           )}
         </div>
         {group.description && !showTooltips && (
@@ -80,7 +68,6 @@ export function DataCard({ group, className = '' }: DataCardProps): React.ReactE
                   dataId={dataId} 
                   showLabel 
                   showUnit 
-                  showStatusIndicator={isStatusGroup}
                   showTooltip={showTooltips}
                 />
               )

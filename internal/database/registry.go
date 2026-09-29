@@ -1,4 +1,5 @@
-// Package database provides database lifecycle management including migrations, backups, and cleanup.
+// Package database provides database lifecycle management: migrations, backups and
+// cleanup.
 package database
 
 import (
@@ -6,22 +7,10 @@ import (
 	"sync"
 
 	"github.com/dombyte/solis/internal/database/migrations"
-	"github.com/dombyte/solis/internal/logging"
 )
-
-// registryLogger is the package-level logger for registry operations.
-var registryLogger = logging.NewComponentLogger("database.registry")
-
-// logger is the package-level logger for database operations.
 
 // Migration is an alias for migrations.Migration for convenience.
 type Migration = migrations.Migration
-
-// ErrNotImplemented is an alias for migrations.ErrNotImplemented.
-var ErrNotImplemented = migrations.ErrNotImplemented
-
-// MigrationFunc is an alias for migrations.MigrationFunc.
-type MigrationFunc = migrations.MigrationFunc
 
 // MigrationRegistry manages a collection of migrations and tracks the current schema version.
 type MigrationRegistry struct {
@@ -38,23 +27,20 @@ func NewMigrationRegistry() *MigrationRegistry {
 	}
 }
 
-// Register adds a migration to the registry.
-// Migrations should be registered in order, but the registry will sort them internally.
-func (r *MigrationRegistry) Register(migration Migration) {
+// Register adds a migration to the registry; a duplicate version is ignored and
+// reported as false. The registry sorts migrations internally.
+func (r *MigrationRegistry) Register(migration Migration) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	version := migration.Version()
 	if _, exists := r.migrations[version]; exists {
-		registryLogger.Warn().Msgf("Migration version already registered (version: %d)", version)
-		return
+		return false
 	}
-
 	r.migrations[version] = migration
 	r.versions = append(r.versions, version)
 	sort.Ints(r.versions)
-
-	registryLogger.Debug().Msgf("Registered migration (version: %d, description: %s)", version, migration.Description())
+	return true
 }
 
 // GetMigrationsFrom returns all migrations from the given version (exclusive) to the latest.
@@ -76,11 +62,12 @@ func (r *MigrationRegistry) GetMigrationsFrom(fromVersion int) []Migration {
 const (
 	// CurrentSchemaVersion is the latest schema version that this application version supports.
 	// Increment this constant when adding new migrations.
-	CurrentSchemaVersion = 2
+	CurrentSchemaVersion = 3
 
-	// MinCompatibleVersion is the minimum schema version that this application version can work with.
-	// If a database has a version lower than this, migration will be required.
-	MinCompatibleVersion = 1
+	// MinCompatibleVersion is the oldest schema this version can migrate. The V1/V2
+	// migrations were removed in v3, so older databases must be upgraded with a v2
+	// release first.
+	MinCompatibleVersion = 2
 )
 
 // SchemaVersionTableSQL is an alias for migrations.SchemaVersionTableSQL.

@@ -1,1443 +1,183 @@
 package service
 
 import (
+	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/dombyte/solis/internal/config"
-	"github.com/dombyte/solis/internal/modbus"
-	"github.com/dombyte/solis/internal/poller"
+	"github.com/rs/zerolog"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/history"
+	"github.com/dombyte/solis/internal/period"
+	"github.com/dombyte/solis/internal/service/mocks"
 	"github.com/dombyte/solis/internal/solis"
-	"github.com/dombyte/solis/internal/storage"
+	storagemocks "github.com/dombyte/solis/internal/storage/mocks"
 )
 
-func TestNewReadService(t *testing.T) {
-	// Create test config
-	cfg := &config.AppConfig{
-		App: config.AppSettings{
-			Port:    8080,
-			Timeout: 30 * time.Second,
-			Debug:   "INFO",
-		},
-		Modbus: config.ModbusSettings{
-			Type:    "tcp",
-			Host:    "192.168.1.100",
-			Port:    502,
-			Timeout: 5 * time.Second,
-			UnitID:  1,
-		},
-		Storage: config.StorageSettings{
-			Path:        "./data/test.db",
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-		Poller: config.PollerSettings{
-			Interval:        15 * time.Minute,
-			BlockAttempts:   3,
-			BlockRetryDelay: 1 * time.Second,
-			BlockInterval:   0,
-			PollTimeout:     30 * time.Second,
-		},
-	}
+var (
+	ctx = context.Background()
+	t0  = time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+)
 
-	// Create service with nil dependencies (should still create the struct)
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	if service == nil {
-		t.Fatal("NewReadService() returned nil")
-	}
-
-	if service.config != cfg {
-		t.Error("ReadService.config is not set correctly")
-	}
-
-	if service.modbusClient != nil {
-		t.Error("ReadService.modbusClient should be nil")
-	}
-
-	if service.storage != nil {
-		t.Error("ReadService.storage should be nil")
-	}
-
-	if service.poller != nil {
-		t.Error("ReadService.poller should be nil")
-	}
+type fixture struct {
+	svc   *ReadService
+	store *storagemocks.MockReadStore
+	cache *mocks.MockCacheReader
+	hlth  *mocks.MockHealthSnapshotter
 }
 
-func TestNewReadService_WithDependencies(t *testing.T) {
-	cfg := &config.AppConfig{
-		App: config.AppSettings{
-			Port:    8080,
-			Timeout: 30 * time.Second,
-			Debug:   "INFO",
-		},
+func newFixture(t *testing.T) fixture {
+	t.Helper()
+	reg, err := solis.NewRegistry()
+	require.NoError(t, err)
+	f := fixture{
+		store: storagemocks.NewMockReadStore(t),
+		cache: mocks.NewMockCacheReader(t),
+		hlth:  mocks.NewMockHealthSnapshotter(t),
 	}
-
-	// Create mock dependencies
-	modbusClient := &modbus.Client{}
-	st := &storage.Storage{}
-	pl := &poller.Poller{}
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, ModbusClient: modbusClient, Storage: st, Poller: pl})
-
-	if service == nil {
-		t.Fatal("NewReadService() returned nil")
-	}
-
-	if service.modbusClient != modbusClient {
-		t.Error("ReadService.modbusClient is not set correctly")
-	}
-
-	if service.storage != st {
-		t.Error("ReadService.storage is not set correctly")
-	}
-
-	if service.poller != pl {
-		t.Error("ReadService.poller is not set correctly")
-	}
+	f.svc, err = NewReadService(Deps{
+		Store: f.store, Cache: f.cache, Health: f.hlth, Registry: reg,
+		Decoder: solis.NewDecoder(reg, zerolog.Nop()), Log: zerolog.Nop(),
+	})
+	require.NoError(t, err)
+	return f
 }
 
-func TestReadService_HealthCheck_NoDependencies(t *testing.T) {
-	cfg := &config.AppConfig{}
-
-	// Create service with no dependencies
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	// HealthCheck should return ok status even with nil dependencies
-	status, err := service.HealthCheck()
-	if err != nil {
-		t.Errorf("HealthCheck() error = %v", err)
-	}
-
-	if status == nil {
-		t.Fatal("HealthCheck() returned nil status")
-	}
-
-	if status["status"] != "ok" {
-		t.Errorf("HealthCheck() status['status'] = %v, want 'ok'", status["status"])
-	}
+func TestNewReadService_RequiresDependencies(t *testing.T) {
+	_, err := NewReadService(Deps{})
+	require.ErrorIs(t, err, ErrMissingDependency)
+	assert.ErrorContains(t, err, "Store")
 }
 
-func TestReadService_HealthCheck_WithModbusClient(t *testing.T) {
-	cfg := &config.AppConfig{}
-
-	// Create a modbus client (will fail to connect, but we can create the struct)
-	modbusClient := &modbus.Client{}
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, ModbusClient: modbusClient})
-
-	// HealthCheck should handle nil or disconnected modbus client
-	status, err := service.HealthCheck()
-	if err != nil {
-		t.Logf("HealthCheck() with modbus client error: %v", err)
-		return
+func TestKeysSortedAndRegister(t *testing.T) {
+	f := newFixture(t)
+	keys := f.svc.Keys()
+	require.NotEmpty(t, keys)
+	for i := 1; i < len(keys); i++ {
+		assert.Less(t, keys[i-1].Key, keys[i].Key)
 	}
-
-	if status == nil {
-		t.Fatal("HealthCheck() returned nil status")
-	}
-
-	// Should have modbus_connected status
-	if _, ok := status["modbus_connected"]; ok {
-		t.Logf("HealthCheck() includes modbus_connected: %v", status["modbus_connected"])
-	}
+	_, err := f.svc.Register("nope")
+	assert.ErrorIs(t, err, ErrUnknownKey)
+	var ke *KeyError
+	require.ErrorAs(t, err, &ke)
+	assert.Equal(t, "unknown register key: nope", ke.Error())
 }
 
-func TestReadService_HealthCheck_WithStorage(t *testing.T) {
-	cfg := &config.AppConfig{}
+func TestCurrent(t *testing.T) {
+	f := newFixture(t)
+	v := &solis.Value{Key: "grid_power", DecodedValue: 12}
+	f.cache.EXPECT().Get("grid_power").Return(v).Once()
+	got, err := f.svc.Current("grid_power")
+	require.NoError(t, err)
+	assert.Same(t, v, got)
 
-	// Create a storage (will fail to initialize, but we can test the struct)
-	// We'll pass nil for storage in the service
-	service := NewReadService(ReadServiceConfig{Config: cfg})
+	f.cache.EXPECT().Get("battery_soc").Return(nil).Once()
+	_, err = f.svc.Current("battery_soc")
+	assert.ErrorIs(t, err, ErrNoData)
+	assert.Contains(t, err.Error(), "no current value")
 
-	status, err := service.HealthCheck()
-	if err != nil {
-		t.Logf("HealthCheck() error: %v", err)
-		return
-	}
-
-	if status == nil {
-		t.Fatal("HealthCheck() returned nil status")
-	}
-
-	// Should have status
-	if status["status"] != "ok" {
-		t.Errorf("HealthCheck() status['status'] = %v, want 'ok'", status["status"])
-	}
+	_, err = f.svc.Current("zzz")
+	assert.ErrorIs(t, err, ErrUnknownKey)
 }
 
-func TestReadService_HealthCheck_WithPoller(t *testing.T) {
-	cfg := &config.AppConfig{}
+func TestHistoryKindChecks(t *testing.T) {
+	f := newFixture(t)
+	day := []*history.DailyDataPoint{{Date: "2026-08-05", Value: 1}}
+	f.store.EXPECT().GetDailyHistory(ctx, "pv_energy_daily", t0, t0).Return(day, nil).Once()
+	got, err := f.svc.DailyHistory(ctx, "pv_energy_daily", t0, t0)
+	require.NoError(t, err)
+	assert.Equal(t, day, got)
 
-	// Create a poller (not running)
-	pl := &poller.Poller{}
+	f.store.EXPECT().GetMonthlyHistory(ctx, "pv_energy_monthly", t0, t0).Return(nil, nil).Once()
+	_, err = f.svc.MonthlyHistory(ctx, "pv_energy_monthly", t0, t0)
+	require.NoError(t, err)
+	f.store.EXPECT().GetYearlyHistory(ctx, "pv_energy_yearly", t0, t0).Return(nil, nil).Once()
+	_, err = f.svc.YearlyHistory(ctx, "pv_energy_yearly", t0, t0)
+	require.NoError(t, err)
 
-	service := NewReadService(ReadServiceConfig{Config: cfg, Poller: pl})
-
-	status, err := service.HealthCheck()
-	if err != nil {
-		t.Logf("HealthCheck() with poller error: %v", err)
-		return
-	}
-
-	if status == nil {
-		t.Fatal("HealthCheck() returned nil status")
-	}
-
-	// Should have poller_running status
-	if _, ok := status["poller_running"]; ok {
-		t.Logf("HealthCheck() includes poller_running: %v", status["poller_running"])
-	}
+	_, err = f.svc.DailyHistory(ctx, "pv_energy_monthly", t0, t0)
+	assert.ErrorIs(t, err, ErrWrongKind)
+	_, err = f.svc.MonthlyHistory(ctx, "grid_power", t0, t0)
+	assert.ErrorIs(t, err, ErrWrongKind)
+	_, err = f.svc.YearlyHistory(ctx, "nope", t0, t0)
+	assert.ErrorIs(t, err, ErrUnknownKey)
 }
 
-func TestReadService_GetRegister_NoModbusClient(t *testing.T) {
-	cfg := &config.AppConfig{}
+func TestTotal(t *testing.T) {
+	f := newFixture(t)
+	dp := &history.TotalDataPoint{Value: 5}
+	f.store.EXPECT().GetTotalHistory(ctx, "pv_energy_total").Return(dp, nil).Once()
+	got, err := f.svc.Total(ctx, "pv_energy_total")
+	require.NoError(t, err)
+	assert.Same(t, dp, got)
 
-	// Create service with no modbus client
-	service := NewReadService(ReadServiceConfig{Config: cfg})
+	f.store.EXPECT().GetTotalHistory(ctx, "grid_energy_total").Return(nil, nil).Once()
+	_, err = f.svc.Total(ctx, "grid_energy_total")
+	assert.ErrorIs(t, err, ErrNoData)
 
-	// GetRegister should return error when storage is nil
-	_, err := service.GetRegister("test_key")
-	if err == nil {
-		t.Error("GetRegister() with nil storage expected error, got nil")
-	}
+	boom := errors.New("disk")
+	f.store.EXPECT().GetTotalHistory(ctx, "backup_energy_total").Return(nil, boom).Once()
+	_, err = f.svc.Total(ctx, "backup_energy_total")
+	assert.ErrorIs(t, err, boom)
+
+	_, err = f.svc.Total(ctx, "pv_energy_daily")
+	assert.ErrorIs(t, err, ErrWrongKind)
 }
 
-func TestReadService_GetValues_NoStorage(t *testing.T) {
-	cfg := &config.AppConfig{}
+func TestStatusHistory(t *testing.T) {
+	f := newFixture(t)
+	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", mock.Anything, mock.Anything).
+		Return([]*history.ErrorDataPoint{
+			{Timestamp: "2026-08-01T10:00:00Z", RawValue: 1},
+			{Timestamp: "2026-08-02T10:00:00Z", RawValue: 0},
+		}, nil).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+		Timestamp: t0, RawValue: 2,
+		StatusDecoded: []string{"Grid overvoltage"},
+	}).Once()
 
-	// Create service with no dependencies
-	service := NewReadService(ReadServiceConfig{Config: cfg})
+	h, err := f.svc.StatusHistory(ctx, "grid_fault_1")
+	require.NoError(t, err)
+	assert.Equal(t, "Grid Fault 1 (Bitmask)", h.Name)
+	require.Len(t, h.History, 3, "cleared state (raw 0) is kept")
+	assert.Equal(t, t0.UTC().Format(period.TimestampLayout), h.History[0].Timestamp,
+		"newest first")
+	assert.Equal(t, "2026-08-02T10:00:00Z", h.History[1].Timestamp)
+	assert.Equal(t, []string{"No grid"}, h.History[2].StatusDecoded)
 
-	// GetValues with no storage should return empty map
-	values, err := service.GetValues([]string{"test_key"})
-	if err != nil {
-		t.Logf("GetValues() error: %v", err)
-		return
-	}
+	// A cached state that equals the newest stored change is not listed twice.
+	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", mock.Anything, mock.Anything).
+		Return([]*history.ErrorDataPoint{{
+			Timestamp: "2026-08-02T10:00:00.000Z",
+			RawValue:  1,
+		}}, nil).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+		Timestamp: t0, RawValue: 1,
+		StatusDecoded: []string{"No grid"},
+	}).Once()
+	h, err = f.svc.StatusHistory(ctx, "grid_fault_1")
+	require.NoError(t, err)
+	assert.Len(t, h.History, 1)
 
-	if values == nil {
-		t.Fatal("GetValues() returned nil map")
-	}
+	// Store failure is best effort; the current value is still returned.
+	f.store.EXPECT().GetErrorHistory(ctx, "solis_status", mock.Anything, mock.Anything).
+		Return(nil, errors.New("disk")).Once()
+	f.cache.EXPECT().Get("solis_status").Return(nil).Once()
+	h, err = f.svc.StatusHistory(ctx, "solis_status")
+	require.NoError(t, err)
+	assert.Empty(t, h.History)
 
-	// Should return empty map
-	if len(values) != 0 {
-		t.Errorf("GetValues() returned %d values, want 0", len(values))
-	}
+	_, err = f.svc.StatusHistory(ctx, "pv_energy_daily")
+	assert.ErrorIs(t, err, ErrWrongKind)
 }
 
-func TestReadService_GetHistoricalData_NoStorage(t *testing.T) {
-	cfg := &config.AppConfig{}
-
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	// GetHistoricalData with no storage should return error
-	_, err := service.GetHistoricalData("test_key", time.Now().Add(-1*time.Hour), time.Now(), storage.IntervalRaw)
-	if err == nil {
-		t.Error("GetHistoricalData() with nil storage expected error, got nil")
-	}
-
-	if !errors.Is(err, errors.New("storage not available")) {
-		// Check error message
-		if err.Error() != "storage not available" {
-			t.Logf("GetHistoricalData() error = %v", err)
-		}
-	}
-}
-
-func TestReadService_GetHistoricalData_InvalidKey(t *testing.T) {
-	cfg := &config.AppConfig{}
-
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	// GetHistoricalData with invalid key should return error
-	// But it will fail first on storage being nil
-	_, err := service.GetHistoricalData("invalid_key", time.Now().Add(-1*time.Hour), time.Now(), storage.IntervalRaw)
-	if err == nil {
-		t.Error("GetHistoricalData() with invalid key expected error, got nil")
-	}
-}
-
-func TestReadService_GetValues_EmptyKeys(t *testing.T) {
-	cfg := &config.AppConfig{}
-
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	// GetValues with empty keys should return empty map
-	values, err := service.GetValues([]string{})
-	if err != nil {
-		t.Logf("GetValues() with empty keys error: %v", err)
-		return
-	}
-
-	if values == nil {
-		t.Fatal("GetValues() returned nil map")
-	}
-
-	// Should return empty map
-	if len(values) != 0 {
-		t.Errorf("GetValues() with empty keys returned %d values, want 0", len(values))
-	}
-}
-
-func TestReadService_AllRegisterKeys(t *testing.T) {
-	// Verify that solis package has registers available
-	if len(solis.AllRegisters) == 0 {
-		t.Error("solis.AllRegisters is empty")
-	}
-
-	// Verify that RegisterMapByKey has entries
-	if len(solis.RegisterMapByKey) == 0 {
-		t.Error("solis.RegisterMapByKey is empty")
-	}
-
-	// Verify that the first register has a key
-	if len(solis.AllRegisters) > 0 {
-		firstKey := solis.AllRegisters[0].Key
-		if firstKey == "" {
-			t.Error("First register has empty key")
-		}
-		// Verify it exists in the map
-		if _, ok := solis.RegisterMapByKey[firstKey]; !ok {
-			t.Errorf("First register key %s not found in RegisterMapByKey", firstKey)
-		}
-	}
-}
-
-// MockStorage is a mock implementation of storage.Storage for testing
-// We'll use the actual storage for integration tests, but we need to set up a test database
-type MockStorage struct {
-	*storage.Storage
-}
-
-// TestService_GetComputedDailyGridEnergy tests the getComputedDailyGridEnergy method
-func TestService_GetComputedDailyGridEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_daily.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Insert test data for today_energy_fed_into_grid
-	timestamp := time.Now()
-	fedValues := map[string]*solis.Value{
-		"grid_export_daily": {
-			Key:          "grid_export_daily",
-			Name:         "Today Energy Fed Into Grid",
-			RawValue:     150, // 15.0 kWh after scaling (0.1)
-			DecodedValue: 15.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(fedValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store fed values: %v", err)
-	}
-
-	// Insert test data for today_energy_imported_from_grid
-	importValues := map[string]*solis.Value{
-		"grid_import_daily": {
-			Key:          "grid_import_daily",
-			Name:         "Today Energy Imported From Grid",
-			RawValue:     50, // 5.0 kWh after scaling (0.1)
-			DecodedValue: 5.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(importValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store import values: %v", err)
-	}
-
-	// Store computed grid_energy_daily value (fed - import = 15.0 - 5.0 = 10.0)
-	computedDailyValues := map[string]*solis.Value{
-		"grid_energy_daily": {
-			Key:          "grid_energy_daily",
-			Name:         "Grid Energy Daily (Net)",
-			RawValue:     10, // 10.0 kWh (scale is 1, so raw = decoded)
-			DecodedValue: 10.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-	err = st.StoreAllRegisters(computedDailyValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store computed daily grid energy: %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(20 * time.Millisecond)
-
-	// Test getComputedDailyGridEnergy
-	start := timestamp.Add(-24 * time.Hour)
-	end := timestamp.Add(24 * time.Hour)
-
-	result, err := service.GetDailyHistory("grid_energy_daily", start, end)
-	if err != nil {
-		t.Fatalf("GetDailyHistory for grid_energy_daily error = %v", err)
-	}
-
-	// Should return computed values: fed (15.0) - import (5.0) = 10.0
-	if len(result) == 0 {
-		t.Error("Expected computed daily grid energy results, got empty")
-	} else {
-		// Check the first result
-		if len(result) > 0 {
-			expectedValue := 15.0 - 5.0 // 10.0 kWh
-			if result[0].Value != expectedValue {
-				t.Errorf("Computed daily grid energy value = %v, want %v", result[0].Value, expectedValue)
-			}
-			t.Logf("Computed daily grid energy: value=%.2f, raw=%.2f, date=%s",
-				result[0].Value, result[0].RawValue, result[0].Date)
-		}
-	}
-}
-
-// TestService_GetComputedTotalGridEnergy tests the getComputedTotalGridEnergy method
-func TestService_GetComputedTotalGridEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_total.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Insert test data for total_energy_fed_into_grid
-	timestamp := time.Now()
-	fedValues := map[string]*solis.Value{
-		"grid_export_total": {
-			Key:          "grid_export_total",
-			Name:         "Total Energy Fed Into Grid",
-			RawValue:     2000, // 2000 kWh (scale = 1)
-			DecodedValue: 2000.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint32,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(fedValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store fed total values: %v", err)
-	}
-
-	// Insert test data for total_energy_imported_from_grid
-	importValues := map[string]*solis.Value{
-		"grid_import_total": {
-			Key:          "grid_import_total",
-			Name:         "Total Energy Imported From Grid",
-			RawValue:     500, // 500 kWh (scale = 1)
-			DecodedValue: 500.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint32,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(importValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store import total values: %v", err)
-	}
-
-	// Store computed grid_energy_total value (fed - import = 2000.0 - 500.0 = 1500.0)
-	computedTotalValues := map[string]*solis.Value{
-		"grid_energy_total": {
-			Key:          "grid_energy_total",
-			Name:         "Grid Energy Total (Net)",
-			RawValue:     1500, // 1500 kWh (scale = 1)
-			DecodedValue: 1500.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint32,
-			Stability:    solis.Dynamic,
-		},
-	}
-	err = st.StoreAllRegisters(computedTotalValues, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store computed total grid energy: %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(20 * time.Millisecond)
-
-	// Test getComputedTotalGridEnergy
-	result, err := service.GetTotalHistory("grid_energy_total")
-	if err != nil {
-		t.Fatalf("GetTotalHistory for grid_energy_total error = %v", err)
-	}
-
-	if result == nil {
-		t.Fatal("Expected computed total grid energy result, got nil")
-	}
-
-	// Should return computed values: fed (2000.0) - import (500.0) = 1500.0
-	expectedValue := 2000.0 - 500.0
-	if result.Value != expectedValue {
-		t.Errorf("Computed total grid energy value = %v, want %v", result.Value, expectedValue)
-	}
-
-	t.Logf("Computed total grid energy: value=%.2f, raw=%.2f, timestamp=%s",
-		result.Value, result.RawValue, result.Timestamp)
-}
-
-// TestService_GetComputedMonthlyEnergy tests the getComputedMonthlyEnergy method
-func TestService_GetComputedMonthlyEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_monthly.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Insert test daily data for today_energy_consumption
-	timestamp := time.Now()
-	values := map[string]*solis.Value{
-		"energy_consumption_daily": {
-			Key:          "energy_consumption_daily",
-			Name:         "Today Energy Consumption",
-			RawValue:     100, // 10.0 kWh after scaling (0.1)
-			DecodedValue: 10.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(values, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store daily values: %v", err)
-	}
-
-	// Store computed monthly value (sum of daily values = 10.0)
-	currentMonth := timestamp.Format("2006-01")
-	monthlyDp := &storage.MonthlyDataPoint{
-		Month:    currentMonth,
-		Value:    10.0,
-		RawValue: 10, // scale is 1, so raw = decoded
-	}
-	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", monthlyDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed monthly value: %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(20 * time.Millisecond)
-
-	// Test getComputedMonthlyEnergy
-	start := time.Date(timestamp.Year(), timestamp.Month(), 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(timestamp.Year(), timestamp.Month()+1, 0, 0, 0, 0, -1, time.UTC)
-
-	result, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory for energy_consumption_monthly error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected computed monthly energy results, got empty")
-	} else {
-		// The computed value should be based on the daily sum
-		// Note: The exact value depends on the computation logic
-		if result[0].Value < 0 {
-			t.Errorf("Computed monthly energy value = %v, want >= 0", result[0].Value)
-		}
-		t.Logf("Computed monthly energy: value=%.2f, raw=%.2f, month=%s",
-			result[0].Value, result[0].RawValue, result[0].Month)
-	}
-}
-
-// TestService_GetComputedMonthlyGridEnergy tests the getComputedMonthlyGridEnergy method
-func TestService_GetComputedMonthlyGridEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_month_grid.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store test data directly using StoreMonthlyDataPoint
-	// This simulates having pre-computed monthly values
-	// For computed registers, scale is 1, so Value = RawValue * 1 = RawValue
-	fedDp := &storage.MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    500.0, // This is the decoded value (already scaled)
-		RawValue: 500.0, // For scale=1 registers, RawValue equals Value
-	}
-	err = st.StoreMonthlyDataPoint("grid_export_monthly", fedDp)
-	if err != nil {
-		t.Fatalf("Failed to store fed monthly data: %v", err)
-	}
-
-	importDp := &storage.MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    200.0, // This is the decoded value (already scaled)
-		RawValue: 200.0, // For scale=1 registers, RawValue equals Value
-	}
-	err = st.StoreMonthlyDataPoint("grid_import_monthly", importDp)
-	if err != nil {
-		t.Fatalf("Failed to store import monthly data: %v", err)
-	}
-
-	// Store computed grid_energy_monthly value (fed - import = 500.0 - 200.0 = 300.0)
-	netDp := &storage.MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    300.0, // 500.0 - 200.0
-		RawValue: 300.0,
-	}
-	err = st.StoreMonthlyDataPoint("grid_energy_monthly", netDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed monthly grid energy: %v", err)
-	}
-
-	// Test getComputedMonthlyGridEnergy
-	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
-
-	result, err := service.GetMonthlyHistory("grid_energy_monthly", start, end)
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory for grid_energy_monthly error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected computed monthly grid energy results, got empty")
-	} else {
-		// Should return computed values: fed (500.0) - import (200.0) = 300.0
-		expectedValue := 500.0 - 200.0
-		// Note: The computation uses DecodedValue from the stored data, which equals Value for scale=1 registers
-		if result[0].Value != expectedValue {
-			t.Errorf("Computed monthly grid energy value = %v, want %v", result[0].Value, expectedValue)
-		}
-		t.Logf("Computed monthly grid energy: value=%.2f, raw=%.2f, month=%s",
-			result[0].Value, result[0].RawValue, result[0].Month)
-	}
-}
-
-// TestService_GetComputedYearlyEnergy tests the getComputedYearlyEnergy method
-func TestService_GetComputedYearlyEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_yearly.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Insert test daily data for today_energy_consumption
-	timestamp := time.Now()
-	values := map[string]*solis.Value{
-		"energy_consumption_daily": {
-			Key:          "energy_consumption_daily",
-			Name:         "Today Energy Consumption",
-			RawValue:     100, // 10.0 kWh after scaling (0.1)
-			DecodedValue: 10.0,
-			Unit:         "kWh",
-			Timestamp:    timestamp,
-			DataType:     solis.Uint16,
-			Stability:    solis.Dynamic,
-		},
-	}
-
-	err = st.StoreAllRegisters(values, timestamp)
-	if err != nil {
-		t.Fatalf("Failed to store daily values: %v", err)
-	}
-
-	// Store computed yearly value (sum of daily values = 10.0)
-	currentYear := timestamp.Format("2006")
-	yearlyDp := &storage.YearlyDataPoint{
-		Year:     currentYear,
-		Value:    10.0,
-		RawValue: 10, // scale is 1, so raw = decoded
-	}
-	err = st.StoreYearlyDataPoint("energy_consumption_yearly", yearlyDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed yearly value: %v", err)
-	}
-
-	// Wait a bit for storage to complete
-	time.Sleep(20 * time.Millisecond)
-
-	// Test getComputedYearlyEnergy
-	start := time.Date(timestamp.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(timestamp.Year(), time.December, 31, 23, 59, 59, 0, time.UTC)
-
-	result, err := service.GetYearlyHistory("energy_consumption_yearly", start, end)
-	if err != nil {
-		t.Fatalf("GetYearlyHistory for energy_consumption_yearly error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected computed yearly energy results, got empty")
-	} else {
-		// The computed value should be based on the daily sum
-		if result[0].Value < 0 {
-			t.Errorf("Computed yearly energy value = %v, want >= 0", result[0].Value)
-		}
-		t.Logf("Computed yearly energy: value=%.2f, raw=%.2f, year=%s",
-			result[0].Value, result[0].RawValue, result[0].Year)
-	}
-}
-
-// TestService_GetComputedYearlyGridEnergy tests the getComputedYearlyGridEnergy method
-func TestService_GetComputedYearlyGridEnergy(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_computed_year_grid.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store test data directly using StoreYearlyDataPoint
-	// For computed registers, scale is 1, so Value = RawValue * 1 = RawValue
-	fedDp := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    3000.0, // This is the decoded value (already scaled)
-		RawValue: 3000.0, // For scale=1 registers, RawValue equals Value
-	}
-	err = st.StoreYearlyDataPoint("grid_export_yearly", fedDp)
-	if err != nil {
-		t.Fatalf("Failed to store fed yearly data: %v", err)
-	}
-
-	importDp := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    1000.0, // This is the decoded value (already scaled)
-		RawValue: 1000.0, // For scale=1 registers, RawValue equals Value
-	}
-	err = st.StoreYearlyDataPoint("grid_import_yearly", importDp)
-	if err != nil {
-		t.Fatalf("Failed to store import yearly data: %v", err)
-	}
-
-	// Store computed grid_energy_yearly value (fed - import = 3000.0 - 1000.0 = 2000.0)
-	netDp := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    2000.0, // 3000.0 - 1000.0
-		RawValue: 2000.0,
-	}
-	err = st.StoreYearlyDataPoint("grid_energy_yearly", netDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed yearly grid energy: %v", err)
-	}
-
-	// Test getComputedYearlyGridEnergy
-	start := time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, time.December, 31, 23, 59, 59, 0, time.UTC)
-
-	result, err := service.GetYearlyHistory("grid_energy_yearly", start, end)
-	if err != nil {
-		t.Fatalf("GetYearlyHistory for grid_energy_yearly error = %v", err)
-	}
-
-	if len(result) == 0 {
-		t.Error("Expected computed yearly grid energy results, got empty")
-	} else {
-		// Should return computed values: fed (3000.0) - import (1000.0) = 2000.0
-		expectedValue := 3000.0 - 1000.0
-		// Note: The computation uses DecodedValue from the stored data, which equals Value for scale=1 registers
-		if result[0].Value != expectedValue {
-			t.Errorf("Computed yearly grid energy value = %v, want %v", result[0].Value, expectedValue)
-		}
-		t.Logf("Computed yearly grid energy: value=%.2f, raw=%.2f, year=%s",
-			result[0].Value, result[0].RawValue, result[0].Year)
-	}
-}
-
-// TestService_ValidateRegisterType tests the validateRegisterType method
-func TestService_ValidateRegisterType(t *testing.T) {
-	cfg := &config.AppConfig{}
-	service := NewReadService(ReadServiceConfig{Config: cfg})
-
-	// Test with valid daily register
-	err := service.validateRegisterType("energy_consumption_daily", solis.IsDailyRegister, "daily energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for valid daily register returned error: %v", err)
-	}
-
-	// Test with invalid daily register
-	err = service.validateRegisterType("pv_voltage_1", solis.IsDailyRegister, "daily energy")
-	if err == nil {
-		t.Error("validateRegisterType for invalid daily register expected error, got nil")
-	}
-
-	// Test with valid monthly register
-	err = service.validateRegisterType("pv_energy_monthly", solis.IsMonthlyRegister, "monthly energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for valid monthly register returned error: %v", err)
-	}
-
-	// Test with valid yearly register
-	err = service.validateRegisterType("pv_energy_yearly", solis.IsYearlyRegister, "yearly energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for valid yearly register returned error: %v", err)
-	}
-
-	// Test with valid total register
-	err = service.validateRegisterType("pv_energy_total", solis.IsTotalRegister, "total energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for valid total register returned error: %v", err)
-	}
-
-	// Test with computed net grid register (should be total)
-	err = service.validateRegisterType("grid_energy_total", solis.IsTotalRegister, "total energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for grid_energy_total returned error: %v", err)
-	}
-
-	// Test with computed monthly net grid register (should be monthly)
-	err = service.validateRegisterType("grid_energy_monthly", solis.IsMonthlyRegister, "monthly energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for grid_energy_monthly returned error: %v", err)
-	}
-
-	// Test with computed yearly net grid register (should be yearly)
-	err = service.validateRegisterType("grid_energy_yearly", solis.IsYearlyRegister, "yearly energy")
-	if err != nil {
-		t.Errorf("validateRegisterType for grid_energy_yearly returned error: %v", err)
-	}
-}
-
-// TestService_DecemberMonthlyCalculation tests that December queries work correctly with the date expansion fix
-func TestService_DecemberMonthlyCalculation(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_december.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store daily values for December
-	dailyValues := []struct {
-		date  string
-		value float64
-		raw   float64
-	}{
-		{"2024-12-01", 10.0, 100.0},
-		{"2024-12-02", 20.0, 200.0},
-		{"2024-12-03", 15.0, 150.0},
-	}
-
-	for _, dv := range dailyValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "energy_consumption_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert daily value: %v", err)
-		}
-	}
-
-	// Store computed monthly value for December (sum of daily values = 10 + 20 + 15 = 45)
-	monthlyDp := &storage.MonthlyDataPoint{
-		Month:    "2024-12",
-		Value:    45.0,
-		RawValue: 45.0,
-	}
-	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", monthlyDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed monthly value: %v", err)
-	}
-
-	// Query for December (this tests the date expansion fix for December)
-	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
-
-	monthly, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory for December error = %v", err)
-	}
-
-	if len(monthly) == 0 {
-		t.Error("Expected computed monthly energy results for December, got empty")
-	} else {
-		// The computed value should be the sum of all daily values
-		expected := 10.0 + 20.0 + 15.0
-		if monthly[0].Value != expected {
-			t.Errorf("Computed December monthly energy value = %v, want %v", monthly[0].Value, expected)
-		}
-		t.Logf("December monthly calculation: value=%.2f, month=%s", monthly[0].Value, monthly[0].Month)
-	}
-}
-
-// TestService_YearBoundaryYearlyCalculation tests that yearly queries across year boundaries work correctly
-func TestService_YearBoundaryYearlyCalculation(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_year_boundary.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store daily values across year boundary (Dec 2024 and Jan 2025)
-	dailyValues := []struct {
-		date  string
-		value float64
-		raw   float64
-	}{
-		{"2024-12-30", 10.0, 100.0},
-		{"2024-12-31", 20.0, 200.0},
-		{"2025-01-01", 15.0, 150.0},
-		{"2025-01-02", 5.0, 50.0},
-	}
-
-	for _, dv := range dailyValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "energy_consumption_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert daily value: %v", err)
-		}
-	}
-
-	// Store computed yearly value for 2024 (sum of Dec 2024 daily values = 10 + 20 = 30)
-	yearlyDp := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    30.0,
-		RawValue: 30.0,
-	}
-	err = st.StoreYearlyDataPoint("energy_consumption_yearly", yearlyDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed yearly value: %v", err)
-	}
-
-	// Query for 2024 (this tests the date expansion fix for year boundary)
-	start := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC)
-
-	yearly, err := service.GetYearlyHistory("energy_consumption_yearly", start, end)
-	if err != nil {
-		t.Fatalf("GetYearlyHistory for 2024 error = %v", err)
-	}
-
-	if len(yearly) == 0 {
-		t.Error("Expected computed yearly energy results for 2024, got empty")
-	} else {
-		// The computed value should be the sum of Dec 2024 daily values
-		expected := 10.0 + 20.0
-		if yearly[0].Value != expected {
-			t.Errorf("Computed 2024 yearly energy value = %v, want %v", yearly[0].Value, expected)
-		}
-		t.Logf("2024 yearly calculation: value=%.2f, year=%s", yearly[0].Value, yearly[0].Year)
-	}
-}
-
-// TestService_NetRegisterDecreasingValues tests that net registers can be updated with decreasing values
-func TestService_NetRegisterDecreasingValues(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_net_decreasing.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// First, store a higher value for grid_energy_yearly
-	yearlyDp1 := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    1000.0,
-		RawValue: 1000.0,
-	}
-
-	// Store initial high value
-	err = st.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp1)
-	if err != nil {
-		t.Fatalf("Failed to store initial yearly grid energy: %v", err)
-	}
-
-	// Now store a lower value (net energy decreased)
-	yearlyDp2 := &storage.YearlyDataPoint{
-		Year:     "2024",
-		Value:    500.0, // Lower than 1000.0
-		RawValue: 500.0,
-	}
-
-	// This should succeed because grid_energy_yearly is a net register
-	err = st.StoreYearlyDataPoint("grid_energy_yearly", yearlyDp2)
-	if err != nil {
-		t.Fatalf("Failed to store decreased yearly grid energy: %v", err)
-	}
-
-	// Verify the value was updated to the lower value
-	retrieved, err := service.GetYearlyHistory("grid_energy_yearly", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2024, 12, 31, 23, 59, 59, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("Failed to retrieve yearly grid energy: %v", err)
-	}
-
-	if len(retrieved) == 0 {
-		t.Fatal("Expected to retrieve yearly grid energy, got empty")
-	}
-
-	if retrieved[0].Value != 500.0 {
-		t.Errorf("Yearly grid energy value = %v, want 500.0 (should have been updated to lower value)", retrieved[0].Value)
-	}
-
-	t.Logf("Net register decreasing value test passed: value updated from 1000.0 to 500.0")
-}
-
-// TestService_DailyGridEnergyMissingData tests daily grid energy calculation with missing data
-func TestService_DailyGridEnergyMissingData(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_daily_grid_missing.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store only fed values (no import values)
-	fedValues := []struct {
-		date  string
-		value float64
-		raw   float64
-	}{
-		{"2024-06-01", 100.0, 1000.0},
-		{"2024-06-02", 200.0, 2000.0},
-	}
-
-	for _, dv := range fedValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "grid_export_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert fed daily value: %v", err)
-		}
-	}
-
-	// Store computed grid_energy_daily values (only fed, no import, so net = fed)
-	for _, dv := range fedValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "grid_energy_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert computed daily grid energy value: %v", err)
-		}
-	}
-
-	// Query for daily grid energy
-	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 6, 2, 23, 59, 59, 0, time.UTC)
-
-	dailyGrid, err := service.GetDailyHistory("grid_energy_daily", start, end)
-	if err != nil {
-		t.Fatalf("GetDailyHistory for grid_energy_daily error = %v", err)
-	}
-
-	if len(dailyGrid) == 0 {
-		t.Error("Expected computed daily grid energy results, got empty")
-	} else {
-		// When only fed exists, net = fed value
-		for i, dp := range dailyGrid {
-			expected := fedValues[i].value
-			if dp.Value != expected {
-				t.Errorf("Daily grid energy value at index %d = %v, want %v (only fed data exists)", i, dp.Value, expected)
-			}
-		}
-		t.Logf("Daily grid energy with missing import data: correctly used only fed values")
-	}
-}
-
-// TestService_MonthlyGridEnergyMissingData tests monthly grid energy calculation with missing data
-func TestService_MonthlyGridEnergyMissingData(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_monthly_grid_missing.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store only fed values (no import values) for a month
-	fedValues := []struct {
-		date  string
-		value float64
-		raw   float64
-	}{
-		{"2024-06-01", 100.0, 1000.0},
-		{"2024-06-02", 200.0, 2000.0},
-	}
-
-	for _, dv := range fedValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "grid_export_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert fed daily value: %v", err)
-		}
-	}
-
-	// Store computed monthly grid energy value (sum of daily fed values = 100 + 200 = 300)
-	monthlyGridDp := &storage.MonthlyDataPoint{
-		Month:    "2024-06",
-		Value:    300.0,
-		RawValue: 3000.0, // sum of raw values: 1000 + 2000
-	}
-	err = st.StoreMonthlyDataPoint("grid_energy_monthly", monthlyGridDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed monthly grid energy: %v", err)
-	}
-
-	// Query for monthly grid energy for June
-	start := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 6, 30, 23, 59, 59, 0, time.UTC)
-
-	monthlyGrid, err := service.GetMonthlyHistory("grid_energy_monthly", start, end)
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory for grid_energy_monthly error = %v", err)
-	}
-
-	if len(monthlyGrid) == 0 {
-		t.Error("Expected computed monthly grid energy results, got empty")
-	} else {
-		// When only fed exists, net = fed value
-		expected := 100.0 + 200.0
-		if monthlyGrid[0].Value != expected {
-			t.Errorf("Monthly grid energy value = %v, want %v (only fed data exists)", monthlyGrid[0].Value, expected)
-		}
-		t.Logf("Monthly grid energy with missing import data: correctly used only fed values")
-	}
-}
-
-// TestService_FebruaryLeapYear tests that February calculations work correctly in leap years
-func TestService_FebruaryLeapYear(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_february.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Store daily values for February 2024 (leap year - 29 days)
-	// Test with Feb 29
-	dailyValues := []struct {
-		date  string
-		value float64
-		raw   float64
-	}{
-		{"2024-02-28", 10.0, 100.0},
-		{"2024-02-29", 20.0, 200.0}, // Leap day
-	}
-
-	for _, dv := range dailyValues {
-		_, err := st.DB().Exec(
-			"INSERT INTO daily_values (date, register_key, value, raw_value) VALUES (?, ?, ?, ?)",
-			dv.date, "energy_consumption_daily", dv.value, dv.raw,
-		)
-		if err != nil {
-			t.Fatalf("Failed to insert daily value: %v", err)
-		}
-	}
-
-	// Store computed monthly value for February 2024 (sum of daily values = 10 + 20 = 30)
-	monthlyDp := &storage.MonthlyDataPoint{
-		Month:    "2024-02",
-		Value:    30.0,
-		RawValue: 30.0,
-	}
-	err = st.StoreMonthlyDataPoint("energy_consumption_monthly", monthlyDp)
-	if err != nil {
-		t.Fatalf("Failed to store computed monthly value: %v", err)
-	}
-
-	// Query for February 2024
-	start := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 2, 29, 23, 59, 59, 0, time.UTC)
-
-	monthly, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
-	if err != nil {
-		t.Fatalf("GetMonthlyHistory for February 2024 error = %v", err)
-	}
-
-	if len(monthly) == 0 {
-		t.Error("Expected computed monthly energy results for February, got empty")
-	} else {
-		// The computed value should include Feb 29
-		expected := 10.0 + 20.0
-		if monthly[0].Value != expected {
-			t.Errorf("Computed February 2024 monthly energy value = %v, want %v", monthly[0].Value, expected)
-		}
-		t.Logf("February 2024 (leap year) monthly calculation: value=%.2f, month=%s", monthly[0].Value, monthly[0].Month)
-	}
-}
-
-// TestService_InvalidDateRange tests that invalid date ranges (end before start) return errors
-func TestService_InvalidDateRange(t *testing.T) {
-	// Create a temporary database for testing
-	tempDir := t.TempDir()
-	dbPath := tempDir + "/test_invalid_range.db"
-
-	cfg := &config.AppConfig{
-		Storage: config.StorageSettings{
-			Path:        dbPath,
-			WalMode:     true,
-			Synchronous: "NORMAL",
-			TempStore:   "MEMORY",
-		},
-	}
-
-	st, err := storage.New(&cfg.Storage)
-	if err != nil {
-		t.Fatalf("Failed to create storage: %v", err)
-	}
-	defer func() {
-		st.Close()
-		os.RemoveAll(tempDir)
-	}()
-
-	service := NewReadService(ReadServiceConfig{Config: cfg, Storage: st})
-
-	// Test monthly with end before start - returns empty, not error
-	start := time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) // end is before start
-
-	monthlyResult, err := service.GetMonthlyHistory("energy_consumption_monthly", start, end)
-	if err != nil {
-		t.Errorf("Expected no error for invalid date range, got: %v", err)
-	}
-	if len(monthlyResult) != 0 {
-		t.Errorf("Expected empty result for invalid date range, got %d results", len(monthlyResult))
-	} else {
-		t.Logf("Invalid monthly date range correctly returned empty result")
-	}
-
-	// Test yearly with end before start - returns empty, not error
-	yearlyResult, err := service.GetYearlyHistory("energy_consumption_yearly", start, end)
-	if err != nil {
-		t.Errorf("Expected no error for invalid yearly date range, got: %v", err)
-	}
-	if len(yearlyResult) != 0 {
-		t.Errorf("Expected empty result for invalid yearly date range, got %d results", len(yearlyResult))
-	} else {
-		t.Logf("Invalid yearly date range correctly returned empty result")
-	}
-
-	// Test daily with end before start - storage doesn't validate, just returns empty
-	// This is acceptable behavior
-	dailyResult, err := service.GetDailyHistory("energy_consumption_daily", start, end)
-	if err != nil {
-		t.Logf("Daily history with invalid range returned error: %v", err)
-	} else if len(dailyResult) == 0 {
-		t.Logf("Daily history with invalid range returned empty result (acceptable)")
-	} else {
-		t.Errorf("Expected empty result for invalid date range, got %d results", len(dailyResult))
-	}
+func TestHealth(t *testing.T) {
+	f := newFixture(t)
+	f.hlth.EXPECT().Snapshot().Return(health.Snapshot{Status: health.StatusDegraded}).Once()
+	assert.Equal(t, health.StatusDegraded, f.svc.Health().Status)
 }

@@ -1,5 +1,4 @@
 import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
-import { useWebSocket } from '../lib/hooks/useWebSocket';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useVersionCheck } from '../lib/hooks/useVersionCheck';
 import { useMobile } from '../hooks/useMobile';
@@ -11,8 +10,8 @@ export function Info() {
   // Get version from import.meta.env if available
   const version = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
 
-  // Get WebSocket connection status (initialized at app level)
-  const { isConnected } = useWebSocket({ autoConnect: false, requestInitialData: false });
+  // WebSocket connection is initialized at app level; Info needs no key subscriptions.
+  const isConnected = useRegisterStore(state => state.isConnected);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
 
   // Version check
@@ -31,15 +30,14 @@ export function Info() {
     setChecking(true);
     setCheckStatus('checking');
     try {
-      await checkForUpdate();
-      // Small delay to allow state to propagate
-      await new Promise(resolve => setTimeout(resolve, 100));
-      setCheckStatus(hasUpdate ? 'update-available' : 'up-to-date');
+      // Use the fresh result: `hasUpdate` from this render is the value before the check.
+      const updateAvailable = await checkForUpdate();
+      setCheckStatus(updateAvailable ? 'update-available' : 'up-to-date');
     } finally {
       setChecking(false);
       setLastCheckTime(Date.now());
     }
-  }, [checkForUpdate, hasUpdate]);
+  }, [checkForUpdate]);
 
   // Trigger update and reload
   const handleTriggerUpdate = useCallback(() => {
@@ -163,13 +161,13 @@ export function Info() {
           </div>
           {lastCheckTime && (
             <div className={`mt-3 p-3 rounded-lg transition-all duration-300 ${
-              checkStatus === 'update-available' ? 'bg-amber-500/10 border border-amber-500/20' :
-              checkStatus === 'up-to-date' ? 'bg-emerald-500/10 border border-emerald-500/20' :
+              checkStatus === 'update-available' ? 'bg-warning/10 border border-warning/20' :
+              checkStatus === 'up-to-date' ? 'bg-success/10 border border-success/20' :
               'bg-muted/50'
             }`}>
               <p className={`text-sm flex items-center gap-2 ${
-                checkStatus === 'update-available' ? 'text-amber-500' :
-                checkStatus === 'up-to-date' ? 'text-emerald-500' :
+                checkStatus === 'update-available' ? 'text-warning' :
+                checkStatus === 'up-to-date' ? 'text-success' :
                 'text-muted-foreground'
               } ${checkStatus === 'checking' ? 'animate-pulse' : ''}`}>
                 {checkStatus === 'checking' && (

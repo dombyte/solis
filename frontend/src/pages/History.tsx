@@ -12,6 +12,7 @@ import { historyDataGroups } from '../lib/config/groups';
 import { Menu, RefreshCw } from 'lucide-react';
 import type { Period } from '../types';
 import type { DateRange } from 'react-day-picker';
+import { format } from 'date-fns';
 
 export function History(): React.ReactElement {
   const isMobile = useMobile();
@@ -24,7 +25,7 @@ export function History(): React.ReactElement {
   const [endDate, setEndDate] = useState(initialRange.end);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   
-  const { data, isLoading, error, loadHistory } = useHistory();
+  const { data, isLoading, error, loadHistory, clearHistory } = useHistory();
 
   // Format date string for Date objects (handles yyyy, yyyy-MM, yyyy-MM-dd)
   const formatForDate = useCallback((dateStr: string, targetPeriod: Period = period): string => {
@@ -46,8 +47,6 @@ export function History(): React.ReactElement {
     return undefined;
   }, [startDate, endDate, period, formatForDate]);
 
-  // Track if we've loaded initial data to avoid duplicate loads
-  const loadedRef = React.useRef(false);
 
   // Handle period change
   const handlePeriodChange = useCallback((newPeriod: Period) => {
@@ -67,28 +66,20 @@ export function History(): React.ReactElement {
     setEndDate(range.end);
   }, []);
 
-  // Load initial history data on mount
+  // Load history on mount and whenever period, dates or the selection change (one effect:
+  // a separate mount effect fetched everything twice, review FE-L1).
   useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
-    if (startDate && endDate && selectedIds.length > 0) {
+    if (selectedIds.length === 0) {
+      clearHistory(); // nothing selected: no stale chart (review FE-L2)
+      return;
+    }
+    if (!startDate || !endDate) return;
+    // Check if all selected IDs are valid for the current period
+    const validIdsForPeriod = historyDataGroups[period] || [];
+    if (selectedIds.every(id => validIdsForPeriod.includes(id))) {
       loadHistory(selectedIds, startDate, endDate);
     }
-  }, [loadHistory, selectedIds, startDate, endDate]);
-
-  // Load history when state changes (period, dates, or selected IDs)
-  useEffect(() => {
-    // Only load if we have valid data
-    if (startDate && endDate && selectedIds.length > 0) {
-      // Check if all selected IDs are valid for the current period
-      const validIdsForPeriod = historyDataGroups[period] || [];
-      const allValid = selectedIds.every(id => validIdsForPeriod.includes(id));
-      
-      if (allValid && loadedRef.current) {
-        loadHistory(selectedIds, startDate, endDate);
-      }
-    }
-  }, [startDate, endDate, selectedIds, period, loadHistory]);
+  }, [startDate, endDate, selectedIds, period, loadHistory, clearHistory]);
 
   const handleToggle = (id: string) => {
     setSelectedIds(prev => 
@@ -113,8 +104,9 @@ export function History(): React.ReactElement {
         setStartDate(`${range.from.getFullYear()}-${String(range.from.getMonth() + 1).padStart(2, '0')}`);
         setEndDate(`${range.to.getFullYear()}-${String(range.to.getMonth() + 1).padStart(2, '0')}`);
       } else {
-        setStartDate(range.from.toISOString().split('T')[0]);
-        setEndDate(range.to.toISOString().split('T')[0]);
+        // Local calendar day: toISOString() would shift to the previous day east of UTC.
+        setStartDate(format(range.from, 'yyyy-MM-dd'));
+        setEndDate(format(range.to, 'yyyy-MM-dd'));
       }
     }
   }, [period]);

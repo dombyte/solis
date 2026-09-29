@@ -1,75 +1,101 @@
-// Package server provides HTTP server lifecycle management for the Solis monitor API.
+// Package server manages the HTTP server lifecycle. The server is a non-restartable part:
+// if ListenAndServe fails unexpectedly, its health probe reports failed and the
+// supervisor escalates to a whole-app restart.
 package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"strconv"
+	"sync"
 	"time"
 
-	"github.com/dombyte/solis/internal/config"
-	"github.com/dombyte/solis/internal/logging"
-	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog"
+
+	"github.com/dombyte/solis/internal/health"
 )
 
-// logger is the package-level logger for server operations.
-var logger = logging.NewComponentLogger("http.server")
+// ShutdownTimeout bounds graceful shutdown.
+const ShutdownTimeout = 5 * time.Second
 
-// Server is the HTTP server for the Solis monitor API.
-type Server struct {
-	// config holds the app configuration (contains port and timeout).
-	config *config.AppSettings
-	// router is the Chi router with all routes configured.
-	router *chi.Mux
-	// httpServer is the underlying HTTP server.
-	httpServer *http.Server
+// idleTimeoutFactor scales the request timeout to the keep-alive idle timeout.
+const idleTimeoutFactor = 2
+
+// Settings are the listen port and the request timeout.
+type Settings struct {
+	// Port is the TCP listen port.
+	Port int
+	// Timeout bounds reading and writing a request (idle connections get twice that).
+	Timeout time.Duration
 }
 
-// New creates a new HTTP server instance.
-func New(cfg *config.AppSettings, router *chi.Mux) *Server {
+// Server wraps http.Server.
+type Server struct {
+	srv *http.Server
+	log zerolog.Logger
+
+	mu     sync.Mutex
+	failed error
+}
+
+// New creates a server listening on cfg.Port.
+func New(cfg Settings, handler http.Handler, log zerolog.Logger) *Server {
 	return &Server{
-		config: cfg,
-		router: router,
-		httpServer: &http.Server{
-			Addr:         fmt.Sprintf(":%d", cfg.Port),
-			Handler:      router,
-			ReadTimeout:  cfg.Timeout,
-			WriteTimeout: cfg.Timeout,
-			IdleTimeout:  cfg.Timeout * 2,
+		log: log,
+		srv: &http.Server{
+			Addr:              ":" + strconv.Itoa(cfg.Port),
+			Handler:           handler,
+			ReadTimeout:       cfg.Timeout,
+			ReadHeaderTimeout: cfg.Timeout,
+			WriteTimeout:      cfg.Timeout,
+			IdleTimeout:       cfg.Timeout * idleTimeoutFactor,
 		},
 	}
 }
 
-// Start starts the HTTP server.
+// Start binds the listener synchronously (so a busy port fails startup) and serves in
+// the background.
 func (s *Server) Start() error {
-	logger.Info().Msgf("Starting HTTP server on %s", s.httpServer.Addr)
+	ln, err := net.Listen("tcp", s.srv.Addr)
+	if err != nil {
+		return fmt.Errorf("http server: listen %s: %w", s.srv.Addr, err)
+	}
+	return s.Serve(ln)
+}
 
-	// Start server in a goroutine
+// Serve serves on ln in the background.
+func (s *Server) Serve(ln net.Listener) error {
+	s.log.Info().Str("addr", ln.Addr().String()).Msg("HTTP server listening")
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil {
-			if err != http.ErrServerClosed {
-				logger.Error().Msgf("HTTP server error: %v", err)
-			}
+		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.mu.Lock()
+			s.failed = err
+			s.mu.Unlock()
+			s.log.Error().Err(err).Msg("HTTP server failed")
 		}
 	}()
-
-	logger.Info().Msgf("HTTP server is running on port %d", s.config.Port)
 	return nil
 }
 
-// Stop stops the HTTP server gracefully.
+// Stop shuts the server down gracefully within ShutdownTimeout.
 func (s *Server) Stop(ctx context.Context) error {
-	logger.Info().Msg("Stopping HTTP server...")
-
-	// Create a context with timeout
-	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, ShutdownTimeout)
 	defer cancel()
-
-	if err := s.httpServer.Shutdown(stopCtx); err != nil {
-		logger.Error().Msgf("HTTP server shutdown error: %v", err)
-		return err
+	if err := s.srv.Shutdown(ctx); err != nil {
+		return fmt.Errorf("http server: shutdown: %w", err)
 	}
-
-	logger.Info().Msg("HTTP server stopped")
 	return nil
+}
+
+// Probe reports failed once the server stopped serving unexpectedly.
+func (s *Server) Probe() (health.State, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failed != nil {
+		return health.Failed, s.failed.Error()
+	}
+	return health.Healthy, ""
 }

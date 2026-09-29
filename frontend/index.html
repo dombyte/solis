@@ -4,9 +4,32 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#000000" />
     <title>Solis Monitor</title>
+    <script>
+      // Apply the stored theme before the first paint (no light flash before React
+      // loads, review FE-L6); mirrors ThemeProvider in main.tsx (key "solis-theme",
+      // default "dark", class on <html>).
+      (function () {
+        var t = 'dark';
+        try {
+          var stored = localStorage.getItem('solis-theme');
+          if (stored === 'light' || stored === 'dark') t = stored;
+          if (stored === 'system') {
+            t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+        } catch (e) {}
+        document.documentElement.classList.add(t);
+      })();
+      // Installed PWA only: block pinch zoom on iOS, which ignores touch-action for
+      // pinch (the CSS rule in index.css covers Android). A browser tab keeps it.
+      if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+        document.addEventListener('gesturestart', function (e) {
+          e.preventDefault();
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

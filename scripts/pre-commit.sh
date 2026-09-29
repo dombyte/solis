@@ -1,6 +1,11 @@
 #!/bin/bash
+# Pre-commit checks. golangci-lint (.golangci.yml) covers formatting (gofumpt, goimports),
+# line/function length, complexity, gosec, staticcheck, global state and the panic
+# policy; only what it cannot do runs separately (deadcode, govulncheck, build, tests).
+# Check-only: it never rewrites or stages files. Fix formatting with
+# `golangci-lint fmt` and lint findings by hand. Mock drift is checked in CI.
 
-set -e
+set -u
 
 echo "=== Running Pre-commit Checks ==="
 echo ""
@@ -8,7 +13,6 @@ echo ""
 # Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Track failures
@@ -16,7 +20,7 @@ FAILED=0
 
 # Helper function to print results
 print_result() {
-    if [ $1 -eq 0 ]; then
+    if [ "$1" -eq 0 ]; then
         echo -e "${GREEN}✓${NC} $2"
     else
         echo -e "${RED}✗${NC} $2"
@@ -24,132 +28,50 @@ print_result() {
     fi
 }
 
-# 1. Run gofmt
-echo "Running gofmt..."
-gofmt -w -s . 2>/dev/null
-print_result $? "gofmt"
-
-# 2. Run goimports
-echo "Running goimports..."
-if command -v goimports &> /dev/null; then
-    goimports -w -d . 2>/dev/null
-    print_result $? "goimports"
-else
-    echo -e "${YELLOW}⚠${NC} goimports not installed, skipping"
+if ! command -v golangci-lint &> /dev/null; then
+    echo -e "${RED}✗${NC} golangci-lint not installed (https://golangci-lint.run)"
+    exit 1
 fi
 
-# 3. Run golangci-lint
-echo "Running golangci-lint..."
-if command -v golangci-lint &> /dev/null; then
-    golangci-lint run --config .golangci.yml --fix 2>/dev/null || true
-    golangci-lint run --config .golangci.yml 2>/dev/null
-    print_result $? "golangci-lint"
+# 1. Format (gofumpt + goimports): report, never rewrite
+echo "Checking formatting..."
+FMT=$(golangci-lint fmt --diff --config .golangci.yml 2>&1)
+if [ -n "$FMT" ]; then
+    echo "$FMT"
+    print_result 1 "golangci-lint fmt (run 'golangci-lint fmt' to fix)"
 else
-    echo -e "${YELLOW}⚠${NC} golangci-lint not installed, skipping"
+    print_result 0 "golangci-lint fmt"
 fi
 
-# 4. Run gosec
-echo "Running gosec..."
-if command -v gosec &> /dev/null; then
-    gosec ./... 2>/dev/null
-    print_result $? "gosec"
+# 2. Lint
+echo "Linting..."
+golangci-lint run --config .golangci.yml
+print_result $? "golangci-lint run"
+
+# 3. Unused exported code (golangci's unused only sees unexported identifiers)
+echo "Checking for dead code..."
+DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./... 2>&1)
+if [ -n "$DEAD" ]; then
+    echo "$DEAD"
+    print_result 1 "deadcode"
 else
-    echo -e "${YELLOW}⚠${NC} gosec not installed, skipping"
+    print_result 0 "deadcode"
 fi
 
-# 5. Run staticcheck
-echo "Running staticcheck..."
-if command -v staticcheck &> /dev/null; then
-    staticcheck ./... 2>/dev/null
-    print_result $? "staticcheck"
-else
-    echo -e "${YELLOW}⚠${NC} staticcheck not installed, skipping"
-fi
+# 4. Known vulnerabilities in dependencies and the standard library
+echo "Checking for vulnerabilities..."
+go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+print_result $? "govulncheck"
 
-# 6. Check function length
-echo "Checking function lengths..."
-MAX_FUNC_LINES=40
-LONG_FUNCS=$(awk -v MAX="$MAX_FUNC_LINES" '
-FNR == 1 {
-    in_func = 0
-    lines = 0
-}
-/^func / {
-    if (in_func && lines > MAX) {
-        print FILENAME ": line " start ": function is " lines " lines (> " MAX ")"
-    }
-    in_func = 1
-    start = FNR
-    lines = 1
-    next
-}
-in_func {
-    lines++
-}
-END {
-    if (in_func && lines > MAX) {
-        print FILENAME ": line " start ": function is " lines " lines (> " MAX ")"
-    }
-}' $(find . -name "*.go" -not -name "*_test.go" -not -path "./.git/*" -not -path "./vendor/*") 2>/dev/null || true)
-if [ -n "$LONG_FUNCS" ]; then
-    echo "Found functions exceeding $MAX_FUNC_LINES lines:"
-    echo "$LONG_FUNCS"
-    print_result 1 "function length check"
-else
-    print_result 0 "function length check"
-fi
-
-# 7. Check line length
-echo "Checking line lengths..."
-LONG_LINES=$(awk 'length > 100 {print FILENAME":"FNR": Line too long ("length" chars)}' $(find . -name "*.go" -not -name "*_test.go" -not -path "./.git/*" -not -path "./vendor/*") 2>/dev/null || true)
-if [ -n "$LONG_LINES" ]; then
-    echo "Found lines exceeding 100 characters:"
-    echo "$LONG_LINES"
-    print_result 1 "line length check"
-else
-    print_result 0 "line length check"
-fi
-
-
-# 8. Run tests
-echo "Running tests..."
-if go test ./... 2>/dev/null; then
-    print_result 0 "tests"
-else
-    print_result 1 "tests"
-fi
-
-
-
-# 9. Build check
+# 5. Build
 echo "Building..."
-if go build ./... 2>/dev/null; then
-    print_result 0 "build"
-else
-    print_result 1 "build"
-fi
+go build ./...
+print_result $? "build"
 
-# 10. Check for global state
-echo "Checking for global state..."
-GLOBAL_VARS=$(grep -rn "^var [a-z]" --include="*.go" . | grep -v "_test.go" | grep -v "// " | grep -v "mock" | grep -v "^var [a-z].*=.*$" || true)
-if [ -n "$GLOBAL_VARS" ]; then
-    echo "Found package-level global state:"
-    echo "$GLOBAL_VARS"
-    print_result 1 "global state check"
-else
-    print_result 0 "global state check"
-fi
-
-# 11. Check for panic usage
-echo "Checking for panic usage..."
-PANICS=$(grep -rn "panic(" --include="*.go" . | grep -v "_test.go" | grep -v "recover" | grep -v "// " || true)
-if [ -n "$PANICS" ]; then
-    echo "Found panic calls:"
-    echo "$PANICS"
-    print_result 1 "panic check"
-else
-    print_result 0 "panic check"
-fi
+# 6. Tests (with the race detector, as in CI)
+echo "Running tests..."
+go test -race ./...
+print_result $? "tests"
 
 echo ""
 echo "=== Pre-commit Checks Complete ==="
@@ -157,10 +79,6 @@ echo "=== Pre-commit Checks Complete ==="
 if [ $FAILED -ne 0 ]; then
     echo -e "${RED}Some checks failed. Please fix the issues before committing.${NC}"
     exit 1
-else
-    echo -e "${GREEN}All checks passed!${NC}"
-
-    # Add files if they were modified by formatting
-    git add -u
-    exit 0
 fi
+echo -e "${GREEN}All checks passed!${NC}"
+exit 0

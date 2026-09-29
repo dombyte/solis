@@ -1,17 +1,14 @@
 import React from 'react';
 import { formatValue } from '../../lib/utils/format';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
-import { Badge } from '../ui/badge';
 import { Skeleton } from '../ui/skeleton';
-import { Popover, PopoverTrigger, PopoverContent } from '../ui/popover';
-import { Info } from 'lucide-react';
+import { InfoPopover } from '../ui/info-popover';
 
 interface ValueDisplayProps {
   dataId: string;
   showLabel?: boolean;
   showUnit?: boolean;
   className?: string;
-  showStatusIndicator?: boolean;
   showTooltip?: boolean;
 }
 
@@ -20,17 +17,17 @@ export function ValueDisplay({
   showLabel = true,
   showUnit = true,
   className = '',
-  showStatusIndicator = false,
   showTooltip = true,
 }: ValueDisplayProps): React.ReactElement {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
-  const registerValues = useRegisterStore(state => state.registerValues);
+  // Select only this value: unchanged values keep their object across WS frames, so the
+  // component re-renders only when its own value changes (review FE-M2).
+  const value = useRegisterStore(state => state.registerValues.get(dataId));
   const getResolvedRegisterById = useRegisterStore(state => state.getResolvedRegisterById);
   const isLoading = useRegisterStore(state => state.isLoading);
   
   const resolvedRegister = getResolvedRegisterById(dataId);
   const register = resolvedRegister || registerMetadata.get(dataId);
-  const value = registerValues.get(dataId);
 
   if (!register) {
     return <span className={className}>-</span>;
@@ -51,8 +48,7 @@ export function ValueDisplay({
   let displayValue: string = '-';
   let displayUnit = '';
   const statusDecoded = value?.statusDecoded;
-  const rawValue = value?.rawValue;
-  
+
   // Use resolved display value if available from template resolution
   if (resolvedRegister?.displayValue !== undefined) {
     const resolvedValue = resolvedRegister.displayValue;
@@ -138,60 +134,18 @@ export function ValueDisplay({
     }
   }
 
-  // Check if this is a status register with active faults/statuses
-  const hasStatusIssues = (statusDecoded: unknown): boolean => {
-    if (!statusDecoded) return false;
-    if (Array.isArray(statusDecoded)) {
-      return statusDecoded.length > 0;
-    }
-    if (typeof statusDecoded === 'object' && statusDecoded !== null) {
-      const obj = statusDecoded as { name?: string };
-      return obj.name !== 'Normal' && obj.name !== 'OK' && obj.name !== 'No fault';
-    }
-    return false;
-  };
-
-  const hasIssues = hasStatusIssues(statusDecoded);
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 sm:gap-2 ${className}`}>
       {showLabel && (
-        <span className="text-xs sm:text-sm font-medium truncate min-w-0">{register.name}:</span>
+        <span className="text-xs sm:text-sm font-medium text-muted-foreground truncate min-w-0">{register.name}:</span>
       )}
       <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
         <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
-        {(showStatusIndicator && hasIssues && rawValue !== undefined) || 
-         (showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined) ? (
-          <div className="flex-shrink-0">
-            {showStatusIndicator && hasIssues && rawValue !== undefined && (
-              <Badge variant="destructive" className="text-xs px-1.5 py-0.5 truncate max-w-[80px] sm:max-w-[100px] md:max-w-[120px] lg:max-w-[140px]">
-                {Array.isArray(statusDecoded) ? statusDecoded.length : '!'}
-              </Badge>
-            )}
-            {showStatusIndicator && !hasIssues && rawValue !== undefined && statusDecoded !== undefined && (
-              <Badge variant="outline" className="text-xs px-1.5 py-0.5">
-                OK
-              </Badge>
-            )}
-          </div>
-        ) : null}
         {showTooltip && register.description && (
-          <div className="flex-shrink-0">
-            <Popover>
-              <PopoverTrigger asChild>
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm p-1"
-                  aria-label={`Info about ${register.name}`}
-                >
-                  <Info className="h-3.5 w-3.5" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 max-w-[300px]" align="center" sideOffset={8}>
-                <p className="text-sm text-popover-foreground whitespace-normal break-words">{register.description}</p>
-              </PopoverContent>
-            </Popover>
-          </div>
+          <InfoPopover label={register.name}>
+            <p>{register.description}</p>
+          </InfoPopover>
         )}
       </div>
     </div>

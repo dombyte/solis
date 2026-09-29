@@ -3,20 +3,20 @@ WORKDIR /frontend
 # Accept git commit hash as build argument with default value
 ARG VITE_GIT_COMMIT_HASH
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
+RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
 FROM node:26-alpine AS docs
 WORKDIR /docs
 COPY docs/package.json docs/package-lock.json ./
-RUN npm install
+RUN npm ci
 COPY docs/ .
 RUN npm run build
 
 
 
-FROM golang:1.27.1-alpine AS builder
+FROM golang:1.26.8-alpine AS builder
 WORKDIR /app
 RUN apk --no-cache add ca-certificates tzdata
 
@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 go build \
     -ldflags="-w -s" \
     -a \
     -installsuffix cgo \
-    -o solis ./cmd/main.go
+    -o solis ./cmd
 
 
 FROM scratch

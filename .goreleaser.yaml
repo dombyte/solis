@@ -3,12 +3,16 @@ version: 2
 project_name: solis
 before:
   hooks:
-    - go mod tidy
-    - go fmt ./...
+    # CI already enforces a tidy go.mod; verify only, never rewrite the tree mid-release.
+    - go mod verify
+    # Frontend and API docs are built once here and shipped in both the archives and
+    # the images (the binary serves ./frontend/dist and ./docs/dist from disk).
+    - make frontend VITE_GIT_COMMIT_HASH={{ .Version }}-{{ .ShortCommit }}
+    - make docs
 
 builds:
   - id: solis-multi-arch
-    main: ./cmd/main.go
+    main: ./cmd
     binary: solis
     goos:
       - linux
@@ -17,93 +21,139 @@ builds:
       - amd64
       - arm
       - arm64
+    # v1 runs on every x86-64 CPU (v3 needs AVX2, missing on many NAS/Celeron boxes).
     goamd64:
-      - v3
+      - v1
     goarm:
       - 7
     goarm64:
       - v8.0
     env:
       - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # CommitDate (not Date) keeps rebuilds of the same tag byte-identical.
     ldflags:
-      - "-s -w"
+      - >-
+        -s -w
+        -X main.Version={{ .Version }}
+        -X main.Commit={{ .ShortCommit }}
+        -X main.BuildDate={{ .CommitDate }}
+        -X main.GoVersion={{ envOrDefault "GOVERSION" "unknown" }}
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - formats: ["tar.gz"]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    wrap_in_directory: true
+    files:
+      - LICENSE
+      - README.md
+      - example/config.yaml
+      - frontend/dist
+      - docs/dist
 
 changelog:
   sort: asc
-  use: github
-  format: |
-    {{ .Message -}}
-        {{- if .Logins }} by {{ .Logins | englishJoin }}{{- end -}}
-        {{- if .SHA }}
-          {{- $sha := split .SHA "" -}}
-          {{- if .Logins }} in {{ else }}in{{ end }}[#{{ index $sha 0 }}{{ index $sha 1 }}{{ index $sha 2 }}{{ index $sha 3 }}{{ index $sha 4 }}{{ index $sha 5 }}{{ index $sha 6 }}]({{ .GitURL }}/commit/{{ .SHA }})
-        {{- end }}
+  use: git
+  abbrev: 7
   filters:
     exclude:
-      - "^test:"
-      - "^chore:"
-      - "Merge branch"
-      - "Merge pull request"
-      - "^test:"
-      - "^rebase:"
+      - "^Merge (branch|pull request|remote-tracking branch)"
+      - '^Revert "'
+      - "^WIP"
+  # Commit subjects follow Conventional Commits (see AGENTS.md "Commits"). A commit lands
+  # in the first group (list order) whose regexp matches; "order" sets the display order.
+  groups:
+    - title: Breaking changes
+      regexp: '^\w+(\(.+\))?!:'
+      order: 0
+    - title: Dependencies
+      regexp: '^\w+\(deps\):'
+      order: 6
+    - title: Features
+      regexp: '^feat(\(.+\))?:'
+      order: 1
+    - title: Bug fixes
+      regexp: '^fix(\(.+\))?:'
+      order: 2
+    - title: Performance
+      regexp: '^perf(\(.+\))?:'
+      order: 3
+    - title: Refactoring
+      regexp: '^refactor(\(.+\))?:'
+      order: 4
+    - title: Documentation
+      regexp: '^docs(\(.+\))?:'
+      order: 5
+    - title: Maintenance
+      regexp: '^(chore|build|ci|test|style)(\(.+\))?:'
+      order: 7
+    # Only for subjects without a type (commits from before the convention).
+    - title: Other changes
+      order: 999
 
 release:
-  name_template: "v{{.Version}}"
+  github:
+    owner: dombyte
+    name: solis
+  name_template: "v{{ .Version }}"
   prerelease: auto
   header: |
     {{- if .Prerelease }}
     > [!WARNING]
     > **This is a pre-release version. Use with caution and report any issues you encounter.**
-
-    **{{.TagContents}}**
-    {{ else }}
-    {{.ProjectName}} v{{.Version}} is available!
     {{- end }}
 
-  footer: |
-    {{- if and .PreviousTag .Tag -}}
-    **Full Changelog**: [{{ .PreviousTag }}...{{ .Tag }}]({{ .GitURL }}/compare/{{ .PreviousTag }}...{{ .Tag }})
-    {{- end -}}
 
-    {{if .Env.GITHUB_REPOSITORY}}
-    ## Docker Images
-      - `ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:v{{ .Version }}`
-      {{if not .Prerelease}}
-      - `ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest`
-      {{- end -}}
-    {{- end -}}
+
+  footer: |
+    ## Docker images
+
+    Platforms: `linux/amd64`, `linux/arm64`, `linux/arm/v7`
+
+    - `ghcr.io/dombyte/solis:v{{ .Version }}`
+    {{- if not .Prerelease }}
+    - `ghcr.io/dombyte/solis:v{{ .Major }}.{{ .Minor }}`
+    - `ghcr.io/dombyte/solis:v{{ .Major }}`
+    - `ghcr.io/dombyte/solis:latest`
+    {{- end }}
 
 dockers_v2:
   - id: multi-arch
     ids:
       - solis-multi-arch
     images:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}"
+      - ghcr.io/dombyte/solis
+    # Pre-releases only get their exact tag; empty tags are skipped.
     tags:
       - "v{{ .Version }}"
+      - "{{ if not .Prerelease }}v{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}v{{ .Major }}{{ end }}"
       - "{{ if not .Prerelease }}latest{{ end }}"
     platforms:
-      - "linux/amd64"
-      - "linux/arm64"
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
     dockerfile: Dockerfile.goreleaser
     extra_files:
-      - frontend/
-      - docs/
-    labels:
-      "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
-      "org.opencontainers.image.created": "{{.Date}}"
-      "org.opencontainers.image.name": "{{.ProjectName}}"
-      "org.opencontainers.image.revision": "{{.FullCommit}}"
-      "org.opencontainers.image.version": "{{.Version}}"
-      "org.opencontainers.image.source": "{{.GitURL}}"
-    annotations:
-      "org.opencontainers.image.description": "Solis Monitor Multi-Architecture AMD64_v3 and ARM64_v8"
-    build_args:
-      VITE_GIT_COMMIT_HASH: "{{.Version}}-{{.ShortCommit}}"
+      - frontend/dist
+      - docs/dist
+    labels: &oci
+      org.opencontainers.image.title: Solis Monitor
+      org.opencontainers.image.description: >-
+        Monitors a Solis hybrid inverter over Modbus TCP/RTU and serves a live web dashboard
+      org.opencontainers.image.url: https://github.com/dombyte/solis
+      org.opencontainers.image.documentation: https://github.com/dombyte/solis#readme
+      org.opencontainers.image.source: https://github.com/dombyte/solis
+      org.opencontainers.image.vendor: dombyte
+      org.opencontainers.image.licenses: MIT
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
+    # Annotations are what ghcr.io shows on the package page for multi-arch images.
+    annotations: *oci
+
 checksum:
   name_template: "checksums.txt"

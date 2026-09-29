@@ -25,6 +25,7 @@ linters:
     - ineffassign
     - gocyclo
     - dupl
+    - mnd
     - wastedassign
 
     # Correctness / bug finding
@@ -46,14 +47,29 @@ linters:
     # Code structure
     - lll
 
+    - gochecknoglobals
+    - forbidigo
+
   settings:
+    forbidigo:
+      forbid:
+        - pattern: ^panic$
+          msg: "no panic at runtime; return an error"
+
     # Line length linter - hard limit of 100 chars per Global Plan
     lll:
       line-length: 100
+      tab-width: 4
 
-    # Cyclomatic complexity linter
+    # Cyclomatic complexity linter (reports > min-complexity)
     gocyclo:
-      min-complexity: 12
+      min-complexity: 7
+
+    # Magic numbers; register/status tables are data.
+    mnd:
+      ignored-files:
+        - internal/solis/table\.go$
+        - internal/solis/status_tables\.go$
 
     # Duplicate code linter
     dupl:
@@ -88,10 +104,10 @@ linters:
         - name: package-comments
           disabled: false
 
-        # Style: max function length (warning at 60)
+        # Style: max function length (args = max statements, max lines)
         - name: function-length
           disabled: false
-          arguments: [60, 0]
+          arguments: [40, 40]
 
         # Style: max function parameters
         - name: argument-limit
@@ -123,7 +139,7 @@ linters:
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)reff/
+      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/
@@ -137,20 +153,28 @@ linters:
       - legacy
       - std-error-handling
     rules:
-      - linters: [revive, dupl, errcheck, gosec, lll]
+      - linters: [revive, dupl, errcheck, gosec, lll, gochecknoglobals, forbidigo, mnd]
         path: _test\.go
       - linters: [rowserrcheck, sqlclosecheck, bodyclose]
         path: _test\.go
 
 formatters:
   enable:
+    - gofumpt
     - goimports
+  settings:
+    gofumpt:
+      extra-rules: false
+    goimports:
+      # Import groups: stdlib, third-party, project (AGENTS.md code style)
+      local-prefixes:
+        - github.com/dombyte/solis
   exclusions:
     generated: lax
     paths:
       - (^|/)test/
       - (^|/)mocks/
-      - (^|/)reff/
+      - (^|/)ref/
       - (^|/)vendor/
       - (^|/)frontend/node_modules/
       - (^|/)third_party/

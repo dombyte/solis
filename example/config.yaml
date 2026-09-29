@@ -1,0 +1,61 @@
+# Solis Monitor configuration example. Copy to the directory you run the app in (next to
+# docker-compose.yaml) as config.yaml and adjust `modbus.address`.
+#
+# Every setting can be overridden with an environment variable: SOLIS_ + the path in upper
+# case with "_" (e.g. SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502). Durations need a
+# unit (30s, 5m, 24h, 7d, 1y); a bare number is rejected.
+
+app:
+  debug: INFO # DEBUG, INFO, WARN, ERROR, FATAL
+  port: 8080
+  timeout: 30s # HTTP request and storage read timeout (at least 1s)
+
+poller:
+  # Base interval between poll cycles (at least 1s). Also drives the aggregator and the
+  # health graces.
+  interval: 5s
+  # Retries per register block after a failed read (2 = up to 3 reads)
+  block_attempts: 2
+  # Delay between retries of the same block
+  block_retry_delay: 1s
+  # Delay between successive block reads (0 = immediate)
+  block_interval: 0s
+  # Maximum duration of a full poll cycle; poll_timeout + modbus.timeout must be < 3 x interval
+  poll_timeout: 5s
+
+modbus:
+  # The URL scheme selects the transport: tcp://host:port or rtu://<serial device path>
+  address: "tcp://192.168.1.100:502"
+  timeout: 2s
+  slave_id: 1 # 1-247
+  # RTU (serial) only; 0 / "" = library default 19200 8N2. Example for an RS485 adapter:
+  # address: "rtu:///dev/ttyUSB0"
+  # speed: 9600
+  # data_bits: 8
+  # parity: "N" # N, E or O
+  # stop_bits: 1
+
+# Local time at which the inverter's daily counters roll over (strict 24h HH:MM).
+# The timezone comes from the TZ environment variable, never from this file.
+rollover:
+  time: "23:59"
+
+storage:
+  path: ./data/solis.db
+  # Retention of daily rows; monthly and yearly rows follow it. Only periods of already
+  # frozen years are deleted. Units: s, m, h, d, w, y, combinable (e.g. "1y6w").
+  daily_retention: 10y
+  # Retention of status/fault change rows
+  error_retention: 10y
+  wal_mode: true
+  synchronous: NORMAL # OFF, NORMAL, FULL, EXTRA
+  temp_store: MEMORY # DEFAULT, FILE, MEMORY
+  # Periodic online backups into data/backups (a backup before schema migrations is
+  # always taken, whatever this says)
+  enable_backup: true
+  max_backups: 3 # 0 = keep all
+  backup_interval: 24h
+  cleanup_interval: 24h
+
+# There is no aggregator section: monthly/yearly/total values are computed from the daily
+# rows automatically. To recompute them, stop the app and run: solis backfill --years N

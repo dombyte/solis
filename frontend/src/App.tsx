@@ -4,12 +4,10 @@ import { lazy, Suspense } from 'react';
 import { MobileNav } from './components/layout/MobileNav';
 import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
-import { ToastContainer } from './components/layout/ToastContainer';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { LoadingScreen } from './components/layout/LoadingScreen';
 import { useMobile } from './hooks/useMobile';
 
-import { ToastProvider } from './components/ui/toast';
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const History = lazy(() => import('./pages/History').then(m => ({ default: m.History })));
@@ -20,9 +18,8 @@ export function App() {
   const isMobile = useMobile();
 
   return (
-    <ToastProvider>
         <BrowserRouter>
-          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'pb-24' : 'pb-0'}`}>
+          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'mobile-nav-spacer' : 'pb-0'}`}>
             {!isMobile && <DesktopNav />}
             <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
               {isMobile && <MobileHeader />}
@@ -48,10 +45,8 @@ export function App() {
               </main>
               {isMobile && <MobileNav />}
             </div>
-            <ToastContainer />
             <UpdateBanner />
           </div>
         </BrowserRouter>
-      </ToastProvider>
   );
 }

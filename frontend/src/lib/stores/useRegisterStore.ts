@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { RegisterMetadata, RegisterValue, SolisStatusDecoded, FaultStatusDecoded, ApiDataObject } from '../../types';
+import type { RegisterMetadata, RegisterValue, SolisStatusDecoded, ApiDataObject, WsValueDTO } from '../../types';
 import { apiDataObjects } from '../config/data';
 import { resolveTemplate, isTemplate, type TemplateContext } from '../utils/template';
 
@@ -15,30 +15,19 @@ interface RegisterStoreState {
   isConnected: boolean;
   lastUpdated: Date | null;
   isLoading: boolean;
-  error: string | null;
   
   // Actions
   initialize: () => Promise<void>;
-  updateValue: (key: string, value: unknown, timestamp?: string) => void;
-  updateValues: (data: Record<string, unknown>, timestamp?: string) => void;
+  applyWsValues: (values: Record<string, WsValueDTO>, ts?: string, removed?: string[]) => void;
   setConnected: (connected: boolean) => void;
-  setLoading: (loading: boolean) => void;
-  setError: (error: string | null) => void;
-  
+  clearValues: () => void;
+
   // Getters
   getRegisterById: (id: string) => RegisterMetadata | undefined;
-  getRegisterByKey: (key: string) => RegisterMetadata | undefined;
-  getValueById: (id: string) => RegisterValue | undefined;
-  getValueByKey: (key: string) => RegisterValue | undefined;
-  getValuesByGroup: (groupId: string) => RegisterValue[];
-  getAllValues: () => RegisterValue[];
 
   // Template resolution getter
   getResolvedRegisterById: (id: string) => (RegisterMetadata & { displayValue: number | string | null | undefined }) | undefined;
   
-  // Helper methods
-  hasDataForId: (id: string) => boolean;
-  hasDataForKey: (key: string) => boolean;
 }
 
 // Convert ApiDataObject to RegisterMetadata
@@ -72,7 +61,7 @@ function resolveRegisterMetadata(
     return { ...metadata, displayValue };
   }
   
-  const val = regValue || { value: null, rawValue: undefined, timestamp: undefined, statusDecoded: undefined } as RegisterValue;
+  const val = regValue || { value: null, timestamp: undefined, statusDecoded: undefined } as RegisterValue;
   
   const context: TemplateContext = {
     // From metadata
@@ -97,14 +86,14 @@ function resolveRegisterMetadata(
     
     // From RegisterValue
     value: val.value,
-    rawValue: val.rawValue,
     timestamp: val.timestamp,
     statusDecoded: val.statusDecoded,
-    
-    // Direct API data properties (for template resolution)
-    DecodedValue: val.rawValue !== undefined ? val.rawValue : (typeof val.value === 'number' ? val.value : undefined),
-    RawValue: val.rawValue,
-    StringValue: val.value !== null && val.value !== undefined 
+
+    // Direct API data properties (for template resolution); the backend already sends a
+    // single scaled/rounded value, so DecodedValue and RawValue alias the same number.
+    DecodedValue: typeof val.value === 'number' ? val.value : undefined,
+    RawValue: typeof val.value === 'number' ? val.value : undefined,
+    StringValue: val.value !== null && val.value !== undefined
       ? String(val.value) : '',
   };
   
@@ -122,7 +111,7 @@ function resolveRegisterMetadata(
   } else if (metadata.value) {
     displayValue = metadata.value;
   } else {
-    displayValue = val.value ?? val.rawValue;
+    displayValue = val.value;
   }
   
   return {
@@ -148,7 +137,6 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
   isConnected: false,
   lastUpdated: null,
   isLoading: true,
-  error: null,
 
   initialize: () => {
     return new Promise<void>((resolve) => {
@@ -181,166 +169,72 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
     });
   },
 
-  updateValue: (key, value, timestamp) => {
-    const regByKey = get().registerMetadataByKey.get(key);
-    if (regByKey) {
-      const newValues = new Map(get().registerValues);
-      
-      // Handle status_decoded if present in the value object
-      let statusDecoded: SolisStatusDecoded | FaultStatusDecoded | undefined;
-      let displayValue: number | string | null = typeof value === 'number' ? value : typeof value === 'string' ? value : null;
-      let rawValue: number | undefined;
-      
-      if (typeof value === 'object' && value !== null) {
-        const val = value as Record<string, unknown>;
-        // Extract status_decoded first as it takes priority for display
-        if (val.status_decoded !== undefined && val.status_decoded !== null) {
-          statusDecoded = val.status_decoded as SolisStatusDecoded | FaultStatusDecoded;
-          // For status registers, use the decoded status as the display value
-          if (Array.isArray(statusDecoded)) {
-            displayValue = statusDecoded.join(', ');
-          } else if (typeof statusDecoded === 'object') {
-            const statusObj = statusDecoded as { name?: string; description?: string };
-            displayValue = statusObj.name || JSON.stringify(statusDecoded);
-          } else {
-            displayValue = String(statusDecoded);
-          }
-          // For rawValue, try to extract the numeric raw value
-          rawValue = (val.RawValue as number | undefined) ?? (val.DecodedValue as number | undefined);
-        } else {
-          // For numeric registers without status_decoded, prefer DecodedValue then RawValue
-          // This avoids using StringValue which might contain debug info like "Raw: 498"
-          const decodedValue = val.DecodedValue as number | string | undefined;
-          const rawValueTemp = val.RawValue as number | string | undefined;
-          const stringValue = val.StringValue as string | undefined;
-          displayValue = decodedValue ?? rawValueTemp ?? stringValue ?? (value !== null && value !== undefined ? String(value) : null);
-          rawValue = (val.RawValue as number | undefined) ?? (val.DecodedValue as number | undefined);
-        }
-      } else if (typeof value === 'number') {
-        // Simple numeric value
-        rawValue = value;
-        displayValue = value;
+  applyWsValues: (values, ts, removed) => {
+    const metadataByKey = get().registerMetadataByKey;
+    const updates = new Map(get().registerValues);
+    let changed = false;
+
+    // Keys the server no longer has a value for: drop them so the UI shows "no data"
+    // instead of a stale value.
+    removed?.forEach((key) => {
+      const reg = metadataByKey.get(key);
+      if (reg && updates.delete(reg.id)) changed = true;
+    });
+
+    Object.entries(values).forEach(([key, dto]) => {
+      const reg = metadataByKey.get(key);
+      if (!reg) return;
+      changed = true;
+
+      const statusDecoded = dto.status_decoded;
+      let displayValue: number | string | null;
+      if (statusDecoded !== undefined && statusDecoded !== null) {
+        displayValue = Array.isArray(statusDecoded)
+          ? statusDecoded.join(', ')
+          : (statusDecoded as SolisStatusDecoded).name ?? JSON.stringify(statusDecoded);
+      } else {
+        displayValue = dto.value;
       }
-      
-      newValues.set(regByKey.id, {
+
+      const timestamp = dto.timestamp ?? ts;
+
+      updates.set(reg.id, {
         key,
-        id: regByKey.id,
+        id: reg.id,
         value: displayValue,
-        rawValue: typeof rawValue === 'number' ? rawValue : undefined,
         timestamp,
-        unit: regByKey.unit,
+        unit: dto.unit ?? reg.unit,
         statusDecoded,
       });
-      set({
-        registerValues: newValues,
-        lastUpdated: timestamp ? new Date(timestamp) : new Date(),
-      });
-    }
-  },
-
-  updateValues: (data, timestamp) => {
-    const updates = new Map(get().registerValues);
-    const metadataByKey = get().registerMetadataByKey;
-    
-    Object.entries(data).forEach(([key, value]) => {
-      const regByKey = metadataByKey.get(key);
-      if (regByKey) {
-        // Handle case where value is an object with DecodedValue (from WebSocket)
-        let actualValue: number | string | null = typeof value === 'number' ? value : typeof value === 'string' ? value : null;
-        let rawValue: number | string | undefined = undefined;
-        let statusDecoded: SolisStatusDecoded | FaultStatusDecoded | undefined;
-        
-        if (typeof value === 'object' && value !== null) {
-          const val = value as Record<string, unknown>;
-          // Extract status_decoded first as it takes priority for display
-          if (val.status_decoded !== undefined && val.status_decoded !== null) {
-            statusDecoded = val.status_decoded as SolisStatusDecoded | FaultStatusDecoded;
-            // For status registers, use the decoded status as the display value
-            if (Array.isArray(statusDecoded)) {
-              actualValue = statusDecoded.join(', ');
-            } else if (typeof statusDecoded === 'object') {
-              const statusObj = statusDecoded as { name?: string; description?: string };
-              actualValue = statusObj.name || JSON.stringify(statusDecoded);
-            } else {
-              actualValue = String(statusDecoded);
-            }
-            // For rawValue, try to extract the numeric raw value
-            rawValue = (val.RawValue as number | string | undefined) ?? (val.DecodedValue as number | string | undefined);
-          } else {
-            // For numeric registers without status_decoded, prefer DecodedValue then RawValue
-            // This avoids using StringValue which might contain debug info like "Raw: 498"
-            const decodedValue = val.DecodedValue as number | string | undefined;
-            const rawValueTemp = val.RawValue as number | string | undefined;
-            const stringValue = val.StringValue as string | undefined;
-            actualValue = decodedValue ?? rawValueTemp ?? stringValue ?? (value !== null && value !== undefined ? String(value) : null);
-            rawValue = (val.RawValue as number | string | undefined) ?? (val.DecodedValue as number | string | undefined);
-          }
-        } else if (typeof value === 'number') {
-          // Simple numeric value
-          actualValue = value;
-          rawValue = value;
-        }
-        
-        updates.set(regByKey.id, {
-          key,
-          id: regByKey.id,
-          value: actualValue,
-          rawValue: typeof rawValue === 'number' ? rawValue : undefined,
-          timestamp,
-          unit: regByKey.unit,
-          statusDecoded,
-        });
-      }
     });
-    
+
+    if (!changed) return;
+
     set({
       registerValues: updates,
-      lastUpdated: timestamp ? new Date(timestamp) : new Date(),
+      lastUpdated: ts ? new Date(ts) : new Date(),
     });
   },
 
   setConnected: (connected) => set({ isConnected: connected }),
-  setLoading: (loading) => set({ isLoading: loading }),
-  setError: (error) => set({ error }),
+
+  clearValues: () => {
+    const { registerMetadata, lastUpdated, registerValues } = get();
+    const empty = Array.from(registerValues.values()).every(v => v.value === null);
+    if (empty && lastUpdated === null) return; // repeated reconnect failures: no re-render
+    const values = new Map<string, RegisterValue>();
+    registerMetadata.forEach(reg => {
+      values.set(reg.id, { key: reg.key, id: reg.id, value: null, unit: reg.unit });
+    });
+    set({ registerValues: values, lastUpdated: null });
+  },
 
   getRegisterById: (id) => get().registerMetadata.get(id),
-  getRegisterByKey: (key) => get().registerMetadataByKey.get(key),
-  
-  getValueById: (id) => get().registerValues.get(id),
-  
-  getValueByKey: (key) => {
-    const reg = get().registerMetadataByKey.get(key);
-    return reg ? get().registerValues.get(reg.id) : undefined;
-  },
   
   getResolvedRegisterById: (id) => {
     const metadata = get().registerMetadata.get(id);
     if (!metadata) return undefined;
     const value = get().registerValues.get(id);
     return resolveRegisterMetadata(metadata, value);
-  },
-  
-  getValuesByGroup: (groupId) => {
-    const allValues = Array.from(get().registerValues.values());
-    const metadata = get().registerMetadata;
-    
-    return allValues.filter(v => {
-      const reg = metadata.get(v.id);
-      return reg?.group === groupId;
-    });
-  },
-  
-  getAllValues: () => Array.from(get().registerValues.values()),
-  
-  hasDataForId: (id) => {
-    const value = get().registerValues.get(id);
-    return value !== undefined && value.value !== null;
-  },
-  
-  hasDataForKey: (key) => {
-    const reg = get().registerMetadataByKey.get(key);
-    if (!reg) return false;
-    const value = get().registerValues.get(reg.id);
-    return value !== undefined && value.value !== null;
   },
 }));

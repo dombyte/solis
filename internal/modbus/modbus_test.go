@@ -3,589 +3,261 @@ package modbus
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/dombyte/solis/internal/config"
+	"github.com/rs/zerolog"
+	sv "github.com/simonvetter/modbus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dombyte/solis/internal/util"
+	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
-func TestNewClient_InvalidType(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type: "invalid",
-	}
+// device serves input register i as value i.
+type device struct{ reads atomic.Int32 }
 
-	_, err := NewClient(cfg)
-	if err == nil {
-		t.Error("NewClient() expected error for invalid type, got nil")
-	}
+func (d *device) HandleCoils(*sv.CoilsRequest) ([]bool, error) { return nil, sv.ErrIllegalFunction }
+func (d *device) HandleDiscreteInputs(*sv.DiscreteInputsRequest) ([]bool, error) {
+	return nil, sv.ErrIllegalFunction
+}
 
-	expectedMsg := "unsupported modbus type: invalid (only tcp is supported)"
-	if err.Error() != expectedMsg {
-		t.Errorf("NewClient() error = %v, expected %v", err.Error(), expectedMsg)
+func (d *device) HandleHoldingRegisters(*sv.HoldingRegistersRequest) ([]uint16, error) {
+	return nil, sv.ErrIllegalFunction
+}
+
+// illegalAddr answers every read with an ILLEGAL DATA ADDRESS exception.
+const illegalAddr = 9000
+
+func (d *device) HandleInputRegisters(req *sv.InputRegistersRequest) ([]uint16, error) {
+	d.reads.Add(1)
+	if req.Addr == illegalAddr {
+		return nil, sv.ErrIllegalDataAddress
+	}
+	out := make([]uint16, req.Quantity)
+	for i := range out {
+		out[i] = req.Addr + uint16(i)
+	}
+	return out, nil
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := l.Addr().(*net.TCPAddr).Port
+	require.NoError(t, l.Close())
+	return port
+}
+
+func startDevice(t *testing.T, port int) *sv.ModbusServer {
+	t.Helper()
+	srv, err := sv.NewServer(&sv.ServerConfiguration{
+		URL: "tcp://127.0.0.1:" + strconv.Itoa(port), Timeout: time.Second, MaxClients: 2,
+	}, &device{})
+	require.NoError(t, err)
+	require.NoError(t, srv.Start())
+	return srv
+}
+
+func settings(port int) Settings {
+	return Settings{
+		Address: "tcp://127.0.0.1:" + strconv.Itoa(port), UnitID: 1,
+		Timeout: 500 * time.Millisecond,
 	}
 }
 
-func TestNewClient_ValidTCP(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
+func TestSettingsValidate(t *testing.T) {
+	assert.NoError(t, settings(502).Validate())
+	assert.NoError(t, Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}.Validate())
+	assert.NoError(t, Settings{
+		Address: "rtu:///dev/ttyUSB0", Timeout: time.Second,
+		Parity: "e",
+	}.Validate())
+	for _, s := range []Settings{
+		{},
+		{Address: "tcp://h:502", Timeout: 0},
+		{Address: "udp://h:502", Timeout: 1},
+		{Address: "tcp://", Timeout: 1},
+		{Address: "rtu://", Timeout: 1},
+		{Address: "rtu:///dev/ttyUSB0", Timeout: 1, Parity: "X"},
+	} {
+		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings)
 	}
-
-	// This will likely fail to connect but should not panic
-	client, err := NewClient(cfg)
-	if err == nil && client != nil {
-		defer client.Close()
-	}
-	// Test passes as long as it doesn't panic
+	_, err := New(Settings{}, util.NewRealClock(), zerolog.Nop())
+	assert.ErrorIs(t, err, ErrInvalidSettings)
 }
 
-func TestClient_Connect_Disconnect(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Second,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping connect test: %v", err)
-	}
-	defer client.Close()
-
-	// Should already be connected from NewClient
-	if !client.IsConnected() {
-		// If not, try to connect
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer cancel()
-		if err := client.Connect(ctx); err != nil {
-			t.Logf("Connect failed (expected for 127.0.0.1:502): %v", err)
-		}
-	}
-
-	// Test disconnect
-	if err := client.Disconnect(); err != nil {
-		t.Logf("Disconnect error (may be expected): %v", err)
-	}
-
-	if client.IsConnected() {
-		t.Error("Client should not be connected after Disconnect()")
-	}
+func TestParity(t *testing.T) {
+	p, err := parity("")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_NONE, p)
+	p, err = parity("n")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_NONE, p)
+	p, err = parity("E")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_EVEN, p)
+	p, err = parity("O")
+	require.NoError(t, err)
+	assert.Equal(t, sv.PARITY_ODD, p)
+	_, err = parity("X")
+	assert.Error(t, err)
 }
 
-func TestClient_StateTransitions(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping state test: %v", err)
-	}
-	defer client.Close()
-
-	// Check initial state
-	if client.GetState() != Connected {
-		t.Logf("Client state: %s (expected Connected)", client.GetState())
-	}
-
-	// Disconnect and check state
-	client.Disconnect()
-	if client.GetState() != Disconnected {
-		t.Errorf("Expected Disconnected state after Disconnect(), got: %s", client.GetState())
-	}
+func TestConnect_RTUMissingDevice(t *testing.T) {
+	c, err := New(Settings{Address: "rtu:///dev/nonexistent-solis-test", Timeout: time.Second},
+		util.NewRealClock(), zerolog.Nop())
+	require.NoError(t, err)
+	err = c.connect()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "rtu:///dev/nonexistent-solis-test")
 }
 
-func TestShouldReconnect_AllCases(t *testing.T) {
-	// We can't directly test shouldReconnect since it's not exported
-	// But we can test classifyError which is the core logic
-
-	tests := []struct {
-		name     string
-		err      error
-		expected bool // Should be reconnectable
-	}{
-		// Nil
-		{"nil error", nil, false},
-
-		// Context errors - using BLACKLIST approach
-		// Only context.Canceled is NOT reconnectable
-		// context.DeadlineExceeded IS reconnectable (device timeout, should retry)
-		{"context canceled", context.Canceled, false},
-		{"context deadline exceeded", context.DeadlineExceeded, true},
-		{"wrapped context canceled", fmt.Errorf("wrap: %w", context.Canceled), false},
-		{"wrapped deadline exceeded", fmt.Errorf("wrap: %w", context.DeadlineExceeded), true},
-
-		// Network errors - SHOULD be reconnectable
-		{"connection refused", errors.New("connection refused"), true},
-		{"connection reset by peer", errors.New("connection reset by peer"), true},
-		{"EOF", errors.New("EOF"), true},
-		{"i/o timeout", errors.New("i/o timeout"), true},
-		{"connection timed out", errors.New("connection timed out"), true},
-		{"broken pipe", errors.New("broken pipe"), true},
-		{"use of closed", errors.New("use of closed network connection"), true},
-		{"no such host", errors.New("no such host"), true},
-		{"network is down", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("network is down")}, true},
-		{"write error", errors.New("write: connection reset by peer"), true},
-		{"read error", errors.New("read: broken pipe"), true},
-
-		// Timeout errors - SHOULD be reconnectable
-		{"timeout", errors.New("timeout"), true},
-		{"request timeout", errors.New("request timeout"), true},
-		{"timed out", errors.New("connection timed out"), true},
-
-		// Unknown errors - SHOULD be reconnectable (might be device issues)
-		{"unknown error", errors.New("some unknown error"), true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			classified := classifyError(tt.err)
-			if classified == nil {
-				if tt.expected {
-					t.Errorf("classifyError(%v) returned nil, expected reconnectable", tt.err)
-				}
-				return
-			}
-
-			result := classified.IsReconnectable()
-			if result != tt.expected {
-				t.Errorf("classifyError(%v).IsReconnectable() = %v, want %v",
-					tt.err, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestState_String(t *testing.T) {
-	states := []struct {
-		state    State
-		expected string
-	}{
-		{Disconnected, "disconnected"},
-		{Connecting, "connecting"},
-		{Connected, "connected"},
-		{Error, "error"},
-		{State(99), "unknown"},
-	}
-
-	for _, tt := range states {
-		t.Run(tt.expected, func(t *testing.T) {
-			if got := tt.state.String(); got != tt.expected {
-				t.Errorf("State(%d).String() = %v, want %v", tt.state, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestClientError_IsReconnectable(t *testing.T) {
-	// Test that ClientError.IsReconnectable works correctly
-	connectionError := &ClientError{
-		Type:    ErrTypeConnection,
-		Message: "connection refused",
-		Cause:   nil,
-	}
-
-	if !connectionError.IsReconnectable() {
-		t.Error("ErrTypeConnection should be reconnectable")
-	}
-
-	timeoutError := &ClientError{
-		Type:    ErrTypeTimeout,
-		Message: "timeout",
-		Cause:   nil,
-	}
-
-	if !timeoutError.IsReconnectable() {
-		t.Error("ErrTypeTimeout should be reconnectable")
-	}
-
-	unknownError := &ClientError{
-		Type:    ErrTypeUnknown,
-		Message: "unknown",
-		Cause:   nil,
-	}
-
-	if unknownError.IsReconnectable() {
-		t.Error("ErrTypeUnknown should NOT be reconnectable")
-	}
-}
-
-func TestClient_Disconnect(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping disconnect test: %v", err)
-	}
-	defer client.Close()
-
-	// Disconnect should not panic
-	err = client.Disconnect()
-	if err != nil {
-		t.Logf("Disconnect error (may be expected): %v", err)
-	}
-
-	if client.IsConnected() {
-		t.Error("Client should not be connected after Disconnect()")
-	}
-
-	// Disconnecting when already disconnected should not panic
-	err = client.Disconnect()
-	if err != nil {
-		t.Logf("Second Disconnect error (may be expected): %v", err)
-	}
-}
-
-func TestClient_GetState(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping GetState test: %v", err)
-	}
-	defer client.Close()
-
-	// GetState should return a valid state
-	state := client.GetState()
-	if state != Disconnected && state != Connecting && state != Connected && state != Error {
-		t.Errorf("GetState() returned invalid state: %v", state)
-	}
-}
-
-func TestClient_Close(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping Close test: %v", err)
-	}
-
-	// Close should not panic
-	err = client.Close()
-	if err != nil {
-		t.Logf("Close error (may be expected): %v", err)
-	}
-}
-
-func TestClient_IsConnected(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping IsConnected test: %v", err)
-	}
-	defer client.Close()
-
-	// IsConnected should return false for unreachable host
-	// (since connection failed in NewClient)
-	_ = client.IsConnected()
-	// Just ensure it doesn't panic
-}
-
-func TestClient_Config(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Second,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping config test: %v", err)
-	}
-	defer client.Close()
-
-	returnedCfg := client.Config()
-	if returnedCfg == nil {
-		t.Fatal("Config() returned nil")
-	}
-	if returnedCfg.Host != cfg.Host {
-		t.Errorf("Config().Host = %v, want %v", returnedCfg.Host, cfg.Host)
-	}
-}
-
-func TestClassifyError_Nil(t *testing.T) {
-	// Test nil error
-	if result := classifyError(nil); result != nil {
-		t.Errorf("classifyError(nil) should return nil, got %v", result)
-	}
-}
-
-func TestClassifyError_ContextCanceled(t *testing.T) {
-	// Test context.Canceled - should NOT be reconnectable
-	classified := classifyError(context.Canceled)
-	if classified == nil {
-		t.Fatal("classifyError(context.Canceled) should not return nil")
-	}
-	if classified.IsReconnectable() {
-		t.Error("context.Canceled should NOT be reconnectable")
-	}
-	if classified.Type != ErrTypeUnknown {
-		t.Errorf("Expected ErrTypeUnknown for context.Canceled, got %v", classified.Type)
-	}
-}
-
-func TestClassifyError_ContextDeadlineExceeded(t *testing.T) {
-	// Test context.DeadlineExceeded - SHOULD be reconnectable
-	classified := classifyError(context.DeadlineExceeded)
-	if classified == nil {
-		t.Fatal("classifyError(context.DeadlineExceeded) should not return nil")
-	}
-	if !classified.IsReconnectable() {
-		t.Error("context.DeadlineExceeded SHOULD be reconnectable")
-	}
-	if classified.Type != ErrTypeConnection {
-		t.Errorf("Expected ErrTypeConnection for context.DeadlineExceeded, got %v", classified.Type)
-	}
-}
-
-func TestClassifyError_NetworkErrors(t *testing.T) {
-	// Test various network errors - all should be reconnectable
-	networkErrors := []string{
-		"connection refused",
-		"connection reset by peer",
-		"EOF",
-		"i/o timeout",
-		"broken pipe",
-		"use of closed network connection",
-	}
-
-	for _, errMsg := range networkErrors {
-		err := errors.New(errMsg)
-		classified := classifyError(err)
-		if classified == nil {
-			t.Errorf("classifyError(%s) should not return nil", errMsg)
-			continue
-		}
-		if !classified.IsReconnectable() {
-			t.Errorf("Error '%s' should be reconnectable", errMsg)
-		}
-	}
-}
-
-func TestClientError_Types(t *testing.T) {
-	// Test all error types
-	errorTypes := []struct {
-		errType   ErrorType
-		reconnect bool
-	}{
-		{ErrTypeUnknown, false},
-		{ErrTypeConnection, true},
-		{ErrTypeTimeout, true},
-	}
-
-	for _, tt := range errorTypes {
-		modbusErr := &ClientError{
-			Type:    tt.errType,
-			Message: "test error",
-			Cause:   nil,
-		}
-
-		if modbusErr.IsReconnectable() != tt.reconnect {
-			t.Errorf("ErrorType %v: IsReconnectable() = %v, want %v",
-				tt.errType, modbusErr.IsReconnectable(), tt.reconnect)
-		}
-	}
-}
-
-func TestNewClient_InvalidConfig(t *testing.T) {
-	// Test with invalid type
-	cfg := &config.ModbusSettings{
-		Type: "invalid_type",
-	}
-	if _, err := NewClient(cfg); err == nil {
-		t.Error("NewClient() should return error for invalid type")
-	}
-}
-
-func TestState_AllStates(t *testing.T) {
-	// Test all state values
-	states := []State{
-		Disconnected,
-		Connecting,
-		Connected,
-		Error,
-		State(99), // unknown
-	}
-
-	for _, state := range states {
-		// Just ensure String() doesn't panic
-		_ = state.String()
-	}
-}
-
-func TestClient_DoubleDisconnect(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping double disconnect test: %v", err)
-	}
-	defer client.Close()
-
-	// First disconnect
-	err = client.Disconnect()
-	if err != nil {
-		t.Logf("First Disconnect error (may be expected): %v", err)
-	}
-
-	// Second disconnect - should not panic
-	err = client.Disconnect()
-	if err != nil {
-		t.Logf("Second Disconnect error (may be expected): %v", err)
-	}
-}
-
-func TestClient_DoubleClose(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping double close test: %v", err)
-	}
-
-	// First close
-	err = client.Close()
-	if err != nil {
-		t.Logf("First Close error (may be expected): %v", err)
-	}
-
-	// Second close - should not panic
-	err = client.Close()
-	if err != nil {
-		t.Logf("Second Close error (may be expected): %v", err)
-	}
-}
-
-func TestWaitForState_ContextCancelled(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
-
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping waitForState test: %v", err)
-	}
-	defer client.Close()
-
-	// Test waitForState with cancelled context
+func TestNew_DoesNotConnect(t *testing.T) {
+	c, err := New(settings(freePort(t)), util.NewRealClock(), zerolog.Nop())
+	require.NoError(t, err)
+	assert.False(t, c.IsConnected())
+	_, err = c.ReadRegisters(context.Background(), 1, 1)
+	assert.ErrorIs(t, err, ErrNotConnected)
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately
-
-	// This should return context.Canceled error
-	err = client.WaitForConnection(ctx)
-	if err == nil {
-		t.Error("WaitForConnection should fail with cancelled context")
-	}
-	if err != context.Canceled {
-		t.Errorf("Expected context.Canceled, got: %v", err)
-	}
+	cancel()
+	_, err = c.ReadRegisters(ctx, 1, 1)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.NoError(t, c.Close())
 }
 
-func TestWaitForState_Timeout(t *testing.T) {
-	cfg := &config.ModbusSettings{
-		Type:    "tcp",
-		Host:    "127.0.0.1",
-		Port:    502,
-		Timeout: 1 * time.Millisecond,
-		UnitID:  1,
-	}
+func TestRun_ConnectReadLoseReconnect(t *testing.T) {
+	port := freePort(t)
+	srv := startDevice(t, port)
+	clk := clocktest.New(time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC))
+	c, err := New(settings(port), clk, zerolog.Nop())
+	require.NoError(t, err)
 
-	client, err := NewClient(cfg)
-	if err != nil {
-		t.Skipf("Skipping waitForState timeout test: %v", err)
-	}
-	defer client.Close()
+	var beats atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx, 5*time.Second, func() { beats.Add(1) }); close(done) }()
+	defer func() { cancel(); <-done }()
 
-	// Test waitForState with very short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
+	require.Eventually(t, c.IsConnected, 2*time.Second, time.Millisecond)
+	regs, err := c.ReadRegisters(context.Background(), 33035, 3)
+	require.NoError(t, err)
+	assert.Equal(t, []uint16{33035, 33036, 33037}, regs)
 
-	// This should timeout quickly since the device is not connected
-	err = client.WaitForConnection(ctx)
-	if err == nil {
-		t.Error("WaitForConnection should timeout")
+	// Device goes away: the read fails and marks the connection lost.
+	require.NoError(t, srv.Stop())
+	require.Eventually(t, func() bool {
+		_, err := c.ReadRegisters(context.Background(), 1, 1)
+		var re *ReadError
+		return errors.As(err, &re) || errors.Is(err, ErrNotConnected)
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Eventually(t, func() bool { return !c.IsConnected() }, time.Second, time.Millisecond)
+
+	// While reconnecting it keeps beating inside the backoff.
+	before := beats.Load()
+	for range 4 {
+		require.True(t, clk.BlockUntil(1))
+		clk.Advance(5 * time.Second)
 	}
-	if err != context.DeadlineExceeded {
-		t.Logf("WaitForConnection returned error: %v (expected timeout)", err)
-	}
+	require.Eventually(t, func() bool { return beats.Load() >= before+3 }, 2*time.Second,
+		time.Millisecond)
+
+	// Device returns: the loop reconnects.
+	srv = startDevice(t, port)
+	defer func() { _ = srv.Stop() }()
+	require.Eventually(t, func() bool {
+		clk.Advance(MaxBackoff)
+		return c.IsConnected()
+	}, 3*time.Second, 5*time.Millisecond)
+	_, err = c.ReadRegisters(context.Background(), 10, 1)
+	assert.NoError(t, err)
 }
 
-func TestClassifyError_WrappedErrors(t *testing.T) {
-	// Test that wrapped errors are properly classified
+func TestReadError(t *testing.T) {
+	e := &ReadError{Addr: 1, Count: 2, Err: errors.New("x")}
+	assert.Contains(t, e.Error(), "read 2 registers at 1")
+	assert.EqualError(t, errors.Unwrap(e), "x")
+}
+
+func TestKeepsConnection(t *testing.T) {
 	tests := []struct {
-		name     string
 		err      error
-		expected ErrorType
+		tcp, rtu bool
 	}{
-		{"wrapped context.Canceled", fmt.Errorf("outer: %w", context.Canceled), ErrTypeUnknown},
-		{"wrapped context.DeadlineExceeded", fmt.Errorf("outer: %w", context.DeadlineExceeded), ErrTypeConnection},
-		{"double wrapped context.Canceled", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", context.Canceled)), ErrTypeUnknown},
-		{"wrapped network error", fmt.Errorf("read failed: %w", errors.New("connection refused")), ErrTypeConnection},
+		{sv.ErrIllegalDataAddress, true, true},
+		{sv.ErrServerDeviceBusy, true, true},
+		{sv.ErrAcknowledge, true, true},
+		{sv.ErrGWTargetFailedToRespond, true, true},
+		{sv.ErrBadCRC, false, true},
+		{sv.ErrShortFrame, false, true},
+		{sv.ErrProtocolError, false, true},
+		{sv.ErrRequestTimedOut, false, true},
+		{sv.ErrBadTransactionId, false, false},
+		{errors.New("broken pipe"), false, false},
 	}
-
+	tcp := &Client{}
+	rtu := &Client{rtu: true}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			classified := classifyError(tt.err)
-			if classified == nil {
-				t.Fatal("classifyError should not return nil")
-			}
-			if classified.Type != tt.expected {
-				t.Errorf("Expected type %v, got %v", tt.expected, classified.Type)
-			}
+		t.Run(tt.err.Error(), func(t *testing.T) {
+			assert.Equal(t, tt.tcp, tcp.keepsConnection(tt.err), "tcp")
+			assert.Equal(t, tt.rtu, rtu.keepsConnection(tt.err), "rtu")
 		})
+	}
+}
+
+func TestReadRegisters_ExceptionKeepsConnection(t *testing.T) {
+	port := freePort(t)
+	srv := startDevice(t, port)
+	defer func() { _ = srv.Stop() }()
+	c, err := New(settings(port), util.NewRealClock(), zerolog.Nop())
+	require.NoError(t, err)
+	require.NoError(t, c.connect())
+	defer func() { _ = c.Close() }()
+
+	_, err = c.ReadRegisters(context.Background(), illegalAddr, 1)
+	require.ErrorIs(t, err, sv.ErrIllegalDataAddress)
+	assert.True(t, c.IsConnected(), "an exception reply is a valid frame")
+	regs, err := c.ReadRegisters(context.Background(), 5, 2)
+	require.NoError(t, err)
+	assert.Equal(t, []uint16{5, 6}, regs)
+}
+
+func TestSettingsValidate_Serial(t *testing.T) {
+	base := Settings{Address: "rtu:///dev/ttyUSB0", Timeout: time.Second}
+	ok := base
+	ok.DataBits, ok.StopBits = 7, 1
+	assert.NoError(t, ok.Validate())
+	for _, s := range []Settings{
+		{Address: base.Address, Timeout: 1, DataBits: 4},
+		{Address: base.Address, Timeout: 1, DataBits: 9},
+		{Address: base.Address, Timeout: 1, StopBits: 3},
+		{Address: "tcp://h:0", Timeout: 1},
+		{Address: "tcp://h:x", Timeout: 1},
+	} {
+		assert.ErrorIs(t, s.Validate(), ErrInvalidSettings, s)
+	}
+}
+
+// On RTU an open port says nothing about the inverter: 5 line errors in a row mark the
+// connection lost; an exception reply (the device answered) resets the count (ACQ-M3).
+func TestTooManyLineFailures(t *testing.T) {
+	c := &Client{rtu: true}
+	for range maxLineFailures - 1 {
+		assert.False(t, c.tooManyLineFailures(sv.ErrRequestTimedOut))
+	}
+	assert.False(t, c.tooManyLineFailures(sv.ErrIllegalDataAddress), "a reply resets")
+	for range maxLineFailures - 1 {
+		assert.False(t, c.tooManyLineFailures(sv.ErrBadCRC))
+	}
+	assert.True(t, c.tooManyLineFailures(sv.ErrShortFrame))
+
+	tcp := &Client{}
+	for range 2 * maxLineFailures {
+		assert.False(t, tcp.tooManyLineFailures(sv.ErrRequestTimedOut), "tcp drops at once")
 	}
 }

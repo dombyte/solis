@@ -1,0 +1,16 @@
+# Build context for the Dockerfiles: sources only. Never send the live database, local
+# config, build outputs or dependency folders to the Docker daemon.
+.git
+data/
+config.yaml
+solis
+server
+*.db
+*.db-wal
+*.db-shm
+*.backup
+frontend/node_modules/
+frontend/dist/
+docs/node_modules/
+docs/dist/
+ref/

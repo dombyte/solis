@@ -1,16 +1,48 @@
 import type { WebSocketMessage } from '../../types';
 
+type MessageListener = (message: WebSocketMessage) => void;
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 30000;
+const RECONNECT_JITTER = 0.2;
+
+/**
+ * Delay before reconnect attempt `attempt` (1-based): exponential from 1 s, capped at
+ * 30 s, with ±20 % jitter so many open dashboards do not reconnect in lockstep after a
+ * server restart. `random` is injectable for checks (defaults to Math.random).
+ */
+function reconnectDelay(attempt: number, random: () => number = Math.random): number {
+  const exp = Math.min(RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1), RECONNECT_MAX_MS);
+  return Math.round(exp * (1 + (random() * 2 - 1) * RECONNECT_JITTER));
+}
+
+/**
+ * Subscription client for the v3 WebSocket protocol (subscribe/unsubscribe/ping ->
+ * snapshot/update/error). Keys are ref-counted across every caller of `subscribe()` so
+ * multiple components can want the same key without double-subscribing or dropping it
+ * early; the full active key set is resent on every (re)connect.
+ */
+const MESSAGE_TYPES = new Set(['snapshot', 'update', 'error']);
+
+/** Minimal runtime check of a server frame before it reaches the store (FE-L11). */
+function isWebSocketMessage(m: unknown): m is WebSocketMessage {
+  if (typeof m !== 'object' || m === null) return false;
+  const { type, values } = m as { type?: unknown; values?: unknown };
+  if (typeof type !== 'string' || !MESSAGE_TYPES.has(type)) return false;
+  return type === 'error' || (typeof values === 'object' && values !== null);
+}
+
 class SolisWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
-  private reconnectInterval = 5000;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private shouldReconnect = true;
-  private listeners: Set<(message: WebSocketMessage) => void> = new Set();
+  private listeners: Set<MessageListener> = new Set();
   private onConnectCallbacks: (() => void)[] = [];
   private onDisconnectCallbacks: (() => void)[] = [];
+  private subscriptions: Map<string, number> = new Map();
 
   constructor(url?: string) {
     // Allow overriding WebSocket URL via environment variable
@@ -33,20 +65,39 @@ class SolisWebSocket {
     } else {
       this.url = '/ws';
     }
+
+    // Reconnecting never gives up (see scheduleReconnect); these events only skip the
+    // current backoff wait when the network returns or the tab becomes visible again.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.reconnectNow);
+      window.addEventListener('focus', this.reconnectNow);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this.reconnectNow();
+      });
+    }
   }
+
+  private reconnectNow = (): void => {
+    this.reconnectAttempts = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.shouldReconnect && !this.connected) {
+      this.connect();
+    }
+  };
 
   connect(): void {
     // Don't create a new connection if we're already connected or connecting
     if (this.connected) {
-      console.log('WebSocket already connected, skipping new connection');
       return;
     }
-    
+
     if (this.ws) {
       // Check if the socket is in a non-closed state (CONNECTING or OPEN)
       const readyState = this.ws.readyState;
       if (readyState === WebSocket.CONNECTING || readyState === WebSocket.OPEN) {
-        console.log('WebSocket already connecting or open, skipping new connection');
         return;
       }
     }
@@ -61,21 +112,19 @@ class SolisWebSocket {
       const host = window.location.host;
       wsUrl = `${protocol}//${host}${this.url}`;
     }
-    
-    console.log('Connecting to WebSocket:', wsUrl);
+
     this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
       this.connected = true;
       this.reconnectAttempts = 0;
-      console.log('WebSocket connected');
       this.onConnectCallbacks.forEach(cb => cb());
-      this.listeners.forEach(cb => cb({ type: 'connected' } as WebSocketMessage));
+      // Re-subscribe to the full active key set; the hub has no memory of this client.
+      this.resubscribeAll();
     };
 
-    this.ws.onclose = (event) => {
+    this.ws.onclose = () => {
       this.connected = false;
-      console.log('WebSocket disconnected:', event.code, event.reason);
       this.onDisconnectCallbacks.forEach(cb => cb());
       // Clear the reference to allow creating a new socket
       this.ws = null;
@@ -90,7 +139,11 @@ class SolisWebSocket {
 
     this.ws.onmessage = (event) => {
       try {
-        const message: WebSocketMessage = JSON.parse(event.data);
+        const message: unknown = JSON.parse(event.data);
+        if (!isWebSocketMessage(message)) {
+          console.warn('Ignoring malformed WebSocket frame:', event.data);
+          return;
+        }
         this.listeners.forEach(listener => listener(message));
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
@@ -98,38 +151,36 @@ class SolisWebSocket {
     };
   }
 
-  private scheduleReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.warn('Max reconnection attempts reached');
-      return;
+  private resubscribeAll(): void {
+    const keys = Array.from(this.subscriptions.keys());
+    if (keys.length > 0) {
+      this.send({ type: 'subscribe', keys });
     }
-    
+  }
+
+  /**
+   * Schedules the next attempt with capped exponential backoff. It never gives up: the
+   * backend exits and is restarted by its container runtime when self-healing fails,
+   * which can take longer than any fixed attempt budget.
+   */
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return;
     this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectInterval * this.reconnectAttempts, 30000);
-    
-    setTimeout(() => {
+    const delay = reconnectDelay(this.reconnectAttempts);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.connected) {
-        console.log(`WebSocket reconnect attempt ${this.reconnectAttempts}...`);
         this.connect();
       }
     }, delay);
-  }
-
-  disconnect(): void {
-    this.shouldReconnect = false;
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-      this.connected = false;
-    }
-    this.shouldReconnect = true;
   }
 
   isConnected(): boolean {
     return this.connected;
   }
 
-  onMessage(callback: (message: WebSocketMessage) => void): () => void {
+  onMessage(callback: MessageListener): () => void {
     this.listeners.add(callback);
     return () => { this.listeners.delete(callback); };
   }
@@ -156,9 +207,44 @@ class SolisWebSocket {
         console.warn('Failed to send WebSocket message:', error);
         this.connected = false;
       }
-    } else {
-      console.log('WebSocket not ready, message not sent:', this.ws?.readyState);
     }
+  }
+
+  /**
+   * Ref-counted subscribe: sends a `subscribe` frame for keys new to the active set
+   * (a no-op while disconnected; `resubscribeAll` covers them on the next connect).
+   * The returned function releases this caller's interest, sending `unsubscribe` once
+   * no other caller still needs a given key.
+   */
+  subscribe(keys: string[]): () => void {
+    const newKeys: string[] = [];
+    for (const key of keys) {
+      const count = this.subscriptions.get(key) ?? 0;
+      this.subscriptions.set(key, count + 1);
+      if (count === 0) newKeys.push(key);
+    }
+    if (newKeys.length > 0) {
+      this.send({ type: 'subscribe', keys: newKeys });
+    }
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const removedKeys: string[] = [];
+      for (const key of keys) {
+        const count = this.subscriptions.get(key) ?? 0;
+        if (count <= 1) {
+          this.subscriptions.delete(key);
+          removedKeys.push(key);
+        } else {
+          this.subscriptions.set(key, count - 1);
+        }
+      }
+      if (removedKeys.length > 0) {
+        this.send({ type: 'unsubscribe', keys: removedKeys });
+      }
+    };
   }
 }
 

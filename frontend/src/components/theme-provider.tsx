@@ -23,6 +23,32 @@ const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
 >(undefined)
 
+// Storage can be blocked (private mode, disabled site data): every access may throw, and
+// the theme is only a convenience, so failures fall back to the default (review FE-L6).
+function getStorage(): Storage | null {
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+function readTheme(key: string): string | null {
+  try {
+    return getStorage()?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+function writeTheme(key: string, theme: Theme): void {
+  try {
+    getStorage()?.setItem(key, theme)
+  } catch {
+    // not persisted; the in-memory theme still applies
+  }
+}
+
 function isTheme(value: string | null): value is Theme {
   if (value === null) {
     return false
@@ -85,7 +111,7 @@ export function ThemeProvider({
   ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    const storedTheme = localStorage.getItem(storageKey)
+    const storedTheme = readTheme(storageKey)
     if (isTheme(storedTheme)) {
       return storedTheme
     }
@@ -95,7 +121,7 @@ export function ThemeProvider({
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
-      localStorage.setItem(storageKey, nextTheme)
+      writeTheme(storageKey, nextTheme)
       setThemeState(nextTheme)
     },
     [storageKey]
@@ -153,6 +179,10 @@ export function ThemeProvider({
         return
       }
 
+      if (document.querySelector('[role="dialog"]')) {
+        return
+      }
+
       if (event.key.toLowerCase() !== "d") {
         return
       }
@@ -167,7 +197,7 @@ export function ThemeProvider({
                 ? "light"
                 : "dark"
 
-        localStorage.setItem(storageKey, nextTheme)
+        writeTheme(storageKey, nextTheme)
         return nextTheme
       })
     }
@@ -181,7 +211,7 @@ export function ThemeProvider({
 
   React.useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage) {
+      if (event.storageArea !== getStorage()) {
         return
       }
 

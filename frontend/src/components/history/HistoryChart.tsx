@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../theme-provider';
 import { useMobile } from '../../hooks/useMobile';
@@ -6,6 +6,18 @@ import type { ChartData } from '../../types';
 
 // Register all Chart.js components
 Chart.register(...registerables);
+
+// Room above the plot area for the top y-axis label, which is centred on its grid line.
+const PLOT_TOP_PADDING = 8;
+
+// One pinned y-axis label: its text and its offset (px) from the top of the canvas.
+interface YTick {
+  label: string;
+  y: number;
+}
+
+const sameTicks = (a: YTick[], b: YTick[]): boolean =>
+  a.length === b.length && a.every((t, i) => t.label === b[i].label && t.y === b[i].y);
 
 interface HistoryChartProps {
   data: ChartData | null;
@@ -16,38 +28,50 @@ interface HistoryChartProps {
 export function HistoryChart({ data, className = '', datasetCount = 0 }: HistoryChartProps): React.ReactElement {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
+  const [yTicks, setYTicks] = React.useState<YTick[]>([]);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [datasetVisibility, setDatasetVisibility] = React.useState<Record<string, boolean>>({});
-  
-  // Initialize and update dataset visibility when data changes
-  useEffect(() => {
-    if (!data) return;
-    
-    // Initialize all datasets as visible
+
+  // Reset dataset visibility when a new `data` object arrives, without a dedicated
+  // effect: React's recommended pattern for state that must be re-derived from a
+  // changed prop is to adjust it during render, not inside a useEffect.
+  const [prevData, setPrevData] = React.useState<ChartData | null>(null);
+  if (data !== prevData) {
+    setPrevData(data);
     const initialVisibility: Record<string, boolean> = {};
-    data.datasets.forEach((ds, index) => {
-      initialVisibility[ds.label || `dataset-${index}`] = true;
+    data?.datasets.forEach((_ds, index) => {
+      initialVisibility[String(index)] = true;
     });
     setDatasetVisibility(initialVisibility);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+  }
 
   // Update chart dataset visibility when state changes
   useEffect(() => {
     if (!chartInstanceRef.current || !data) return;
-    
+
     const chart = chartInstanceRef.current;
-    data.datasets.forEach((ds, index) => {
-      const label = ds.label || `dataset-${index}`;
-      const isVisible = datasetVisibility[label] !== false;
+    data.datasets.forEach((_ds, index) => {
+      const key = String(index);
+      const isVisible = datasetVisibility[key] !== false;
       chart.setDatasetVisibility(index, isVisible);
     });
     chart.update();
   }, [datasetVisibility, data]);
 
-  const toggleDatasetVisibility = (label: string) => {
+  // Open the chart scrolled to the most recent data (labels are sorted oldest -> newest,
+  // so "most recent" is the right edge) instead of defaulting to the oldest entries.
+  // useLayoutEffect avoids a visible left-to-right jump after the width-driving inner
+  // div has committed its minWidth style.
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.scrollLeft = container.scrollWidth;
+  }, [data]);
+
+  const toggleDatasetVisibility = (key: string) => {
     setDatasetVisibility(prev => {
       const newVisibility = { ...prev };
-      newVisibility[label] = !(prev[label] ?? true);
+      newVisibility[key] = !(prev[key] ?? true);
       return newVisibility;
     });
   };
@@ -77,8 +101,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
 
   useEffect(() => {
     if (!chartRef.current || !data) return;
-    
-    // Clean up previous chart instance
+
+    // Clean up previous chart instances
     if (chartInstanceRef.current) {
       chartInstanceRef.current.destroy();
       chartInstanceRef.current = null;
@@ -137,10 +161,9 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         labels: data.labels,
         datasets: data.datasets.map((ds, datasetIndex) => {
           const { border, background } = getColorForKey(ds.key, datasetIndex);
-          // Calculate bar width based on number of datasets
-          // For 1-2 datasets, use smaller bars to fit more
-          // On mobile, use slightly smaller bars to create more space between dates
-          const barPercentage = isMobile ? (datasetCount <= 2 ? 0.5 : 0.7) : (datasetCount <= 2 ? 0.4 : 0.8);
+          // Scale bar width smoothly with the number of datasets (rather than a binary
+          // <=2 cutoff) so bars slim down gradually as more series are overlaid.
+          const barPercentage = Math.min(0.85, Math.max(0.4, 0.85 - (datasetCount - 1) * 0.05));
           const categoryPercentage = isMobile ? 0.8 : 0.9;
           return {
             label: ds.label,
@@ -153,14 +176,35 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             // Bar width settings
             barPercentage,
             categoryPercentage,
-            // Minimum bar length in pixels to prevent bars from getting too thin
-            minBarLength: isMobile ? 8 : 10,
+            // Caps a bar's absolute pixel width so a category with few bars (e.g. a
+            // single data point) doesn't stretch to fill the whole plot area -
+            // barPercentage/categoryPercentage only control a bar's *fraction* of its
+            // category slot, which is the entire plot width when there's 1 category.
+            maxBarThickness: isMobile ? 40 : 56,
+            // No minBarLength: it also applies to 0, drawing a day with 0 kWh as a
+            // visible bar (review FE-M7).
           };
         }),
       },
+      // Publish the y ticks after every update (new data, resize, a series toggled) so
+      // the pinned HTML axis always matches the grid lines.
+      plugins: [{
+        id: 'pinnedYAxis',
+        afterUpdate: (chart) => {
+          const scale = chart.scales.y;
+          const next = scale.ticks.map(t => ({
+            label: Array.isArray(t.label) ? t.label.join(' ') : String(t.label ?? t.value),
+            y: scale.getPixelForValue(t.value),
+          }));
+          setYTicks(prev => (sameTicks(prev, next) ? prev : next));
+        },
+      }],
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: {
+          padding: { top: PLOT_TOP_PADDING },
+        },
         plugins: {
           legend: {
             display: false,
@@ -193,7 +237,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             },
             ticks: { 
               font: { 
-                size: isMobile ? 10 : 10,
+                size: 11,
                 family: 'Inter Variable, sans-serif'
               },
               color: mutedForeground,
@@ -260,15 +304,14 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
             }
           },
           y: {
-            grid: { 
+            grid: {
               color: borderColorVar
             },
-            ticks: { 
-              font: { 
-                size: 10,
-                family: 'Inter Variable, sans-serif'
-              },
-              color: mutedForeground
+            // Labels are rendered as HTML outside the scroll container (see the
+            // pinnedYAxis plugin), so they stay pinned to the left while the bars and
+            // x-axis scroll. The grid lines stay here with the scrollable plot area.
+            ticks: {
+              display: false,
             },
             border: {
               display: false
@@ -294,11 +337,15 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     );
   }
 
-  // Calculate minimum width based on number of data points and datasets
-  // When 1-2 categories are selected, reduce spacing to show more time period
+  // Calculate the chart's content width based on number of data points and datasets.
+  // Scales smoothly with datasetCount (more series per category need more horizontal
+  // room) instead of a binary cutoff, and has no artificial floor: `w-full` fills the
+  // container when the content is narrower than it, so scrolling only appears once
+  // there's genuinely more content than fits (e.g. it no longer forces a sliver of
+  // scroll for a single bar).
   const dataPointCount = data.labels?.length || 0;
-  const pointWidth = datasetCount <= 2 ? 60 : 80;
-  const minWidth = Math.min(Math.max(dataPointCount * pointWidth, 800), 4000);
+  const pointWidth = Math.min(160, Math.max(60, 40 + datasetCount * 14));
+  const minWidth = Math.min(dataPointCount * pointWidth, 4000);
 
   // Function to get color for a dataset by index
   const getColorForDataset = (datasetIndex: number): string => {
@@ -310,7 +357,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   const datasetStats = data.datasets.map((ds, index) => {
     const values = ds.data.filter((val): val is number => val !== null && val !== undefined);
     return {
-      key: ds.label || `dataset-${index}`,
+      key: String(index),
       label: ds.label,
       unit: ds.unit || '',
       datasetIndex: index,
@@ -325,17 +372,45 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
 
   return (
     <div className={`relative w-full ${className}`}>
-      <div 
-        className="overflow-x-auto history-chart-scroll w-full"
-        style={{ minHeight: '200px', maxHeight: '500px' }}
-      >
-        <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
-          <canvas ref={chartRef} />
+      <div className="flex w-full" style={{ minHeight: '200px', maxHeight: '500px' }}>
+        {/* Pinned y-axis - lives outside the scroll container so it never scrolls. Plain
+            text positioned from the chart's own scale: it is never clipped, and the
+            invisible copy of the labels sizes the column to the widest one. */}
+        <div
+          className="relative flex-shrink-0 pr-1 text-[11px] leading-none text-muted-foreground tabular-nums text-right"
+          style={{ height: '400px' }}
+          aria-hidden="true"
+        >
+          <div className="invisible h-0 overflow-hidden">
+            {yTicks.map(t => <div key={t.label}>{t.label}</div>)}
+          </div>
+          {yTicks.map(t => (
+            <span
+              key={t.label}
+              className="absolute right-1 -translate-y-1/2 whitespace-nowrap"
+              style={{ top: `${t.y}px` }}
+            >
+              {t.label}
+            </span>
+          ))}
+        </div>
+        <div
+          ref={scrollContainerRef}
+          className="overflow-x-auto history-chart-scroll flex-1 min-w-0"
+        >
+          <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
+            <canvas
+              ref={chartRef}
+              role="img"
+              aria-label={`Bar chart of ${data.datasets.length} dataset${data.datasets.length === 1 ? '' : 's'} across ${dataPointCount} period${dataPointCount === 1 ? '' : 's'}`}
+              aria-describedby={validStats.length > 0 ? 'history-chart-stats' : undefined}
+            />
+          </div>
         </div>
       </div>
       {/* Statistics display per category in table format with toggle */}
       {validStats.length > 0 && (
-        <div className="mt-3 px-2 w-full overflow-x-auto">
+        <div id="history-chart-stats" className="mt-3 px-2 w-full overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-border">

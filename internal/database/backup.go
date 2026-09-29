@@ -2,23 +2,21 @@ package database
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dombyte/solis/internal/logging"
+	"github.com/rs/zerolog"
 	sqlite "modernc.org/sqlite"
 )
-
-// backupLogger is the package-level logger for backup operations.
-var backupLogger = logging.NewComponentLogger("database.backup")
 
 // BackupConfig contains configuration for backup operations.
 type BackupConfig struct {
@@ -37,48 +35,89 @@ type BackupInfo struct {
 	Size      int64
 }
 
-// GenerateBackupFilename generates a backup filename with timestamp.
-// Format: backups/{name}.{timestamp}.backup
-func GenerateBackupFilename(dbPath string) string {
+// backupStampLayout is the second part of a backup timestamp; milliseconds follow as
+// "_mmm" so two backups within one second never share a file name.
+const backupStampLayout = "20060102_150405"
+
+// utcStampSuffix marks a stamp written in UTC. Older backups carry local time without
+// it; local stamps repeat in the DST fall-back hour and could sort a newer backup as
+// older, so rotation might delete the newest one.
+const utcStampSuffix = "Z"
+
+// backupFilePerm is the permission of backup files (owner read/write only).
+const backupFilePerm = 0o600
+
+// backupDirPerm is the permission of created backup directories (owner rwx, group rx).
+const backupDirPerm = 0o750
+
+// msPerSecond scales the millisecond suffix.
+const msPerSecond = int(time.Second / time.Millisecond)
+
+// GenerateBackupFilename generates a backup filename for the instant now, stamped in UTC.
+// Format: backups/{name}.{YYYYMMDD_HHMMSS_mmm}Z.backup
+func GenerateBackupFilename(dbPath string, now time.Time) string {
 	dbName := filepath.Base(dbPath)
-	dir := filepath.Dir(dbPath)
-	backupsDir := filepath.Join(dir, "backups")
-	timestamp := time.Now().Format("20060102_150405")
-
-	prefix := fmt.Sprintf("%s.%s.backup", dbName, timestamp)
-
-	return filepath.Join(backupsDir, prefix)
+	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	now = now.UTC()
+	ms := now.Nanosecond() / int(time.Millisecond) % msPerSecond
+	stamp := fmt.Sprintf("%s_%03d%s", now.Format(backupStampLayout), ms, utcStampSuffix)
+	return filepath.Join(backupsDir, fmt.Sprintf("%s.%s.backup", dbName, stamp))
 }
 
 // ExtractBackupInfo extracts information from a backup filename.
-// Expected format: {name}.{timestamp}.backup
+// Expected format: {name}.{timestamp}.backup, with or without the millisecond suffix.
 func ExtractBackupInfo(filename string) (*BackupInfo, error) {
 	base := filepath.Base(filename)
 	if !strings.HasSuffix(base, ".backup") {
 		return nil, fmt.Errorf("not a backup file: %s", filename)
 	}
-
-	// Remove .backup extension
 	nameWithoutExt := strings.TrimSuffix(base, ".backup")
-
-	// Find the last dot to separate db name from timestamp
 	lastDotIndex := strings.LastIndex(nameWithoutExt, ".")
 	if lastDotIndex <= 0 {
 		return nil, fmt.Errorf("could not parse backup filename: %s", filename)
 	}
-
-	timestampStr := nameWithoutExt[lastDotIndex+1:]
-
-	info := &BackupInfo{
-		Filename: filename,
+	if t, ok := parseBackupStamp(nameWithoutExt[lastDotIndex+1:]); ok {
+		return &BackupInfo{Filename: filename, Timestamp: t}, nil
 	}
-
-	if t, err := time.Parse("20060102_150405", timestampStr); err == nil {
-		info.Timestamp = t
-		return info, nil
-	}
-
 	return nil, fmt.Errorf("could not parse timestamp in backup filename: %s", filename)
+}
+
+// parseBackupStamp parses "YYYYMMDD_HHMMSS" with an optional "_mmm" suffix; a trailing
+// "Z" means UTC, anything else is a legacy local-time stamp.
+func parseBackupStamp(stamp string) (time.Time, bool) {
+	loc := time.Local
+	if s, ok := strings.CutSuffix(stamp, utcStampSuffix); ok {
+		stamp, loc = s, time.UTC
+	}
+	secs, msPart := stamp, ""
+	if len(stamp) > len(backupStampLayout) {
+		secs, msPart = stamp[:len(backupStampLayout)], stamp[len(backupStampLayout):]
+	}
+	t, err := time.ParseInLocation(backupStampLayout, secs, loc)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if msPart == "" {
+		return t, true
+	}
+	ms, ok := parseBackupMillis(msPart)
+	if !ok {
+		return time.Time{}, false
+	}
+	return t.Add(time.Duration(ms) * time.Millisecond), true
+}
+
+// parseBackupMillis parses the "_mmm" millisecond suffix of a backup stamp.
+func parseBackupMillis(part string) (int, bool) {
+	digits, found := strings.CutPrefix(part, "_")
+	if !found {
+		return 0, false
+	}
+	ms, err := strconv.Atoi(digits)
+	if err != nil || ms < 0 || ms >= msPerSecond {
+		return 0, false
+	}
+	return ms, true
 }
 
 // backuper interface for accessing SQLite backup functionality.
@@ -87,75 +126,86 @@ type backuper interface {
 	NewBackup(string) (*sqlite.Backup, error)
 }
 
-// calculateSHA256 calculates the SHA256 checksum of a file.
-func calculateSHA256(filePath string) (string, error) {
-	// filePath is generated from GenerateBackupFilename, which uses controlled inputs
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to open file for checksum: %w", err)
-	}
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close file: %w", closeErr)
-		}
-	}()
-
-	hasher := sha256.New()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", fmt.Errorf("failed to read file for checksum: %w", err)
-	}
-
-	return hex.EncodeToString(hasher.Sum(nil)), nil
-}
-
-// createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API.
-// This provides better consistency and reliability compared to simple file copying.
-// It also verifies the backup integrity using SHA256 checksums.
-func createSQLiteBackup(sourcePath, destPath string) error {
-	srcDB, err := openSourceDatabase(sourcePath)
+// createSQLiteBackup creates a backup of a SQLite database using the native SQLite backup API
+// and verifies the result with PRAGMA integrity_check.
+func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
+	log zerolog.Logger,
+) (err error) {
+	srcDB, err := openSourceDatabase(ctx, sourcePath)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := srcDB.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close source database: %w", closeErr)
-		}
-	}()
-
+	defer closeInto(&err, srcDB, "source database")
 	if err := ensureDestinationDirectory(destPath); err != nil {
 		return err
 	}
-
-	conn, err := getDatabaseConnection(srcDB)
+	conn, err := getDatabaseConnection(ctx, srcDB)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := conn.Close(); closeErr != nil && err == nil {
-			err = fmt.Errorf("failed to close connection: %w", closeErr)
-		}
-	}()
-
+	defer closeInto(&err, conn, "connection")
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
 	}
-
-	if err := verifyBackupFile(destPath); err != nil {
+	if err := useRollbackJournal(ctx, destPath); err != nil {
 		return err
 	}
+	// A backup holds the same data as the database: owner-only, whatever the umask.
+	if err := os.Chmod(destPath, backupFilePerm); err != nil {
+		return fmt.Errorf("restrict backup permissions: %w", err)
+	}
+	return verifyBackupFile(ctx, destPath, log)
+}
 
+// useRollbackJournal switches the finished copy out of WAL mode. The backup API copies
+// the source's WAL header, so every later open of the copy (the integrity check, a
+// restore test) would leave -wal/-shm files next to it that rotation never deletes; a
+// standalone backup file needs no WAL. Closing the connection removes the sidecars.
+func useRollbackJournal(ctx context.Context, path string) (err error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open backup: %w", err)
+	}
+	defer closeInto(&err, db, "backup database")
+	var mode string
+	if err := db.QueryRowContext(ctx, "PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		return fmt.Errorf("set backup journal mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "delete") {
+		return fmt.Errorf("set backup journal mode: got %q", mode)
+	}
 	return nil
 }
 
+// removeBackupFiles deletes a backup file and any sidecar files next to it; files that
+// are already gone are not an error.
+func removeBackupFiles(path string) error {
+	var err error
+	for _, p := range append([]string{path}, path+"-wal", path+"-shm") {
+		if rmErr := os.Remove(p); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+			err = errors.Join(err, rmErr)
+		}
+	}
+	return err
+}
+
+// closeInto closes c and records its error in *err unless an earlier error is set.
+func closeInto(err *error, c io.Closer, what string) {
+	if closeErr := c.Close(); closeErr != nil && *err == nil {
+		*err = fmt.Errorf("failed to close %s: %w", what, closeErr)
+	}
+}
+
 // openSourceDatabase opens the source database for backup
-func openSourceDatabase(sourcePath string) (*sql.DB, error) {
+func openSourceDatabase(ctx context.Context, sourcePath string) (*sql.DB, error) {
 	srcDB, err := sql.Open("sqlite", sourcePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open source database for backup: %w", err)
 	}
 
-	if err := srcDB.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping source database: %w", err)
+	if err := srcDB.PingContext(ctx); err != nil {
+		return nil, errors.Join(fmt.Errorf("failed to ping source database: %w", err),
+			srcDB.Close())
 	}
 
 	return srcDB, nil
@@ -165,7 +215,7 @@ func openSourceDatabase(sourcePath string) (*sql.DB, error) {
 func ensureDestinationDirectory(destPath string) error {
 	destDir := filepath.Dir(destPath)
 	if destDir != "" && destDir != "." {
-		if err := os.MkdirAll(destDir, 0750); err != nil {
+		if err := os.MkdirAll(destDir, backupDirPerm); err != nil {
 			return fmt.Errorf("failed to create destination directory: %w", err)
 		}
 	}
@@ -173,8 +223,8 @@ func ensureDestinationDirectory(destPath string) error {
 }
 
 // getDatabaseConnection gets a connection from the database
-func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
-	conn, err := db.Conn(context.Background())
+func getDatabaseConnection(ctx context.Context, db *sql.DB) (*sql.Conn, error) {
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database connection: %w", err)
 	}
@@ -183,98 +233,107 @@ func getDatabaseConnection(db *sql.DB) (*sql.Conn, error) {
 
 // performBackupCopy performs the actual backup copy using SQLite backup API
 func performBackupCopy(conn *sql.Conn, destPath string) error {
-	var backupErr error
-
-	if err := conn.Raw(func(driverConn any) error {
-		bkp, err := driverConn.(backuper).NewBackup(destPath)
-		if err != nil {
-			backupErr = fmt.Errorf("failed to create backup object: %w", err)
-			return backupErr
-		}
-
-		for more := true; more; {
-			more, err = bkp.Step(-1)
-			if err != nil {
-				backupErr = fmt.Errorf("failed during backup step: %w", err)
-				return backupErr
-			}
-		}
-
-		if err := bkp.Finish(); err != nil {
-			backupErr = fmt.Errorf("failed to finish backup: %w", err)
-			return backupErr
-		}
-
-		return nil
-	}); err != nil && backupErr == nil {
-		backupErr = fmt.Errorf("SQLite backup connection error: %w", err)
+	err := conn.Raw(func(driverConn any) error { return runBackup(driverConn, destPath) })
+	if err != nil {
+		return fmt.Errorf("SQLite backup failed: %w", err)
 	}
-
-	if backupErr != nil {
-		return fmt.Errorf("SQLite backup failed: %w", backupErr)
-	}
-
 	return nil
 }
 
-// verifyBackupFile verifies the backup file exists, has content, and has a valid checksum
-func verifyBackupFile(destPath string) error {
-	backupChecksum, err := calculateSHA256(destPath)
-	if err != nil {
-		if removeErr := os.Remove(destPath); removeErr != nil {
-			backupLogger.Warn().Msgf("Failed to remove incomplete backup file: %v", removeErr)
-		}
-		return fmt.Errorf("failed to verify backup file: %w", err)
+// runBackup copies the whole database behind driverConn to destPath.
+func runBackup(driverConn any, destPath string) error {
+	b, ok := driverConn.(backuper)
+	if !ok {
+		return errors.New("driver connection does not support backups")
 	}
+	bkp, err := b.NewBackup(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create backup object: %w", err)
+	}
+	for more := true; more; {
+		if more, err = bkp.Step(-1); err != nil {
+			return fmt.Errorf("failed during backup step: %w", err)
+		}
+	}
+	if err := bkp.Finish(); err != nil {
+		return fmt.Errorf("failed to finish backup: %w", err)
+	}
+	return nil
+}
 
-	backupLogger.Debug().Msgf("Backup created with checksum: %s", backupChecksum)
+// verifyBackupFile opens the finished backup read-only and runs PRAGMA integrity_check;
+// a backup that is empty or not a sound SQLite database is removed and reported.
+func verifyBackupFile(ctx context.Context, destPath string, log zerolog.Logger) error {
+	err := checkBackupIntegrity(ctx, destPath)
+	if err == nil {
+		return nil
+	}
+	if removeErr := removeBackupFiles(destPath); removeErr != nil {
+		log.Warn().Err(removeErr).Msg("failed to remove invalid backup file")
+	}
+	return fmt.Errorf("backup verification failed: %w", err)
+}
 
-	backupInfo, err := os.Stat(destPath)
+func checkBackupIntegrity(ctx context.Context, path string) (err error) {
+	info, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("backup file not found after creation: %w", err)
 	}
-
-	if backupInfo.Size() == 0 {
-		if removeErr := os.Remove(destPath); removeErr != nil {
-			backupLogger.Warn().Msgf("Failed to remove empty backup file: %v", removeErr)
-		}
-		return fmt.Errorf("backup file is empty")
+	if info.Size() == 0 {
+		return errors.New("backup file is empty")
 	}
-
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		return fmt.Errorf("open backup: %w", err)
+	}
+	defer closeInto(&err, db, "backup database")
+	var result string
+	if err := db.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&result); err != nil {
+		return fmt.Errorf("integrity check: %w", err)
+	}
+	if result != "ok" {
+		return fmt.Errorf("integrity check: %s", result)
+	}
 	return nil
 }
 
-// CreateBackup creates a backup copy of the database file.
-func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
+// CreateBackup creates an integrity-checked backup copy of the database file when
+// backups are enabled ("" and no error when disabled); now names the file.
+func CreateBackup(ctx context.Context, dbPath string, config *BackupConfig, now time.Time,
+	log zerolog.Logger,
+) (string, error) {
 	if !config.Enabled {
-		backupLogger.Info().Msg("Backup disabled, skipping backup creation")
+		log.Info().Msg("backup disabled, skipping backup creation")
 		return "", nil
 	}
+	return WriteBackup(ctx, dbPath, now, log)
+}
 
-	// Check if source file exists
-	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		return "", fmt.Errorf("database file does not exist: %s", dbPath)
+// WriteBackup always creates an integrity-checked backup copy of the database file,
+// regardless of the backup setting (pre-migration and maintenance backups).
+func WriteBackup(ctx context.Context, dbPath string, now time.Time, log zerolog.Logger) (
+	string, error,
+) {
+	if _, err := os.Stat(dbPath); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("database file does not exist: %s", dbPath)
+		}
+		return "", fmt.Errorf("stat database file: %w", err)
 	}
 
-	// Ensure directory exists
-	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0750); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Ensure backups subdirectory exists
-	backupsDir := filepath.Join(dir, "backups")
-	if err := os.MkdirAll(backupsDir, 0750); err != nil {
+	// Ensure the backups subdirectory (and its parent) exists
+	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
+	if err := os.MkdirAll(backupsDir, backupDirPerm); err != nil {
 		return "", fmt.Errorf("failed to create backups directory: %w", err)
 	}
 
 	// Generate backup filename
-	backupPath := GenerateBackupFilename(dbPath)
+	backupPath := GenerateBackupFilename(dbPath, now)
 
-	backupLogger.Info().Msgf("Creating backup (source: %s, destination: %s)", dbPath, backupPath)
+	log.Info().Str("source", dbPath).Str("destination", backupPath).Msg("creating backup")
 
 	// Create the backup using SQLite native backup API
-	if err := createSQLiteBackup(dbPath, backupPath); err != nil {
+	if err := createSQLiteBackup(ctx, dbPath, backupPath, log); err != nil {
 		return "", fmt.Errorf("failed to create backup: %w", err)
 	}
 
@@ -284,7 +343,8 @@ func CreateBackup(dbPath string, config *BackupConfig) (string, error) {
 		return "", fmt.Errorf("failed to get backup file info: %w", err)
 	}
 
-	backupLogger.Info().Msgf("Backup created successfully (file: %s, size: %d)", backupPath, backupInfo.Size())
+	log.Info().Str("file", backupPath).Int64("size", backupInfo.Size()).
+		Msg("backup created successfully")
 
 	return backupPath, nil
 }
@@ -307,32 +367,17 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 		return nil, fmt.Errorf("failed to read backups directory: %w", err)
 	}
 
+	// Only this database's backups: another database (or a renamed one) sharing the
+	// backups directory must never be rotated away by this one.
+	prefix := filepath.Base(dbPath) + "."
 	backups := make([]BackupInfo, 0)
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !strings.HasPrefix(entry.Name(), prefix) {
 			continue
 		}
-
-		filename := entry.Name()
-		if !strings.HasSuffix(filename, ".backup") {
-			continue
+		if info, ok := backupEntry(backupsDir, entry); ok {
+			backups = append(backups, *info)
 		}
-
-		fullPath := filepath.Join(backupsDir, filename)
-		info, err := ExtractBackupInfo(fullPath)
-		if err != nil {
-			// Skip files that don't match our naming pattern
-			continue
-		}
-
-		// Get file size
-		fileInfo, err := os.Stat(fullPath)
-		if err != nil {
-			continue
-		}
-		info.Size = fileInfo.Size()
-
-		backups = append(backups, *info)
 	}
 
 	// Sort by timestamp (newest first)
@@ -343,11 +388,30 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 	return backups, nil
 }
 
+// backupEntry returns the backup info for entry, or false when it is not a backup file
+// following our naming pattern.
+func backupEntry(backupsDir string, entry os.DirEntry) (*BackupInfo, bool) {
+	if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".backup") {
+		return nil, false
+	}
+	fullPath := filepath.Join(backupsDir, entry.Name())
+	info, err := ExtractBackupInfo(fullPath)
+	if err != nil {
+		return nil, false
+	}
+	fileInfo, err := os.Stat(fullPath)
+	if err != nil {
+		return nil, false
+	}
+	info.Size = fileInfo.Size()
+	return info, true
+}
+
 // CleanupBackups removes old backup files, keeping only the most recent MaxBackups.
 // If maxBackups <= 0, keeps all backups.
-func CleanupBackups(dbPath string, maxBackups int) error {
+func CleanupBackups(dbPath string, maxBackups int, log zerolog.Logger) error {
 	if maxBackups <= 0 {
-		backupLogger.Debug().Msg("Backup cleanup skipped: maxBackups <= 0")
+		log.Debug().Msg("Backup cleanup skipped: maxBackups <= 0")
 		return nil
 	}
 
@@ -357,7 +421,8 @@ func CleanupBackups(dbPath string, maxBackups int) error {
 	}
 
 	if len(backups) <= maxBackups {
-		backupLogger.Debug().Msgf("No cleanup needed (backups_count: %d, max_backups: %d)", len(backups), maxBackups)
+		log.Debug().Int("backups_count", len(backups)).Int("max_backups", maxBackups).
+			Msg("no backup cleanup needed")
 		return nil
 	}
 
@@ -365,16 +430,16 @@ func CleanupBackups(dbPath string, maxBackups int) error {
 	toRemove := len(backups) - maxBackups
 	backupsToRemove := backups[maxBackups:]
 
-	backupLogger.Info().Msgf("Cleaning up old backups (to_remove: %d, keeping: %d)", toRemove, maxBackups)
+	log.Info().Int("to_remove", toRemove).Int("keeping", maxBackups).Msg("cleaning up old backups")
 
-	// Remove the oldest backups
+	// Remove the oldest backups (with any sidecar files left by older versions)
 	for _, backup := range backupsToRemove {
-		if err := os.Remove(backup.Filename); err != nil {
-			backupLogger.Error().Msgf("Failed to remove backup (file: %s, error: %v)", backup.Filename, err)
+		if err := removeBackupFiles(backup.Filename); err != nil {
+			log.Error().Err(err).Str("file", backup.Filename).Msg("failed to remove backup")
 			// Continue with cleanup even if one file fails
 			continue
 		}
-		backupLogger.Debug().Msgf("Removed old backup (file: %s)", backup.Filename)
+		log.Debug().Str("file", backup.Filename).Msg("removed old backup")
 	}
 
 	return nil

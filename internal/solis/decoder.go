@@ -1,295 +1,186 @@
-// Package solis provides Solis inverter register definitions, status maps,
-// and utilities for decoding Modbus register data.
 package solis
 
 import (
-	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
-	"github.com/dombyte/solis/internal/logging"
-	"github.com/dombyte/solis/internal/utils"
+	"github.com/rs/zerolog"
 )
 
-// decoderLogger is the package-level logger for decoder operations.
-var decoderLogger = logging.NewComponentLogger("solis.decoder")
+// Battery direction flag values (register 33135).
+const (
+	directionCharging    = 0
+	directionDischarging = 1
+)
 
-// Value represents a decoded register value with its metadata.
-type Value struct {
-	// Key is the register key (e.g., "pv_voltage_1", "status").
-	Key string
-	// Name is the human-readable register name.
-	Name string
-	// RawValue is the raw numeric value before scaling.
-	RawValue float64
-	// DecodedValue is the value after applying the scale factor.
-	DecodedValue float64
-	// StringValue holds the decoded string for String-type registers.
-	StringValue string
-	// Unit is the unit of measurement.
-	Unit string
-	// Timestamp is when the value was read.
-	Timestamp time.Time `json:"timestamp"`
-	// DataType is the type of the value (omitted from JSON output).
-	DataType DataType `json:"-"`
-	// Stability indicates if this is a stable or dynamic register (omitted from JSON output).
-	Stability Stability `json:"-"`
-	// StatusDecoded holds the decoded status information for status registers.
-	// For solis_status: map[string]string with "name" and "description"
-	// For bitmask status: []string with list of active fault/status names
-	StatusDecoded interface{} `json:"status_decoded,omitempty"`
+const (
+	solisStatusKey     = "solis_status"
+	operatingStatusKey = "operating_status"
+	bitsPerRegister    = 16
+	wordShift          = 16
+)
+
+// Lookup resolves registers by key and address.
+type Lookup interface {
+	ByKey(key string) (Register, bool)
+	ByAddress(addr uint16) (Register, bool)
 }
 
-// MarshalJSON implements json.Marshaler for Value to ensure DecodedValue is rounded
-// to 2 decimal places.
-func (v Value) MarshalJSON() ([]byte, error) {
-	// Create a copy with rounded DecodedValue
-	type Alias Value
-	aux := struct {
-		DecodedValue utils.Float64With2Decimals `json:"value"`
-		*Alias
-	}{
-		Alias:        (*Alias)(&v),
-		DecodedValue: utils.Float64With2Decimals(utils.RoundTo2DecimalPlaces(v.DecodedValue)),
-	}
-	return json.Marshal(aux)
+// Decoder turns raw Modbus words into Values and decodes status/fault registers.
+type Decoder struct {
+	regs   Lookup
+	codes  map[uint16]statusCode
+	bits   map[string][]string
+	log    zerolog.Logger
+	signed Register
 }
 
-// DecodeRegister decodes raw register values into a typed Value.
-// This is the main entry point for decoding individual register data.
-// raw contains the uint16 register values as returned directly from Modbus.
-func DecodeRegister(reg *Register, raw []uint16) Value {
+// NewDecoder builds a decoder over the given register lookup.
+func NewDecoder(regs Lookup, log zerolog.Logger) *Decoder {
+	signed, _ := regs.ByKey(KeyBatteryPowerSigned)
+	return &Decoder{regs: regs, codes: statusCodes(), bits: bitNames(), log: log, signed: signed}
+}
+
+// Decode decodes the raw words of exactly one register (full precision).
+func (d *Decoder) Decode(reg Register, raw []uint16, at time.Time) *Value {
 	rawVal := decodeRaw(reg.DataType, raw)
-	decoded := rawVal * reg.Scale
-
-	// Round to exactly 2 decimal places for consistent display
-	decoded = utils.RoundTo2DecimalPlaces(decoded)
-
-	value := Value{
+	v := &Value{
 		Key:          reg.Key,
 		Name:         reg.Name,
 		RawValue:     rawVal,
-		DecodedValue: decoded,
+		DecodedValue: rawVal * reg.Scale,
 		Unit:         reg.Unit,
-		DataType:     reg.DataType,
-		Stability:    reg.Stability,
+		Timestamp:    at,
 	}
-
-	// Decode status information for status registers
-	if reg.Status {
-		value.StatusDecoded = decodeStatus(reg, uint16(rawVal))
+	if reg.Store == StoreStatus {
+		v.StatusDecoded = d.DecodeStatus(reg.Key, uint16(rawVal))
 	}
-
-	return value
+	return v
 }
 
-// decodeStatus decodes status/fault register values based on their key.
-// Returns the decoded status information as either a map (for solis_status)
-// or a list of strings (for bitmask fault registers).
-func decodeStatus(reg *Register, rawValue uint16) interface{} {
-	return decodeStatusByKey(reg.Key, reg.Address, rawValue)
-}
-
-// decodeStatusByKey decodes status based on the register key
-func decodeStatusByKey(key string, address uint16, rawValue uint16) interface{} {
-	if handler, ok := statusDecoders[key]; ok {
-		return handler(rawValue)
+// DecodeBlock decodes every register that starts inside a read block.
+func (d *Decoder) DecodeBlock(b Block, raw []uint16, at time.Time) map[string]*Value {
+	out := make(map[string]*Value)
+	for i := 0; i < len(raw); i++ {
+		reg, ok := d.regs.ByAddress(b.Start + uint16(i)) // #nosec G115 -- i < 125
+		if !ok {
+			continue
+		}
+		n := int(reg.Count())
+		if i+n > len(raw) {
+			d.log.Warn().Str("key", reg.Key).Int("need", n).Int("have", len(raw)-i).
+				Msg("insufficient registers in block")
+			break
+		}
+		out[reg.Key] = d.Decode(reg, raw[i:i+n], at)
+		i += n - 1
 	}
-	return DecodeFaultBits(address, rawValue)
+	return out
 }
 
-// statusDecoders maps status register keys to their decoding functions
-var statusDecoders = map[string]func(uint16) interface{}{
-	"solis_status":        decodeSolisStatusHandler,
-	"operating_status":    decodeOperatingStatusHandler,
-	"grid_fault_1":        decodeGridFault01Handler,
-	"backup_fault_2":      decodeBackupFault02Handler,
-	"battery_fault_3":     decodeBatteryFault03Handler,
-	"device_fault_4":      decodeDeviceFault04Handler,
-	"device_fault_5":      decodeDeviceFault05Handler,
-	"battery_fault_1_bms": decodeBatteryFault1BmsHandler,
-	"battery_fault_2_bms": decodeBatteryFault2BmsHandler,
-}
-
-// Handler wrappers for status decoding
-func decodeSolisStatusHandler(value uint16) interface{}     { return DecodeSolisStatus(value) }
-func decodeOperatingStatusHandler(value uint16) interface{} { return DecodeOperatingStatus(value) }
-func decodeGridFault01Handler(value uint16) interface{} {
-	return DecodeGridFaultStatus01(value)
-}
-func decodeBackupFault02Handler(value uint16) interface{} {
-	return DecodeBackupFaultStatus02(value)
-}
-func decodeBatteryFault03Handler(value uint16) interface{} {
-	return DecodeBatteryFaultStatus03(value)
-}
-func decodeDeviceFault04Handler(value uint16) interface{} {
-	return DecodeDeviceFaultStatus04(value)
-}
-func decodeDeviceFault05Handler(value uint16) interface{} {
-	return DecodeDeviceFaultStatus05(value)
-}
-func decodeBatteryFault1BmsHandler(value uint16) interface{} {
-	return DecodeBatteryFaultStatus1Bms(value)
-}
-func decodeBatteryFault2BmsHandler(value uint16) interface{} {
-	return DecodeBatteryFaultStatus2Bms(value)
-}
-
-// decodeRaw converts raw uint16 register values to a float64 value based on the data type.
-// The registers are in Modbus format (big-endian for multi-register values).
-// For multi-register types (Uint32, Int32, Float32), the first uint16 is the high word.
-func decodeRaw(dataType DataType, raw []uint16) float64 {
-	if len(raw) == 0 {
-		return 0
+// Derive adds derived live values after a full poll was decoded: battery_power_signed is
+// +battery_power while charging and -battery_power while discharging. Missing inputs or
+// an unknown direction leave the derived key absent.
+func (d *Decoder) Derive(values map[string]*Value, at time.Time) {
+	p, okP := values[KeyBatteryPower]
+	dir, okD := values[KeyBatteryDirection]
+	if !okP || !okD || d.signed.Key == "" {
+		return
 	}
+	var sign float64
+	switch dir.RawValue {
+	case directionCharging:
+		sign = 1
+	case directionDischarging:
+		sign = -1
+	default:
+		return
+	}
+	values[KeyBatteryPowerSigned] = &Value{
+		Key: d.signed.Key, Name: d.signed.Name, Unit: d.signed.Unit, Timestamp: at,
+		RawValue: sign * p.RawValue, DecodedValue: sign * p.DecodedValue,
+	}
+}
 
-	// Get the decoder function for this data type
-	decoder, ok := rawDecoders[dataType]
+// DecodeStatus decodes a status/fault register value by key: solis_status yields a
+// {"name","description"} map, bitmask registers the list of active bit names.
+func (d *Decoder) DecodeStatus(key string, raw uint16) any {
+	if key == solisStatusKey {
+		return d.decodeSolisStatus(raw)
+	}
+	names, ok := d.bits[key]
 	if !ok {
+		return []string{"No bit map defined for register " + key}
+	}
+	unknown := "Unknown bit %d"
+	if key == operatingStatusKey {
+		unknown = "Unknown status bit %d"
+	}
+	return activeBits(raw, names, unknown)
+}
+
+// activeBits names every set bit of raw; bits without a name use the unknown format.
+func activeBits(raw uint16, names []string, unknown string) []string {
+	var active []string
+	for i := range bitsPerRegister {
+		if raw&(1<<i) == 0 {
+			continue
+		}
+		if i < len(names) && names[i] != "" {
+			active = append(active, names[i])
+		} else {
+			active = append(active, fmt.Sprintf(unknown, i))
+		}
+	}
+	return active
+}
+
+func (d *Decoder) decodeSolisStatus(raw uint16) map[string]string {
+	c, ok := d.codes[raw]
+	if !ok {
+		d.log.Debug().Uint16("status_code", raw).Msg("unknown status code")
+		return map[string]string{
+			"name":        fmt.Sprintf("Unknown Status (0x%04X)", raw),
+			"description": fmt.Sprintf("Unknown status code: 0x%04X", raw),
+		}
+	}
+	return map[string]string{"name": c.name, "description": c.desc}
+}
+
+// decodeRaw converts big-endian Modbus words to a float64 (high word first).
+func decodeRaw(dt DataType, raw []uint16) float64 {
+	if len(raw) < int(dt.Count()) || len(raw) == 0 {
 		return 0
 	}
-	return decoder(raw)
+	return decodeWords(dt, raw)
 }
 
-// rawDecoders maps data types to their decoding functions
-var rawDecoders = map[DataType]func([]uint16) float64{
-	Uint16:  decodeUint16,
-	Int16:   decodeInt16,
-	Uint32:  decodeUint32,
-	Int32:   decodeInt32,
-	Float32: decodeFloat32,
-	Bool:    decodeBool,
-}
-
-// decodeUint16 decodes a Uint16 value
-func decodeUint16(raw []uint16) float64 {
-	return float64(raw[0])
-}
-
-// decodeInt16 decodes an Int16 value
-func decodeInt16(raw []uint16) float64 {
-	return float64(int16(raw[0])) // #nosec G115
-}
-
-// decodeUint32 decodes a Uint32 value from two uint16 registers
-func decodeUint32(raw []uint16) float64 {
-	if len(raw) < 2 {
-		return 0
+// decodeWords converts raw, which holds at least dt.Count() words, to a float64.
+func decodeWords(dt DataType, raw []uint16) float64 {
+	switch dt {
+	case Int16:
+		return float64(int16(raw[0])) // #nosec G115 -- two's complement reinterpretation
+	case Uint32:
+		return float64(word32(raw))
+	case Int32:
+		return float64(int32(word32(raw))) // #nosec G115 -- two's complement reinterpretation
+	case Float32:
+		return float64(math.Float32frombits(word32(raw)))
+	case Bool:
+		return boolValue(raw[0])
+	default:
+		return float64(raw[0])
 	}
-	return float64(uint32(raw[0])<<16 | uint32(raw[1]))
 }
 
-// decodeInt32 decodes an Int32 value from two uint16 registers
-func decodeInt32(raw []uint16) float64 {
-	if len(raw) < 2 {
-		return 0
-	}
-	return float64(int32(uint32(raw[0])<<16 | uint32(raw[1]))) // #nosec G115
-}
-
-// decodeFloat32 decodes a Float32 value from two uint16 registers
-func decodeFloat32(raw []uint16) float64 {
-	if len(raw) < 2 {
-		return 0
-	}
-	bits := uint32(raw[0])<<16 | uint32(raw[1])
-	return float64(math.Float32frombits(bits))
-}
-
-// decodeBool decodes a Bool value
-func decodeBool(raw []uint16) float64 {
-	if len(raw) >= 1 && raw[0] != 0 {
+func boolValue(w uint16) float64 {
+	if w != 0 {
 		return 1
 	}
 	return 0
 }
 
-// DecodeString decodes a string register from raw uint16 values.
-// Each uint16 contains 2 ASCII characters (high byte and low byte).
-// Example: raw = [0x4845, 0x4C4C, 0x4F20] -> "HELLO " -> "HELLO"
-func DecodeString(raw []uint16) string {
-	result := make([]byte, 0, len(raw)*2)
-
-	for _, word := range raw {
-		// Extract high and low bytes from each uint16
-		high := byte(word >> 8)
-		low := byte(word & 0xFF)
-
-		// Only include printable ASCII characters (32-126)
-		if high >= 32 && high <= 126 {
-			result = append(result, high)
-		}
-		if low >= 32 && low <= 126 {
-			result = append(result, low)
-		}
-	}
-
-	// Trim trailing spaces
-	for len(result) > 0 && result[len(result)-1] == ' ' {
-		result = result[:len(result)-1]
-	}
-
-	return string(result)
-}
-
-// DecodeRange decodes all registers within a single read range.
-// startAddr is the starting address of the range.
-// raw contains the uint16 register values as returned directly from Modbus.
-// Returns a map of register keys to their decoded Values.
-func DecodeRange(startAddr uint16, raw []uint16) map[string]Value {
-	decoderLogger.Debug().Msgf("Decoding range starting at address %d, %d registers", startAddr, len(raw))
-
-	result := make(map[string]Value)
-
-	// Iterate through registers by index
-	// Each register in the raw slice corresponds to a Modbus address: raw[i] = startAddr + i
-	i := 0
-	for i < len(raw) {
-		addr := startAddr + uint16(i)
-
-		// Check if there's a register defined at this address
-		if reg, ok := RegisterMap[addr]; ok {
-			// Check if we have enough registers for this data type
-			regCount := int(reg.Count)
-
-			if i+regCount <= len(raw) {
-				regRaw := raw[i : i+regCount]
-
-				// Special handling for string type
-				if reg.DataType == String {
-					strValue := DecodeString(regRaw)
-					decoderLogger.Debug().Msgf("Decoded string register %s (%d): %q", reg.Key, addr, strValue)
-					result[reg.Key] = Value{
-						Key:          reg.Key,
-						Name:         reg.Name,
-						RawValue:     0,
-						DecodedValue: 0,
-						StringValue:  strValue,
-						Unit:         reg.Unit,
-						DataType:     reg.DataType,
-						Stability:    reg.Stability,
-					}
-				} else {
-					value := DecodeRegister(reg, regRaw)
-					decoderLogger.Debug().Msgf("Decoded register %s (%d): raw=%.1f, decoded=%.1f %s",
-						reg.Key, addr, value.RawValue, value.DecodedValue, value.Unit)
-					result[reg.Key] = value
-				}
-
-				// Move past this register (and any additional registers it occupies)
-				i += regCount
-				continue
-			} else {
-				decoderLogger.Warn().Msgf("Insufficient registers for %s at address %d (need %d, have %d)",
-					reg.Key, addr, regCount, len(raw)-i)
-			}
-		}
-
-		// No register defined at this address, skip 1 register (one Uint16)
-		i += 1
-	}
-
-	decoderLogger.Debug().Msgf("Decoded %d values from range %d", len(result), startAddr)
-	return result
+func word32(raw []uint16) uint32 {
+	return uint32(raw[0])<<wordShift | uint32(raw[1])
 }
