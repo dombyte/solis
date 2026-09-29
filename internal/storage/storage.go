@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
@@ -81,7 +82,8 @@ func open(ctx context.Context, cfg Settings, log zerolog.Logger) (*sql.DB, error
 			return nil, fmt.Errorf("storage: create directory: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", cfg.Path)
+	source := dsn(cfg)
+	db, err := sql.Open("sqlite", source)
 	if err != nil {
 		return nil, fmt.Errorf("storage: open database: %w", err)
 	}
@@ -89,31 +91,32 @@ func open(ctx context.Context, cfg Settings, log zerolog.Logger) (*sql.DB, error
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
-	configurePragmas(ctx, db, cfg, log)
 	if err := db.PingContext(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("storage: ping database: %w", err), db.Close())
 	}
+	log.Debug().Str("dsn", source).Msg("database opened")
 	return db, nil
 }
 
-func configurePragmas(ctx context.Context, db *sql.DB, cfg Settings, log zerolog.Logger) {
-	var pragmas []string
+// dsn is the driver DSN: the path plus the configured pragmas as _pragma parameters.
+// The driver runs them on every connection it opens, so a replaced pool connection
+// keeps them (synchronous and temp_store are per connection, not stored in the file).
+// The values are validated enums (validated by config); an invalid one fails the ping.
+func dsn(cfg Settings) string {
+	q := url.Values{}
 	if cfg.WalMode {
-		pragmas = append(pragmas, "PRAGMA journal_mode=WAL;")
+		q.Add("_pragma", "journal_mode(WAL)")
 	}
-	// Synchronous and TempStore are validated enums (validated by config).
 	if cfg.Synchronous != "" {
-		pragmas = append(pragmas, "PRAGMA synchronous="+cfg.Synchronous+";")
+		q.Add("_pragma", "synchronous("+cfg.Synchronous+")")
 	}
 	if cfg.TempStore != "" {
-		pragmas = append(pragmas, "PRAGMA temp_store="+cfg.TempStore+";")
+		q.Add("_pragma", "temp_store("+cfg.TempStore+")")
 	}
-	for _, p := range pragmas {
-		log.Debug().Str("pragma", p).Msg("applying pragma")
-		if _, err := db.ExecContext(ctx, p); err != nil {
-			log.Warn().Err(err).Str("pragma", p).Msg("failed to apply pragma")
-		}
+	if len(q) == 0 {
+		return cfg.Path
 	}
+	return cfg.Path + "?" + q.Encode()
 }
 
 // schemaSQL mirrors the V1 migration plus the V3 meta table; IF NOT EXISTS keeps it a
