@@ -660,6 +660,15 @@
   }
 }
 
+/* Installed PWA on touch devices: no pinch/double-tap zoom, only scrolling. Browser
+   zoom and the OS text size still apply; a normal browser tab keeps pinch zoom. iOS
+   ignores this for pinch, see the gesturestart handler in index.html. */
+@media (display-mode: standalone) and (pointer: coarse) {
+  html {
+    touch-action: pan-x pan-y;
+  }
+}
+
 /* ========================================================================
    FLOW DIAGRAM ANIMATIONS
    CSS keyframes for animated flow edges (replaces requestAnimationFrame)

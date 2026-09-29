@@ -22,6 +22,13 @@
         } catch (e) {}
         document.documentElement.classList.add(t);
       })();
+      // Installed PWA only: block pinch zoom on iOS, which ignores touch-action for
+      // pinch (the CSS rule in index.css covers Android). A browser tab keeps it.
+      if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+        document.addEventListener('gesturestart', function (e) {
+          e.preventDefault();
+        });
+      }
     </script>
   </head>
   <body>
