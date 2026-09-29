@@ -662,10 +662,17 @@
 
 /* Installed PWA on touch devices: no pinch/double-tap zoom, only scrolling. Browser
    zoom and the OS text size still apply; a normal browser tab keeps pinch zoom. iOS
-   ignores this for pinch, see the gesturestart handler in index.html. */
+   ignores this for pinch, see the gesturestart handler in index.html. The page-level
+   scrollbar is hidden too (the page still scrolls); inner scroll areas such as the
+   license list and dialogs keep theirs. */
 @media (display-mode: standalone) and (pointer: coarse) {
   html {
     touch-action: pan-x pan-y;
+    scrollbar-width: none;
+  }
+
+  html::-webkit-scrollbar {
+    display: none;
   }
 }
 
