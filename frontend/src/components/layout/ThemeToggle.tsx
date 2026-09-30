@@ -3,14 +3,9 @@ import { Button } from '../ui/button';
 import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-
-  // "system" follows the OS: toggle away from what is actually shown (like the "d"
-  // shortcut), otherwise the first click can pick the theme already on screen.
-  const resolvedTheme =
-    theme === 'system'
-      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      : theme;
+  // Toggle away from what is actually shown (like the "d" shortcut), so under "system"
+  // the first click never picks the theme already on screen.
+  const { resolvedTheme, setTheme } = useTheme();
 
   const toggleTheme = () => {
     setTheme(resolvedTheme === 'light' ? 'dark' : 'light');

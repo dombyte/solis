@@ -106,29 +106,10 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
       return newVisibility;
     });
   };
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   
   // Use pointer-based mobile detection
   const isMobile = useMobile();
-  
-  // Also track the actual class on the HTML element for system theme changes
-  const [currentThemeClass, setCurrentThemeClass] = React.useState(() => {
-    const html = document.documentElement;
-    return html.classList.contains('dark') ? 'dark' : 'light';
-  });
-
-  useEffect(() => {
-    const html = document.documentElement;
-    const observer = new MutationObserver(() => {
-      const newTheme = html.classList.contains('dark') ? 'dark' : 'light';
-      if (newTheme !== currentThemeClass) {
-        setCurrentThemeClass(newTheme);
-      }
-    });
-    
-    observer.observe(html, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, [currentThemeClass]);
 
   useEffect(() => {
     if (!chartRef.current || !data) return;
@@ -358,7 +339,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         chartInstanceRef.current = null;
       }
     };
-  }, [data, theme, currentThemeClass, datasetCount, isMobile]);
+  }, [data, resolvedTheme, datasetCount, isMobile]);
 
   if (!data) {
     return (
