@@ -27,11 +27,7 @@
   "packageRules": [
     {
       "matchManagers": ["gomod"],
-      "groupName": "Go dependencies"
-    },
-    {
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["golang"],
+      "groupName": "Go dependencies",
       "postUpdateOptions": ["gomodTidy"]
     },
     {
