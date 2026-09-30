@@ -49,6 +49,12 @@
     {
       "matchManagers": ["npm"],
       "groupName": "npm dependencies"
+    },
+    {
+      "description": "typescript-eslint supports only typescript <6.1; lift once it supports TS 7",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
     }
   ],
   "vulnerabilityAlerts": {
