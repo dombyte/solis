@@ -30,13 +30,18 @@ func modbusSettings(m config.ModbusSettings) modbus.Settings {
 
 // validateModbus applies the Modbus client's own settings rules.
 func validateModbus(c *config.AppConfig) error {
-	return modbusSettings(c.Modbus).Validate()
+	if err := modbusSettings(c.Modbus).Validate(); err != nil {
+		return &config.ValidationError{Field: "modbus", Err: err}
+	}
+	return nil
 }
 
 // validateRollover requires a strict 24-hour HH:MM rollover time.
 func validateRollover(c *config.AppConfig) error {
-	_, err := period.ParseRollover(c.Rollover.Time)
-	return err
+	if _, err := period.ParseRollover(c.Rollover.Time); err != nil {
+		return &config.ValidationError{Field: "rollover.time", Err: err}
+	}
+	return nil
 }
 
 // validatePollTimeout keeps one poll cycle inside the supervisor's healthy grace: the
@@ -46,8 +51,9 @@ func validatePollTimeout(c *config.AppConfig) error {
 	// so a poll can overrun poll_timeout by that much (review ACQ-L3).
 	grace := health.HealthyGraceFactor * c.Poller.Interval
 	if worst := c.Poller.PollTimeout + c.Modbus.Timeout; worst >= grace {
-		return fmt.Errorf("poll_timeout + modbus.timeout (%s) must be below %d x "+
-			"poller.interval (%s)", worst, health.HealthyGraceFactor, grace)
+		return &config.ValidationError{Field: "poller.poll_timeout", Err: fmt.Errorf(
+			"poll_timeout + modbus.timeout (%s) must be below %d x poller.interval (%s)",
+			worst, health.HealthyGraceFactor, grace)}
 	}
 	return nil
 }

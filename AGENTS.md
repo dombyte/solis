@@ -2,7 +2,7 @@
 
 ## Standard
 
-This project follows the **Go Project Standard v3.0**
+This project follows the **Go Project Standard v3.1**
 (local reference: `/home/dom/Dokumente/Git/go-project-standard.md`; will be replaced by a URL).
 That document holds the rules for every Go project: dependency injection, composition root,
 errors, logging, lifecycle, code style, naming, testing, tooling, Git workflow (branches,
@@ -13,8 +13,8 @@ a deviation from a MUST rule of the standard is only valid if it is listed under
 "Deviations" below with its reason. When code and this file disagree, fix one of them in
 the same change.
 
-**Current state:** v3 is implemented and follows the standard; the remaining gaps are listed
-under "Migration backlog".
+**Current state:** v3 is implemented and follows the standard; new gaps go under
+"Migration backlog".
 
 ---
 
@@ -47,7 +47,8 @@ go test -race ./...                         # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
 make build                                  # ./solis with version info (ldflags)
 make assets                                 # frontend/dist + docs/dist (make frontend / docs)
-go run ./cmd                                # server (reads ./config.yaml)
+make docker                                 # dev image (docker-compose.dev.yaml) with version info
+go run ./cmd                                # server (reads ./config.yaml; -config <path>)
 go run ./cmd backfill --years 0             # maintenance job (app must be stopped), exits 0/1
 cd frontend && npm run typecheck && npm run lint && npm run knip
 ```
@@ -94,9 +95,11 @@ example/                 docker-compose (TCP, RTU) and config.yaml templates for
 
 ### Package notes
 
-- **config:** structural checks in `Validate()`; rules owned by other packages (Modbus
-  address, strict `rollover.time` HH:MM, poll timeout vs health grace) are `config.Rule`s
-  passed in by `app.ConfigRules()`. Imports no domain package; `app` maps sections onto each
+- **config:** structural checks in `Validate()`, which reports every problem with its field
+  path (`ValidationErrors`: `poller.interval: must be at least 1s, got 0s; …`); rules owned
+  by other packages (Modbus address, strict `rollover.time` HH:MM, poll timeout vs health
+  grace) are `config.Rule`s passed in by `app.ConfigRules()` and name their field with a
+  `*config.ValidationError`. Imports no domain package; `app` maps sections onto each
   package's own `Settings` (`internal/app/config_mapping.go`).
 - **modbus:** transport selected by the `modbus.address` URL scheme (`tcp://host:port` or
   `rtu://<device path>`); reconnect with exponential backoff; construction never fails on an
@@ -270,6 +273,8 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
 ← { "type": "update",      "ts": "…", "values": {}, "removed": ["battery_power_signed"] }
 → { "type": "unsubscribe", "keys": ["solis_status"] }
 ← { "type": "error",       "code": "unknown_keys", "keys": ["foo"] }
+→ { "type": "ping" }
+← { "type": "pong" }
 ```
 
 - `removed` lists subscribed keys that disappeared from the cache (`ReplaceDomain` events
@@ -277,7 +282,9 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
 - Only changed, subscribed keys are pushed (diff by `value` + `status_decoded` per client);
   pushes are coalesced (~75 ms) so poller + aggregator events close together become one
   frame with one frame-level `ts`.
-- Unknown keys never drop the connection. `ping` from the client is accepted and ignored.
+- Unknown keys never drop the connection. `ping` is answered with `pong`; the frontend
+  pings every 20 s (and on tab focus) and reconnects when no frame arrives within 5 s
+  (dead-connection check).
 - Same-origin upgrader (Origin host must equal the Host header; the scheme is not
   compared). No history over WebSocket — history is REST only.
 - Limits: at most 256 clients (the 257th is closed with 1013), at most 256 keys per frame.
@@ -489,18 +496,9 @@ None. Gaps in the code are backlog items below, not accepted deviations. Add a r
 
 ## 10. Migration Backlog
 
-Known gaps between the current code and standard v3. Each item is its own `refactor/…` (or
-`fix/…`) branch; update this list when an item is done.
+Known gaps between the current code and standard v3. Update this list when an item is done.
 
-1. **Config path from a flag (standard 5):** `cmd/main.go` reads a fixed `./config.yaml`.
-   Add a `-config` flag defaulting to `config.yaml` (image and compose files keep working),
-   or move this item to "Deviations" with the reason.
-2. **Report all config problems (standard 5):** `AppConfig.Validate` returns on the first
-   failing section/rule; collect every problem with its field path (`errors.Join`).
-3. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
-   without shared state.
-4. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
-   ldflags, so a locally built image logs `dev`/`unknown`; pass them as build args.
+No open items.
 
 ---
 

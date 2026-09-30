@@ -71,6 +71,7 @@ func TestRegistry_Contents(t *testing.T) {
 }
 
 func TestNewRegistry_ValidationFailures(t *testing.T) {
+	t.Parallel()
 	daily := Register{Key: "d", Address: 10, DataType: Uint16, Scale: 1, Store: StoreDaily}
 	monthly := Register{Key: "m", DataType: Uint32, Scale: 1, Store: StoreMonthly}
 	edge := Edge{Level: period.Monthly, Source: "d", Target: "m"}
@@ -139,6 +140,7 @@ func TestNewRegistry_ValidationFailures(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := newRegistry(tt.regs, tt.edges, tt.nets)
 			assert.ErrorIs(t, err, ErrInvalidRegistry)
 		})

@@ -208,7 +208,8 @@ func TestUnknownKeysAndBadMessagesKeepConnection(t *testing.T) {
 	assert.Equal(t, []any{"foo"}, errFrame["keys"])
 	assert.Equal(t, TypeSnapshot, read(t, c)["type"])
 
-	send(t, c, ClientMessage{Type: TypePing}) // accepted, no reply
+	send(t, c, ClientMessage{Type: TypePing})
+	assert.Equal(t, TypePong, read(t, c)["type"])
 	require.NoError(t, c.WriteMessage(websocket.TextMessage, []byte("{not json")))
 	bad := read(t, c)
 	assert.Equal(t, CodeBadRequest, bad["code"])

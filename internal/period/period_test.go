@@ -16,6 +16,7 @@ func berlin(t *testing.T) *time.Location {
 }
 
 func TestOf_KeyFormats(t *testing.T) {
+	t.Parallel()
 	loc := berlin(t)
 	tests := []struct {
 		name             string
@@ -39,6 +40,7 @@ func TestOf_KeyFormats(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := Of(tt.at)
 			assert.Equal(t, tt.day, p.Day)
 			assert.Equal(t, tt.month, p.Month)
@@ -145,6 +147,7 @@ func TestParseRollover(t *testing.T) {
 }
 
 func TestWindowAt_LateRollover(t *testing.T) {
+	t.Parallel()
 	loc := berlin(t)
 	r, err := ParseRollover("23:59")
 	require.NoError(t, err)
@@ -173,6 +176,7 @@ func TestWindowAt_LateRollover(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			w, ok := r.WindowAt(tt.at)
 			require.Equal(t, tt.inWindow, ok)
 			if ok {

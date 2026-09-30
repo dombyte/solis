@@ -315,7 +315,8 @@ paths:
            or status changes - only changed keys are included, diffed per client.
         4. Send `unsubscribe` to drop keys you no longer need (unknown keys are ignored
            silently; no reply).
-        5. `ping` is accepted and ignored (a `pong` is not required by the protocol).
+        5. `ping` is answered with `pong`; clients use it as a liveness check (browsers do not
+           expose WebSocket control-frame pongs to JavaScript).
         6. Unknown keys in `subscribe` never drop the connection; the server replies with an
            `error` frame naming them.
         7. When a subscribed key disappears from the server cache (e.g. a derived value
@@ -335,6 +336,7 @@ paths:
         { "type": "update",   "ts": "2026-08-04T09:19:20+02:00", "values": { "pv_total_power": { "value": 5102.5 } } }
         { "type": "update",   "ts": "2026-08-04T09:19:25+02:00", "values": {}, "removed": ["battery_power_signed"] }
         { "type": "error",    "code": "unknown_keys", "message": "unknown keys ignored", "keys": ["foo"] }
+        { "type": "pong" }
         ```
         `snapshot` values include `timestamp` and `unit`; `update` values carry only `value` (and
         `status_decoded` for status/fault keys) to keep frames small.

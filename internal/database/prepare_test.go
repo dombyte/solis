@@ -202,6 +202,7 @@ func TestPrepare_NewerSchemaIsRejected(t *testing.T) {
 }
 
 func TestPrepare_TooOldDatabaseIsRejected(t *testing.T) {
+	t.Parallel()
 	tests := map[string][]string{
 		"schema v1": {
 			SchemaVersionTableSQL,
@@ -211,6 +212,7 @@ func TestPrepare_TooOldDatabaseIsRejected(t *testing.T) {
 	}
 	for name, stmts := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			path := filepath.Join(t.TempDir(), "solis.db")
 			execSQL(t, path, stmts...)
 			err := newManager(t, path, clocktest.New(time.Now())).Prepare(context.Background())

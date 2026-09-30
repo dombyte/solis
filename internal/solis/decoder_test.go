@@ -19,6 +19,7 @@ func newTestDecoder(t *testing.T) (*Decoder, *Registry) {
 }
 
 func TestDecodeRaw(t *testing.T) {
+	t.Parallel()
 	f := math.Float32bits(12.5)
 	tests := []struct {
 		name string
@@ -38,6 +39,7 @@ func TestDecodeRaw(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			assert.InDelta(t, tt.want, decodeRaw(tt.dt, tt.raw), 1e-9)
 		})
 	}
