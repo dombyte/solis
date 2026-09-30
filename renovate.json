@@ -72,14 +72,6 @@
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^scripts/.+\\.sh$/", "/^AGENTS\\.md$/"],
       "matchStrings": ["go run (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[^\\s]+)"],
       "datasourceTemplate": "go"
-    },
-    {
-      "description": "golangci-lint version pinned in golangci-lint-action",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
-      "matchStrings": ["golangci/golangci-lint-action@\\S+\\s+with:\\s+version:\\s*(?<currentValue>v[\\d.]+)"],
-      "depNameTemplate": "golangci/golangci-lint",
-      "datasourceTemplate": "github-releases"
     }
   ],
   "lockFileMaintenance": {
