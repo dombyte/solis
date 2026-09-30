@@ -47,7 +47,7 @@ go test -race ./...                         # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
 make build                                  # ./solis with version info (ldflags)
 make assets                                 # frontend/dist + docs/dist (make frontend / docs)
-go run ./cmd                                # server (reads ./config.yaml)
+go run ./cmd                                # server (reads ./config.yaml; -config <path>)
 go run ./cmd backfill --years 0             # maintenance job (app must be stopped), exits 0/1
 cd frontend && npm run typecheck && npm run lint && npm run knip
 ```
@@ -506,14 +506,11 @@ runs):
    merge) after CI is green. Pushing a branch without a PR triggers no CI, and a newer push
    to the PR cancels the superseded run.
 
-1. **Config path from a flag (standard 5):** `cmd/main.go` reads a fixed `./config.yaml`.
-   Add a `-config` flag defaulting to `config.yaml` (image and compose files keep working),
-   or move this item to "Deviations" with the reason.
-2. **Report all config problems (standard 5):** `AppConfig.Validate` returns on the first
+1. **Report all config problems (standard 5):** `AppConfig.Validate` returns on the first
    failing section/rule; collect every problem with its field path (`errors.Join`).
-3. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
+2. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
    without shared state.
-4. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
+3. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
    ldflags, so a locally built image logs `dev`/`unknown`; pass them as build args.
 
 ---

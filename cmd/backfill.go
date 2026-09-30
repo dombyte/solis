@@ -16,7 +16,7 @@ import (
 )
 
 // runBackfill parses `backfill --years N` and runs the job; exit code 0/1.
-func runBackfill(args []string, stdout, stderr io.Writer) int {
+func runBackfill(args []string, configPath string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("backfill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	years := fs.Int("years", 0, "closed years to recompute in addition to the current year")
@@ -30,15 +30,15 @@ func runBackfill(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	opts := maintenance.Options{Years: *years, Force: *force}
-	if err := backfill(opts, stdout, stderr); err != nil {
+	if err := backfill(opts, configPath, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "backfill: %v\n", err)
 		return 1
 	}
 	return 0
 }
 
-func backfill(opts maintenance.Options, stdout, stderr io.Writer) error {
-	cfg, err := loadConfig()
+func backfill(opts maintenance.Options, configPath string, stdout, stderr io.Writer) error {
+	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
 	}

@@ -9,8 +9,8 @@ import (
 )
 
 // runServer runs the application (server mode) until ctx is cancelled or it fails.
-func runServer(ctx context.Context) error {
-	cfg, err := loadConfig()
+func runServer(ctx context.Context, configPath string) error {
+	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return err
 	}

@@ -1,11 +1,14 @@
 // Package main is the Solis monitor entry point. Without a subcommand it runs the server
 // once and exits 0 on a clean (signal) shutdown and 1 on any error, including a fatal
 // health escalation, so the container runtime's restart policy restarts it; `solis
-// backfill --years N` runs a maintenance job and exits 0/1.
+// backfill --years N` runs a maintenance job and exits 0/1. `-config <path>` (before the
+// subcommand) selects the configuration file, default ./config.yaml.
 package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +22,7 @@ import (
 	"github.com/dombyte/solis/internal/logging"
 )
 
-const configPath = "config.yaml"
+const defaultConfigPath = "config.yaml"
 
 // Build information, set by the Makefile and goreleaser via -ldflags "-X main.Version=…".
 // -X can only set package-level string variables, hence the only globals in the binary.
@@ -42,18 +45,39 @@ func main() {
 	os.Exit(dispatch(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// dispatch selects the subcommand and returns the process exit code.
+// dispatch parses the global flags, selects the subcommand and returns the process exit
+// code.
 func dispatch(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("solis", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() { printUsage(stderr) }
+	configPath := fs.String("config", defaultConfigPath, "path of the configuration file")
+	version := fs.Bool("version", false, "print the build information")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0 // -h/--help printed the usage
+		}
+		return 1
+	}
+	args = fs.Args()
+	if *version {
+		args = []string{"version"}
+	}
+	return runCommand(args, *configPath, stdout, stderr)
+}
+
+// runCommand runs the subcommand in args[0] (the server when args is empty).
+func runCommand(args []string, configPath string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "serve" {
-		return serve(stderr, runServer)
+		return serve(stderr, func(ctx context.Context) error { return runServer(ctx, configPath) })
 	}
 	switch args[0] {
 	case "backfill":
-		return runBackfill(args[1:], stdout, stderr)
-	case "help", "-h", "--help":
+		return runBackfill(args[1:], configPath, stdout, stderr)
+	case "help":
 		printUsage(stdout)
 		return 0
-	case "version", "--version":
+	case "version":
 		_, _ = fmt.Fprintln(stdout, buildInfo())
 		return 0
 	default:
@@ -66,9 +90,11 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
-  solis                     run the server
-  solis backfill --years N  recompute monthly+yearly values (app must be stopped)
-  solis version             print the build information
+  solis [-config PATH]                     run the server
+  solis [-config PATH] backfill --years N  recompute monthly+yearly values (app must be stopped)
+  solis version                            print the build information
+
+  -config PATH  configuration file (default config.yaml)
 `)
 }
 
@@ -90,8 +116,8 @@ func serve(stderr io.Writer, run func(context.Context) error) int {
 	return 0
 }
 
-// loadConfig loads and validates config.yaml.
-func loadConfig() (*config.AppConfig, error) {
+// loadConfig loads and validates the configuration file at path.
+func loadConfig(configPath string) (*config.AppConfig, error) {
 	cfg, err := config.LoadConfig(configPath, app.ConfigRules()...)
 	if err != nil {
 		return nil, fmt.Errorf("load configuration: %w", err)

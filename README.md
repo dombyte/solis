@@ -31,7 +31,9 @@ Without Docker: `make build && ./solis` (linux/darwin; the database lock uses `f
 
 ## Configuration
 
-[`example/config.yaml`](example/config.yaml) is the commented template. Every option can be
+[`example/config.yaml`](example/config.yaml) is the commented template. The app reads
+`./config.yaml`; pass `-config <path>` before the subcommand to use another file
+(`solis -config /etc/solis.yaml`, `solis -config /etc/solis.yaml backfill`). Every option can be
 overridden with `SOLIS_` + its path, e.g. `SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502`.
 Invalid values fail startup.
 
