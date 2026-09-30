@@ -1,3 +1,8 @@
+[![GitHub license](https://badgen.net/github/license/dombyte/solis)](https://github.com/dombyte/solis/blob/master/LICENSE)
+[![Checks](https://github.com/dombyte/solis/actions/workflows/checks.yml/badge.svg)](https://github.com/dombyte/solis/actions/workflows/checks.yml)
+[![GitHub go.mod Go version of a Go module](https://img.shields.io/github/go-mod/go-version/dombyte/solis.svg)](https://github.com/dombyte/solis)
+[![Github tag](https://badgen.net/github/release/dombyte/solis/latest)](https://github.com/dombyte/solis/tags/)
+
 # Solis Monitor
 
 Monitoring for Solis hybrid inverters over Modbus (TCP or RTU). One Go binary polls the
