@@ -62,11 +62,33 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
   // so "most recent" is the right edge) instead of defaulting to the oldest entries.
   // useLayoutEffect avoids a visible left-to-right jump after the width-driving inner
   // div has committed its minWidth style.
+  // The view stays pinned to the right edge until the user scrolls away: the pinned
+  // y-axis column only gets its width once Chart.js has published the ticks, which
+  // shrinks the scroll container after this first scroll and would leave it short of
+  // the end.
+  const pinnedToEndRef = useRef(true);
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    pinnedToEndRef.current = true;
     container.scrollLeft = container.scrollWidth;
   }, [data]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedToEndRef.current) container.scrollLeft = container.scrollWidth;
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [data]);
+
+  const handleScroll = () => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    pinnedToEndRef.current = container.scrollLeft + container.clientWidth >= container.scrollWidth - 1;
+  };
 
   const toggleDatasetVisibility = (key: string) => {
     setDatasetVisibility(prev => {
@@ -396,6 +418,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         </div>
         <div
           ref={scrollContainerRef}
+          onScroll={handleScroll}
           className="overflow-x-auto history-chart-scroll flex-1 min-w-0"
         >
           <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
