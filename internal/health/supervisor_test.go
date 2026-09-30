@@ -298,11 +298,14 @@ func TestFactoryPanicAndStartErrorCountAsFailures(t *testing.T) {
 	})
 	h.run()
 	assert.Equal(t, "failed", h.sup.Snapshot().Components["x"].State)
+	// Wait on the snapshot, not on calls: a wake-up sweep can call the factory before it
+	// publishes, while the ticker sweep's older snapshot for the same instant is visible.
 	require.Eventually(t, func() bool {
 		h.sweep(1)
-		return calls.Load() >= 4
+		return h.sup.Snapshot().Components["x"].Restarts >= 3
 	}, time.Second, time.Millisecond)
 	assert.Equal(t, 3, h.sup.Snapshot().Components["x"].Restarts)
+	assert.Equal(t, int32(4), calls.Load())
 	assert.NoError(t, context.Cause(h.sup.Context()))
 	h.shutdown()
 }
