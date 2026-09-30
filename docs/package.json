@@ -9,10 +9,10 @@
     "preview": "vite preview"
   },
   "devDependencies": {
-    "vite": "^8.2.2",
+    "vite": "^8.3.1",
     "vite-yaml-plugin": "^3.0.3"
   },
   "dependencies": {
-    "swagger-ui-dist": "^5.32.15"
+    "swagger-ui-dist": "^5.33.0"
   }
 }
