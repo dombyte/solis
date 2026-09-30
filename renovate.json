@@ -23,6 +23,9 @@
     ":semanticCommits"
   ],
   "labels": ["renovate"],
+  "constraints": {
+    "npm": "^11"
+  },
   "ignoreUnstable": true,
   "packageRules": [
     {
