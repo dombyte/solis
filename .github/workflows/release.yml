@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   packages: write
+  pull-requests: read # checks.yml gate job
 
 jobs:
   # A release only builds from a commit whose checks pass (same workflow as for PRs).
