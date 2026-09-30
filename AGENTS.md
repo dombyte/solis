@@ -270,6 +270,8 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
 ← { "type": "update",      "ts": "…", "values": {}, "removed": ["battery_power_signed"] }
 → { "type": "unsubscribe", "keys": ["solis_status"] }
 ← { "type": "error",       "code": "unknown_keys", "keys": ["foo"] }
+→ { "type": "ping" }
+← { "type": "pong" }
 ```
 
 - `removed` lists subscribed keys that disappeared from the cache (`ReplaceDomain` events
@@ -277,7 +279,9 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
 - Only changed, subscribed keys are pushed (diff by `value` + `status_decoded` per client);
   pushes are coalesced (~75 ms) so poller + aggregator events close together become one
   frame with one frame-level `ts`.
-- Unknown keys never drop the connection. `ping` from the client is accepted and ignored.
+- Unknown keys never drop the connection. `ping` is answered with `pong`; the frontend
+  pings every 20 s (and on tab focus) and reconnects when no frame arrives within 5 s
+  (dead-connection check).
 - Same-origin upgrader (Origin host must equal the Host header; the scheme is not
   compared). No history over WebSocket — history is REST only.
 - Limits: at most 256 clients (the 257th is closed with 1013), at most 256 keys per frame.
