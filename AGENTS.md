@@ -493,8 +493,18 @@ None. Gaps in the code are backlog items below, not accepted deviations. Add a r
 
 ## 10. Migration Backlog
 
-Known gaps between the current code and standard v3. Each item is its own `refactor/…` (or
-`fix/…`) branch; update this list when an item is done.
+Known gaps between the current code and standard v3. Update this list when an item is done.
+
+**Batch workflow** (keeps "every change through a PR, CI green before merge" with few CI
+runs):
+
+1. Create one batch branch from `main` (e.g. `refactor/migration-backlog`).
+2. Each item gets its own local `refactor/…` or `fix/…` branch cut from the batch branch;
+   run `make check` and `go test -race ./...` before merging it back with `git merge --no-ff`.
+   Item branches are never pushed.
+3. Push the batch branch once, when every item is merged; open one PR and merge it (regular
+   merge) after CI is green. Pushing a branch without a PR triggers no CI, and a newer push
+   to the PR cancels the superseded run.
 
 1. **Config path from a flag (standard 5):** `cmd/main.go` reads a fixed `./config.yaml`.
    Add a `-config` flag defaulting to `config.yaml` (image and compose files keep working),
