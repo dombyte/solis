@@ -2,7 +2,7 @@
 
 ## Standard
 
-This project follows the **Go Project Standard v3.1**
+This project follows the **Go Project Standard v3.2**
 (local reference: `/home/dom/Dokumente/Git/go-project-standard.md`; will be replaced by a URL).
 That document holds the rules for every Go project: dependency injection, composition root,
 errors, logging, lifecycle, code style, naming, testing, tooling, Git workflow (branches,
