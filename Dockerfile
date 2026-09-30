@@ -23,9 +23,14 @@ RUN apk --no-cache add ca-certificates tzdata
 COPY go.mod go.sum* ./
 RUN go mod download
 
+# Build information for the startup log and `solis version` (make docker passes them).
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_DATE=unknown
+
 COPY . .
 RUN CGO_ENABLED=0 go build \
-    -ldflags="-w -s" \
+    -ldflags="-w -s -X main.Version=${VERSION} -X main.Commit=${COMMIT} -X main.BuildDate=${BUILD_DATE} -X main.GoVersion=$(go env GOVERSION)" \
     -a \
     -installsuffix cgo \
     -o solis ./cmd

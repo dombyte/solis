@@ -166,7 +166,8 @@ refuses periods whose daily rows retention already deleted.
 ```bash
 make build           # binary with version info
 make check           # format, lint, race tests, deadcode, govulncheck (check-only)
-docker compose -f docker-compose.dev.yaml up --build
+make docker          # dev image with version info (docker-compose.dev.yaml)
+docker compose -f docker-compose.dev.yaml up
 
 cd frontend && npm install
 npm run dev                                         # proxies /api and /ws to :8080

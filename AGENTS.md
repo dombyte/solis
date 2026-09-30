@@ -47,6 +47,7 @@ go test -race ./...                         # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
 make build                                  # ./solis with version info (ldflags)
 make assets                                 # frontend/dist + docs/dist (make frontend / docs)
+make docker                                 # dev image (docker-compose.dev.yaml) with version info
 go run ./cmd                                # server (reads ./config.yaml; -config <path>)
 go run ./cmd backfill --years 0             # maintenance job (app must be stopped), exits 0/1
 cd frontend && npm run typecheck && npm run lint && npm run knip
@@ -510,8 +511,6 @@ runs):
 
 1. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
    without shared state.
-2. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
-   ldflags, so a locally built image logs `dev`/`unknown`; pass them as build args.
 
 ---
 

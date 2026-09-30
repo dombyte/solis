@@ -4,8 +4,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        VITE_GIT_COMMIT_HASH: final2
+      args: # set by `make docker`; plain `docker compose build` falls back to dev/unknown
+        VITE_GIT_COMMIT_HASH: ${VITE_GIT_COMMIT_HASH:-dev}
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     volumes:
       - ./data:/app/data
       - ./config.yaml:/app/config.yaml:ro
