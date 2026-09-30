@@ -236,12 +236,14 @@ func TestEnsureCutover_RecordsOffsetsForCutoverMonthAndYear(t *testing.T) {
 // in that month), so that month and, on 1 January, that year must stay open too; their
 // inverter values are kept as offsets as well (review AGG-L3).
 func TestEnsureCutover_OnFirstOfMonthKeepsPreviousPeriodOpen(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct{ day, frozenMonth, frozenYear string }{
 		{"2026-10-01", "2026-08", "2025"},
 		{"2027-01-01", "2026-11", "2025"},
 		{"2026-09-27", "2026-08", "2025"}, // mid-month: unchanged
 	} {
 		t.Run(tt.day, func(t *testing.T) {
+			t.Parallel()
 			s, _, _ := newStore(t, day(tt.day))
 			_, _, err := s.EnsureCutover(ctx, period.Of(day(tt.day)))
 			require.NoError(t, err)
@@ -532,6 +534,7 @@ func TestCleanupAll_NothingFrozenKeepsPeriods(t *testing.T) {
 }
 
 func TestCleanupAll_FreezeAware(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		retention time.Duration
@@ -547,6 +550,7 @@ func TestCleanupAll_FreezeAware(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			s, _, _ := newStore(t, day("2026-08-05"))
 			s.cfg.DailyRetention = tt.retention
 			_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-08-05")))

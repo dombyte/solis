@@ -40,6 +40,7 @@ func (r *rejectingStore) WriteComputed(ctx context.Context, w storage.ComputedWr
 // instead of reporting Recovering on every run (review AGG-M3). The reporter mock only
 // allows Healthy here, so a Recovering report fails the test.
 func TestRun_RejectedRowsStillMergeAndStayHealthy(t *testing.T) {
+	t.Parallel()
 	for name, rejected := range map[string]error{
 		"unknown key": fmt.Errorf("storage: %w: zz", storage.ErrUnknownKey),
 		"lag and domain": errors.Join(
@@ -47,6 +48,7 @@ func TestRun_RejectedRowsStillMergeAndStayHealthy(t *testing.T) {
 			&storage.WriteDomainError{Key: "k", Reason: "not computed"}),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			e := newEnv(t, at("2026-08-10 12:00"), at("2026-08-01 12:00"))
 			e.daily("pv_energy_daily", "2026-08-09", 12.5)
 			e.agg.d.Store = &rejectingStore{Store: e.st, rejected: rejected}

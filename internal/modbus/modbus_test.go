@@ -185,6 +185,7 @@ func TestReadError(t *testing.T) {
 }
 
 func TestKeepsConnection(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		err      error
 		tcp, rtu bool
@@ -204,6 +205,7 @@ func TestKeepsConnection(t *testing.T) {
 	rtu := &Client{rtu: true}
 	for _, tt := range tests {
 		t.Run(tt.err.Error(), func(t *testing.T) {
+			t.Parallel()
 			assert.Equal(t, tt.tcp, tcp.keepsConnection(tt.err), "tcp")
 			assert.Equal(t, tt.rtu, rtu.keepsConnection(tt.err), "rtu")
 		})
