@@ -84,10 +84,17 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     return () => observer.disconnect();
   }, [data]);
 
+  // Unpin only when the view moved left: the chart's own scroll to the end moves right,
+  // and a container that shrinks under it (y-axis column widening) leaves scrollLeft
+  // unchanged, so neither must release the pin before the ResizeObserver re-scrolls.
+  const lastScrollLeftRef = useRef(0);
   const handleScroll = () => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    pinnedToEndRef.current = container.scrollLeft + container.clientWidth >= container.scrollWidth - 1;
+    const atEnd = container.scrollLeft + container.clientWidth >= container.scrollWidth - 1;
+    if (atEnd) pinnedToEndRef.current = true;
+    else if (container.scrollLeft < lastScrollLeftRef.current) pinnedToEndRef.current = false;
+    lastScrollLeftRef.current = container.scrollLeft;
   };
 
   const toggleDatasetVisibility = (key: string) => {
