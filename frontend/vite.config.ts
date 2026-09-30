@@ -15,7 +15,7 @@ export default defineConfig({
         includePrivate: false,
         includeSelf: false,
         output: {
-          file: path.join(__dirname, "public", "data", "licenses.json"),
+          file: path.join(import.meta.dirname, "public", "data", "licenses.json"),
           encoding: "utf-8",
           template: (dependencies) => {
             return JSON.stringify(
@@ -51,8 +51,8 @@ export default defineConfig({
       name: 'copy-data-to-dist',
       apply: 'build',
       closeBundle: () => {
-        const dataDir = path.join(__dirname, 'public', 'data');
-        const destDir = path.join(__dirname, 'dist', 'data');
+        const dataDir = path.join(import.meta.dirname, 'public', 'data');
+        const destDir = path.join(import.meta.dirname, 'dist', 'data');
 
         // Ensure dist/data directory exists
         if (!existsSync(destDir)) {
@@ -73,7 +73,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   server: {
