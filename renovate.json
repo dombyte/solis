@@ -35,6 +35,13 @@
       "groupName": "Go tools"
     },
     {
+      "description": "A Go major version is a new module path (mockery/v2 -> mockery/v3); the regex manager only swaps the version",
+      "matchManagers": ["custom.regex"],
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "matchManagers": ["dockerfile"],
       "groupName": "Docker images"
     },
