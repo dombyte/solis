@@ -31,6 +31,13 @@ docs:
 .PHONY: assets
 assets: frontend docs
 
+# Dev image (docker-compose.dev.yaml) with the same build information as `make build`.
+.PHONY: docker
+docker:
+	VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_DATE=$(DATE) \
+		VITE_GIT_COMMIT_HASH=$(VITE_GIT_COMMIT_HASH) \
+		docker compose -f docker-compose.dev.yaml build
+
 .PHONY: clean
 clean:
 	rm -f $(BINARY_NAME)
