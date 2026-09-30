@@ -13,6 +13,9 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   theme: Theme
+  // The theme actually shown: "system" resolved against the OS preference, kept in state
+  // so consumers re-render when the OS scheme flips.
+  resolvedTheme: ResolvedTheme
   setTheme: (theme: Theme) => void
 }
 
@@ -63,6 +66,15 @@ function getSystemTheme(): ResolvedTheme {
   }
 
   return "light"
+}
+
+function subscribeSystemTheme(onChange: () => void) {
+  const mediaQuery = window.matchMedia(COLOR_SCHEME_QUERY)
+  mediaQuery.addEventListener("change", onChange)
+
+  return () => {
+    mediaQuery.removeEventListener("change", onChange)
+  }
 }
 
 function disableTransitionsTemporarily() {
@@ -127,43 +139,27 @@ export function ThemeProvider({
     [storageKey]
   )
 
-  const applyTheme = React.useCallback(
-    (nextTheme: Theme) => {
-      const root = document.documentElement
-      const resolvedTheme =
-        nextTheme === "system" ? getSystemTheme() : nextTheme
-      const restoreTransitions = disableTransitionOnChange
-        ? disableTransitionsTemporarily()
-        : null
-
-      root.classList.remove("light", "dark")
-      root.classList.add(resolvedTheme)
-
-      if (restoreTransitions) {
-        restoreTransitions()
-      }
-    },
-    [disableTransitionOnChange]
+  const systemTheme = React.useSyncExternalStore(
+    subscribeSystemTheme,
+    getSystemTheme
   )
+  const resolvedTheme = theme === "system" ? systemTheme : theme
 
-  React.useEffect(() => {
-    applyTheme(theme)
+  // Layout effect: the class must be set before children's effects read theme colors
+  // from CSS variables (child effects run before the provider's own effects).
+  React.useLayoutEffect(() => {
+    const root = document.documentElement
+    const restoreTransitions = disableTransitionOnChange
+      ? disableTransitionsTemporarily()
+      : null
 
-    if (theme !== "system") {
-      return undefined
+    root.classList.remove("light", "dark")
+    root.classList.add(resolvedTheme)
+
+    if (restoreTransitions) {
+      restoreTransitions()
     }
-
-    const mediaQuery = window.matchMedia(COLOR_SCHEME_QUERY)
-    const handleChange = () => {
-      applyTheme("system")
-    }
-
-    mediaQuery.addEventListener("change", handleChange)
-
-    return () => {
-      mediaQuery.removeEventListener("change", handleChange)
-    }
-  }, [theme, applyTheme])
+  }, [resolvedTheme, disableTransitionOnChange])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -237,9 +233,10 @@ export function ThemeProvider({
   const value = React.useMemo(
     () => ({
       theme,
+      resolvedTheme,
       setTheme,
     }),
-    [theme, setTheme]
+    [theme, resolvedTheme, setTheme]
   )
 
   return (
