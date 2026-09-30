@@ -135,18 +135,27 @@ export function ValueDisplay({
   }
 
 
+  // Label and value share one line when the row is wide enough for the longest label,
+  // "Energy Consumption", with a 5-digit kWh value: 16rem with the small phone text,
+  // 18rem from `sm` up (text-sm/text-lg); below that they stack. The switch is a
+  // container query on the row's own width, and all rows of a card are equally wide, so
+  // a card never mixes one-line and two-line rows (a per-row flex-wrap did). A value
+  // with a unit never breaks; a label that still does not fit is truncated.
   return (
-    <div className={`flex flex-wrap items-center gap-1.5 sm:gap-2 ${className}`}>
-      {showLabel && (
-        <span className="text-xs sm:text-sm font-medium text-muted-foreground truncate min-w-0">{register.name}:</span>
-      )}
-      <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
-        <span className="text-base sm:text-lg font-semibold break-all">{displayValue}{displayUnit && ' '}{displayUnit}</span>
-        {showTooltip && register.description && (
-          <InfoPopover label={register.name}>
-            <p>{register.description}</p>
-          </InfoPopover>
+    <div className={`@container ${className}`}>
+      <div className="flex items-center gap-1.5 sm:gap-2 @max-[16rem]:flex-col @max-[16rem]:items-start @max-[16rem]:gap-0.5 sm:@max-[18rem]:flex-col sm:@max-[18rem]:items-start sm:@max-[18rem]:gap-0.5">
+        {showLabel && (
+          <span className="text-xs sm:text-sm font-medium text-muted-foreground truncate min-w-0 max-w-full">{register.name}:</span>
         )}
+        {/* Only a number with a unit is kept whole; free text (a decoded status) may wrap. */}
+        <div className={`flex items-center gap-1 sm:gap-1.5 ${displayUnit ? 'shrink-0' : 'min-w-0'}`}>
+          <span className={`text-base sm:text-lg font-semibold ${displayUnit ? 'whitespace-nowrap' : 'break-words min-w-0'}`}>{displayValue}{displayUnit && ' '}{displayUnit}</span>
+          {showTooltip && register.description && (
+            <InfoPopover label={register.name}>
+              <p>{register.description}</p>
+            </InfoPopover>
+          )}
+        </div>
       </div>
     </div>
   );

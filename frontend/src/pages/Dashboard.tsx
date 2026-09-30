@@ -49,19 +49,23 @@ export function Dashboard(): React.ReactElement {
         {/* Power flow chart + energy cards share one grid, capped at 3 columns (unlike
             the 4-column grid below) so the layout always settles into chart+Today on
             row one and Month/Year/Total on row two, instead of a 4th column pulling
-            Month up next to the chart on very wide screens. The flow card only spans
-            2 columns from `sm` up - at the true single-column mobile tier a span-2 has
-            nowhere explicit to go, so the browser creates an implicit 2nd column and
-            auto-places the next card into it, breaking the single-column stack. Default
-            (stretch) row alignment plus h-full/centering in PowerFlow keeps every card
-            in a row the same height with no dead gap next to the shorter ones. */}
-        <div className="px-2 mb-3 sm:mb-4 md:mb-5 lg:mb-6">
-          <div className="grid grid-cols-3-custom gap-3 sm:gap-4 md:gap-5 lg:gap-6">
-            <div className="sm:col-span-2 min-w-0">
+            Month up next to the chart on very wide screens. The columns follow the
+            space this grid actually gets (container queries), not the viewport: the
+            desktop sidebar takes 256px, so a 1024px window only leaves tablet width,
+            where three columns squeezed the chart and wrapped the energy values. Three
+            columns start at a 56rem container, two at 36rem. The flow card spans 2
+            columns under the same condition as the 2-column grid - with a span-2 in
+            the single-column tier the browser creates an implicit 2nd column and
+            auto-places the next card into it, breaking the stack. Default (stretch)
+            row alignment plus h-full/centering in PowerFlow keeps every card in a row
+            the same height with no dead gap next to the shorter ones. */}
+        <div className="@container px-2 mb-3 sm:mb-4 md:mb-5 lg:mb-6">
+          <div className="grid grid-cols-1 @xl:grid-cols-2 @4xl:grid-cols-3 gap-3 sm:gap-4 md:gap-5 lg:gap-6">
+            <div className="@xl:col-span-2 min-w-0">
               <PowerFlow />
             </div>
             {isPhone ? (
-              <EnergyCarousel groups={energyGroups} isLoading={isLoading} className="sm:col-span-2" />
+              <EnergyCarousel groups={energyGroups} isLoading={isLoading} className="@xl:col-span-2" />
             ) : (
               energyGroups.map(group =>
                 isLoading ? (

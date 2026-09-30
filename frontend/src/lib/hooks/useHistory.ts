@@ -95,11 +95,10 @@ export function useHistory(): UseHistoryResult {
           for (const d of historyData) {
             const ts = d.date || d.month || d.year || '';
             if (!ts) continue;
-            
-            // Determine period from source path
-            const period = source.includes('/daily/') ? 'daily' : 
-                          source.includes('/monthly/') ? 'monthly' : 
-                          source.includes('/yearly/') ? 'yearly' : 'daily';
+
+            // The row's own key names its period (sources are /api/data/<key>, without a
+            // period segment, so the path cannot tell).
+            const period: Period = d.date ? 'daily' : d.month ? 'monthly' : 'yearly';
             const label = getTimestampLabel(ts, period);
             allTimestamps.add(ts);
             timestampToLabel.set(ts, label);

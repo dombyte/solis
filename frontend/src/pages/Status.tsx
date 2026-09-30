@@ -213,7 +213,7 @@ export function Status(): React.ReactElement {
                     <p className="text-xs sm:text-sm text-muted-foreground">{reg.description}</p>
                   )}
                 </CardHeader>
-                <CardContent className="pt-2">
+                <CardContent className="pt-2 sm:pt-2 md:pt-2">
                   <div className="flex items-center gap-2">
                     {value?.timestamp && (
                       <span className="text-xs text-muted-foreground">

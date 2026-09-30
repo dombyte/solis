@@ -1,5 +1,7 @@
 import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
+import { useSubscription } from '../lib/hooks/useSubscription';
+import { POWER_FLOW_KEYS } from '../components/dashboard/flow/model';
 import { useVersionCheck } from '../lib/hooks/useVersionCheck';
 import { useMobile } from '../hooks/useMobile';
 import { useState, useEffect, useCallback } from 'react';
@@ -10,7 +12,10 @@ export function Info() {
   // Get version from import.meta.env if available
   const version = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
 
-  // WebSocket connection is initialized at app level; Info needs no key subscriptions.
+  // WebSocket connection is initialized at app level. The store only stamps lastUpdated
+  // when a subscribed value changes, so Info subscribes to the live power keys (they
+  // change on nearly every poll) to keep "Last Updated" current on this page too.
+  useSubscription([...POWER_FLOW_KEYS]);
   const isConnected = useRegisterStore(state => state.isConnected);
   const lastUpdated = useRegisterStore(state => state.lastUpdated);
 

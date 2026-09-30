@@ -95,6 +95,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     if (atEnd) pinnedToEndRef.current = true;
     else if (container.scrollLeft < lastScrollLeftRef.current) pinnedToEndRef.current = false;
     lastScrollLeftRef.current = container.scrollLeft;
+    // Set on the DOM directly: toggling the edge fade needs no re-render per scroll.
+    container.dataset.moreLeft = String(container.scrollLeft > 0);
   };
 
   const toggleDatasetVisibility = (key: string) => {
@@ -440,14 +442,14 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
       </div>
       {/* Statistics display per category in table format with toggle */}
       {validStats.length > 0 && (
-        <div id="history-chart-stats" className="mt-3 px-2 w-full overflow-x-auto">
-          <table className="w-full text-sm border-collapse">
+        <div id="history-chart-stats" className="mt-3 sm:px-2 w-full overflow-x-auto">
+          <table className="w-full text-xs sm:text-sm border-collapse">
             <thead>
               <tr className="border-b border-border">
-                <th className="text-left py-2 px-3 font-medium text-foreground">Register</th>
-                <th className="text-right py-2 px-3 font-medium text-foreground">Min</th>
-                <th className="text-right py-2 px-3 font-medium text-foreground">Max</th>
-                <th className="text-right py-2 px-3 font-medium text-foreground">Average</th>
+                <th className="text-left py-2 pl-0 pr-1.5 sm:px-3 font-medium text-foreground">Register</th>
+                <th className="text-right py-2 px-1 sm:px-3 font-medium text-foreground">Min</th>
+                <th className="text-right py-2 px-1 sm:px-3 font-medium text-foreground">Max</th>
+                <th className="text-right py-2 px-1 sm:px-3 font-medium text-foreground">Average</th>
               </tr>
             </thead>
             <tbody>
@@ -456,7 +458,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
                 const dotColor = getColorForDataset(stat.datasetIndex);
                 return (
                   <tr key={`${stat.key}-${index}`} className="border-b border-border/50">
-                    <td className="text-left py-2 px-3">
+                    <td className="text-left py-2 pl-0 pr-1.5 sm:px-3">
                       <button
                         onClick={() => toggleDatasetVisibility(stat.key)}
                         className={`flex items-center gap-2 text-left w-full text-foreground hover:text-primary transition-colors ${
@@ -471,15 +473,16 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
                         {stat.label}
                       </button>
                     </td>
-                    <td className="text-right py-2 px-3 text-muted-foreground">
-                      {stat.min?.toFixed(2)}{stat.unit && ` ${stat.unit}`}
-                    </td>
-                    <td className="text-right py-2 px-3 text-muted-foreground">
-                      {stat.max?.toFixed(2)}{stat.unit && ` ${stat.unit}`}
-                    </td>
-                    <td className="text-right py-2 px-3 text-muted-foreground">
-                      {stat.avg?.toFixed(2)}{stat.unit && ` ${stat.unit}`}
-                    </td>
+                    {[stat.min, stat.max, stat.avg].map((v, i) => (
+                      // The number never breaks. On phones the unit always sits on its own
+                      // line below it (the same in every cell, instead of wrapping only
+                      // where a value is long). With the tighter phone padding this keeps
+                      // all three columns visible at 360px, even for 4-digit yearly values
+                      // next to "Energy Consumption".
+                      <td key={i} className="text-right py-2 px-1 sm:px-3 text-muted-foreground whitespace-nowrap tabular-nums">
+                        {v?.toFixed(2)}{stat.unit && <span className="block text-[10px] sm:inline sm:text-xs"><span className="hidden sm:inline"> </span>{stat.unit}</span>}
+                      </td>
+                    ))}
                   </tr>
                 );
               })}
