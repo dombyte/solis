@@ -94,9 +94,11 @@ example/                 docker-compose (TCP, RTU) and config.yaml templates for
 
 ### Package notes
 
-- **config:** structural checks in `Validate()`; rules owned by other packages (Modbus
-  address, strict `rollover.time` HH:MM, poll timeout vs health grace) are `config.Rule`s
-  passed in by `app.ConfigRules()`. Imports no domain package; `app` maps sections onto each
+- **config:** structural checks in `Validate()`, which reports every problem with its field
+  path (`ValidationErrors`: `poller.interval: must be at least 1s, got 0s; …`); rules owned
+  by other packages (Modbus address, strict `rollover.time` HH:MM, poll timeout vs health
+  grace) are `config.Rule`s passed in by `app.ConfigRules()` and name their field with a
+  `*config.ValidationError`. Imports no domain package; `app` maps sections onto each
   package's own `Settings` (`internal/app/config_mapping.go`).
 - **modbus:** transport selected by the `modbus.address` URL scheme (`tcp://host:port` or
   `rtu://<device path>`); reconnect with exponential backoff; construction never fails on an
@@ -506,11 +508,9 @@ runs):
    merge) after CI is green. Pushing a branch without a PR triggers no CI, and a newer push
    to the PR cancels the superseded run.
 
-1. **Report all config problems (standard 5):** `AppConfig.Validate` returns on the first
-   failing section/rule; collect every problem with its field path (`errors.Join`).
-2. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
+1. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
    without shared state.
-3. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
+2. **Build info in the dev image (standard 10):** `Dockerfile` builds without the version
    ldflags, so a locally built image logs `dev`/`unknown`; pass them as build args.
 
 ---

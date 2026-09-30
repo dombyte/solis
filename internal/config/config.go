@@ -20,23 +20,68 @@ import (
 // ErrInvalidConfig is wrapped by every validation failure.
 var ErrInvalidConfig = errors.New("invalid config")
 
-// ValidationError names the settings section (or "rule") that failed validation.
+// ValidationError is one invalid setting, named by its field path ("poller.interval").
 type ValidationError struct {
-	// Section is "app", "poller", "storage" or "rule".
-	Section string
+	// Field is the setting's path in config.yaml; "rule" for a rule error without one.
+	Field string
 	// Err is the underlying validation failure.
 	Err error
 }
 
-func (e *ValidationError) Error() string {
-	return fmt.Sprintf("%v: %s: %v", ErrInvalidConfig, e.Section, e.Err)
+func (e *ValidationError) Error() string { return e.Field + ": " + e.Err.Error() }
+
+// Unwrap exposes the underlying failure to errors.Is/As.
+func (e *ValidationError) Unwrap() error { return e.Err }
+
+// ValidationErrors lists every problem Validate found.
+type ValidationErrors []*ValidationError
+
+func (e ValidationErrors) Error() string {
+	msgs := make([]string, len(e))
+	for i, ve := range e {
+		msgs[i] = ve.Error()
+	}
+	return fmt.Sprintf("%v: %s", ErrInvalidConfig, strings.Join(msgs, "; "))
 }
 
-// Unwrap exposes ErrInvalidConfig and the underlying failure to errors.Is/As.
-func (e *ValidationError) Unwrap() []error { return []error{ErrInvalidConfig, e.Err} }
+// Unwrap exposes ErrInvalidConfig and every problem to errors.Is/As.
+func (e ValidationErrors) Unwrap() []error {
+	errs := make([]error, 0, len(e)+1)
+	errs = append(errs, ErrInvalidConfig)
+	for _, ve := range e {
+		errs = append(errs, ve)
+	}
+	return errs
+}
+
+// add records a problem at field.
+func (e *ValidationErrors) add(field string, err error) {
+	*e = append(*e, &ValidationError{Field: field, Err: err})
+}
+
+// addf records a formatted problem at field.
+func (e *ValidationErrors) addf(field, format string, args ...any) {
+	e.add(field, fmt.Errorf(format, args...))
+}
+
+// addRule records a rule error: its own ValidationErrors keep their fields, anything else
+// is filed under "rule".
+func (e *ValidationErrors) addRule(err error) {
+	var many ValidationErrors
+	var one *ValidationError
+	switch {
+	case errors.As(err, &many):
+		*e = append(*e, many...)
+	case errors.As(err, &one):
+		*e = append(*e, one)
+	default:
+		e.add("rule", err)
+	}
+}
 
 // Rule is an extra validation injected by the composition root for settings whose rules
-// are owned by other packages (Modbus address, rollover time, health grace).
+// are owned by other packages (Modbus address, rollover time, health grace). A rule names
+// the setting it rejects by returning a *ValidationError.
 type Rule func(*AppConfig) error
 
 // removedKeys are settings that v3 ignores; their presence is reported as a warning.
@@ -253,23 +298,23 @@ func envSet(key string) bool {
 	return ok
 }
 
-// Validate validates every settings section, then applies rules.
+// Validate validates every settings section, then applies rules, and returns every
+// problem found as ValidationErrors (nil when the config is valid).
 func (c *AppConfig) Validate(rules ...Rule) error {
-	sections := []struct {
-		name string
-		v    interface{ Validate() error }
-	}{{"app", &c.App}, {"poller", &c.Poller}, {"modbus", &c.Modbus}, {"storage", &c.Storage}}
-	for _, s := range sections {
-		if err := s.v.Validate(); err != nil {
-			return &ValidationError{Section: s.name, Err: err}
-		}
-	}
+	var errs ValidationErrors
+	c.App.validate(&errs)
+	c.Poller.validate(&errs)
+	c.Modbus.validate(&errs)
+	c.Storage.validate(&errs)
 	for _, r := range rules {
 		if err := r(c); err != nil {
-			return &ValidationError{Section: "rule", Err: err}
+			errs.addRule(err)
 		}
 	}
-	return nil
+	if len(errs) == 0 {
+		return nil
+	}
+	return errs
 }
 
 // durationHook decodes duration strings with the extra units d, w and y ("1y", "2w").
@@ -286,92 +331,81 @@ func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
 	return util.ParseDuration(s)
 }
 
-// Validate validates App configuration.
-func (a *AppSettings) Validate() error {
+func (a *AppSettings) validate(errs *ValidationErrors) {
 	if !oneOf(strings.ToUpper(a.Debug), "DEBUG", "INFO", "WARN", "ERROR", "FATAL") {
-		return fmt.Errorf("invalid debug level: %q (must be DEBUG, INFO, WARN, ERROR, or "+
-			"FATAL)", a.Debug)
+		errs.addf("app.debug", "invalid debug level: %q (must be DEBUG, INFO, WARN, ERROR, "+
+			"or FATAL)", a.Debug)
 	}
 	if a.Timeout < minInterval {
-		return fmt.Errorf("app timeout must be at least %s, got %s", minInterval, a.Timeout)
+		errs.addf("app.timeout", "must be at least %s, got %s", minInterval, a.Timeout)
 	}
-	return validatePort("server port", a.Port)
-}
-
-func validatePort(name string, port int) error {
 	const maxPort = 65535
-	if port <= 0 || port > maxPort {
-		return fmt.Errorf("invalid %s: %d (must be 1-65535)", name, port)
+	if a.Port <= 0 || a.Port > maxPort {
+		errs.addf("app.port", "invalid server port: %d (must be 1-65535)", a.Port)
 	}
-	return nil
 }
 
-// Validate validates Poller configuration.
-func (p *PollerSettings) Validate() error {
+func (p *PollerSettings) validate(errs *ValidationErrors) {
 	if p.Interval < minInterval {
-		return fmt.Errorf("poller interval must be at least %s, got %s", minInterval, p.Interval)
+		errs.addf("poller.interval", "must be at least %s, got %s", minInterval, p.Interval)
 	}
 	if p.BlockAttempts <= 0 {
-		return errors.New("block_attempts must be at least 1")
+		errs.addf("poller.block_attempts", "must be at least 1, got %d", p.BlockAttempts)
 	}
 	if p.PollTimeout <= 0 {
-		return errors.New("poll_timeout must be positive")
+		errs.addf("poller.poll_timeout", "must be positive, got %s", p.PollTimeout)
 	}
-	if p.BlockRetryDelay < 0 || p.BlockInterval < 0 {
-		return errors.New("block_retry_delay and block_interval must be >= 0")
+	if p.BlockRetryDelay < 0 {
+		errs.addf("poller.block_retry_delay", "must be >= 0, got %s", p.BlockRetryDelay)
 	}
-	return nil
+	if p.BlockInterval < 0 {
+		errs.addf("poller.block_interval", "must be >= 0, got %s", p.BlockInterval)
+	}
 }
 
-// Validate validates the structural Modbus settings (the address format and serial
+// validate checks the structural Modbus settings (the address format and serial
 // parameters are checked by the modbus package through an injected rule).
-func (m *ModbusSettings) Validate() error {
+func (m *ModbusSettings) validate(errs *ValidationErrors) {
 	if m.SlaveID < minSlaveID || m.SlaveID > maxSlaveID {
-		return fmt.Errorf("slave_id must be %d-%d, got %d", minSlaveID, maxSlaveID, m.SlaveID)
+		errs.addf("modbus.slave_id", "must be %d-%d, got %d", minSlaveID, maxSlaveID, m.SlaveID)
 	}
-	return nil
 }
 
-// Validate validates Storage configuration.
-func (s *StorageSettings) Validate() error {
+func (s *StorageSettings) validate(errs *ValidationErrors) {
 	if s.Path == "" {
-		return errors.New("storage path is required")
+		errs.addf("storage.path", "is required")
 	}
-	if err := s.validateRetention(); err != nil {
-		return err
+	positive := []struct {
+		field string
+		d     time.Duration
+	}{
+		{"storage.daily_retention", s.DailyRetention},
+		{"storage.error_retention", s.ErrorRetention},
+		{"storage.cleanup_interval", s.CleanupInterval},
+	}
+	for _, p := range positive {
+		if p.d <= 0 {
+			errs.addf(p.field, "must be positive, got %s", p.d)
+		}
 	}
 	if !oneOf(s.Synchronous, "OFF", "NORMAL", "FULL", "EXTRA") {
-		return fmt.Errorf("invalid synchronous mode: %s (must be OFF, NORMAL, FULL, or "+
+		errs.addf("storage.synchronous", "invalid mode %q (must be OFF, NORMAL, FULL, or "+
 			"EXTRA)", s.Synchronous)
 	}
 	if !oneOf(s.TempStore, "DEFAULT", "FILE", "MEMORY") {
-		return fmt.Errorf("invalid temp_store: %s (must be DEFAULT, FILE, or MEMORY)",
+		errs.addf("storage.temp_store", "invalid value %q (must be DEFAULT, FILE, or MEMORY)",
 			s.TempStore)
 	}
-	if s.MaxBackups < 0 {
-		return errors.New("max_backups must be >= 0")
-	}
-	if s.BackupInterval < 0 {
-		return errors.New("backup_interval must be >= 0")
-	}
-	return nil
+	s.validateBackups(errs)
 }
 
-func (s *StorageSettings) validateRetention() error {
-	durations := []struct {
-		name string
-		d    time.Duration
-	}{
-		{"daily_retention", s.DailyRetention},
-		{"error_retention", s.ErrorRetention},
-		{"cleanup_interval", s.CleanupInterval},
+func (s *StorageSettings) validateBackups(errs *ValidationErrors) {
+	if s.MaxBackups < 0 {
+		errs.addf("storage.max_backups", "must be >= 0, got %d", s.MaxBackups)
 	}
-	for _, d := range durations {
-		if d.d <= 0 {
-			return fmt.Errorf("%s must be positive", d.name)
-		}
+	if s.BackupInterval < 0 {
+		errs.addf("storage.backup_interval", "must be >= 0, got %s", s.BackupInterval)
 	}
-	return nil
 }
 
 func oneOf(v string, allowed ...string) bool {
