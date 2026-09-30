@@ -42,7 +42,7 @@ golangci-lint fmt --config .golangci.yml    # gofumpt + goimports (prefix github
 golangci-lint run --config .golangci.yml    # full linter set from the standard
 go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./...   # unused exported code
 go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...       # known vulnerabilities
-go run github.com/vektra/mockery/v2@v2.53.7                 # regenerate mocks (.mockery.yaml)
+go tool mockery                                             # regenerate mocks (.mockery.yaml; version pinned in go.mod)
 go test -race ./...                         # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
 make build                                  # ./solis with version info (ldflags)
@@ -486,11 +486,12 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
 
 ## 9. Deviations from the Standard
 
-None. Gaps in the code are backlog items below, not accepted deviations. Add a row here
+Gaps in the code are backlog items below, not accepted deviations. Add a row here
 (rule, deviation, reason) only for a choice that is meant to stay:
 
 | Rule | Deviation | Reason |
 |---|---|---|
+| Tool versions pinned as `go run tool@vX.Y.Z` | mockery is a `tool` directive in `go.mod` (`go tool mockery`) | `go run …@version` verifies its ~20 modules against sum.golang.org on every CI run (outside the `go.sum`-keyed cache); a checksum-DB hiccup failed the mock drift job. With `go.sum` hashes it runs offline from the cache. Bump with `go get -tool github.com/vektra/mockery/v2@vX.Y.Z` |
 
 ---
 

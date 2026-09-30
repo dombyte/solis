@@ -1,4 +1,4 @@
-# Mock generation: go run github.com/vektra/mockery/v2@v2.53.7
+# Mock generation: go tool mockery
 # Mocks live next to the consumer package in internal/<pkg>/mocks and are never hand-edited.
 with-expecter: true
 disable-version-string: true

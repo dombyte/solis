@@ -68,7 +68,7 @@ jobs:
 
       - name: Mocks up to date
         run: |
-          go run github.com/vektra/mockery/v2@v2.53.7
+          go tool mockery
           git diff --exit-code -- '*/mocks/*'
 
   golangci-lint:
