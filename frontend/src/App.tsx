@@ -19,7 +19,9 @@ export function App() {
 
   return (
         <BrowserRouter>
-          <div className={`min-h-screen bg-background flex ${isMobile ? 'flex-col' : 'flex-row'} w-full max-w-[100vw] overflow-x-hidden ${isMobile ? 'mobile-nav-spacer' : 'pb-0'}`}>
+          {/* Desktop: the shell is exactly viewport-tall and only <main> scrolls (its overflow-x
+              makes it a scroll container), so the sidebar never moves. Mobile: the page scrolls. */}
+          <div className={`bg-background flex ${isMobile ? 'min-h-screen flex-col mobile-nav-spacer' : 'h-screen flex-row overflow-hidden'} w-full max-w-[100vw] overflow-x-hidden`}>
             {!isMobile && <DesktopNav />}
             <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
               {isMobile && <MobileHeader />}
