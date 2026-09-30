@@ -22,6 +22,8 @@ function handleMessage(message: WebSocketMessage): void {
     case 'error':
       console.warn(`WebSocket error [${message.code}]: ${message.message}`, message.keys ?? []);
       break;
+    case 'pong':
+      break;
   }
 }
 

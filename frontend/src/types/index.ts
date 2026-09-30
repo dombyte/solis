@@ -40,7 +40,7 @@ export type SolisStatusDecoded = {
 
 export type FaultStatusDecoded = string[];
 
-// WebSocket subscription protocol (v3): subscribe/unsubscribe/ping -> snapshot/update/error.
+// WebSocket subscription protocol (v3): subscribe/unsubscribe/ping -> snapshot/update/error/pong.
 // One key's value on the wire, rounded to 2 decimals server-side.
 export interface WsValueDTO {
   value: number;
@@ -69,7 +69,11 @@ interface WsErrorMessage {
   keys?: string[];
 }
 
-export type WebSocketMessage = WsSnapshotMessage | WsUpdateMessage | WsErrorMessage;
+interface WsPongMessage {
+  type: 'pong';
+}
+
+export type WebSocketMessage = WsSnapshotMessage | WsUpdateMessage | WsErrorMessage | WsPongMessage;
 
 // Register metadata and values for store
 export interface RegisterMetadata {

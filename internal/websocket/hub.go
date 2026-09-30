@@ -274,6 +274,7 @@ func (h *Hub) handle(clients map[*Client]*clientState, c *Client, msg ClientMess
 			delete(st.last, k)
 		}
 	case TypePing:
+		h.send(clients, c, PongMessage{Type: TypePong})
 	default:
 		h.send(clients, c, ErrorMessage{
 			Type: TypeError, Code: CodeBadRequest,
