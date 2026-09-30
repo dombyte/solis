@@ -9,6 +9,7 @@ import (
 )
 
 func TestMarshalJSON_RoundsToTwoDecimals(t *testing.T) {
+	t.Parallel()
 	tests := map[string]struct {
 		point any
 		want  string
@@ -36,6 +37,7 @@ func TestMarshalJSON_RoundsToTwoDecimals(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			b, err := json.Marshal(tt.point)
 			require.NoError(t, err)
 			assert.JSONEq(t, tt.want, string(b))

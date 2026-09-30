@@ -10,6 +10,7 @@ import (
 )
 
 func TestFloat64With2Decimals_MarshalJSON(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		value    float64
@@ -27,6 +28,7 @@ func TestFloat64With2Decimals_MarshalJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			f := Float64With2Decimals(RoundTo2DecimalPlaces(tt.value))
 			data, err := json.Marshal(f)
 			if err != nil {

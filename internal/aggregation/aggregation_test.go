@@ -33,6 +33,7 @@ func TestApplyEdges(t *testing.T) {
 }
 
 func TestApplyNet(t *testing.T) {
+	t.Parallel()
 	r := registry(t)
 	tests := []struct {
 		name   string
@@ -54,6 +55,7 @@ func TestApplyNet(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := ApplyNet(r.NetPairs(period.Monthly), tt.values)
 			require.Len(t, got, len(tt.want))
 			for k, v := range tt.want {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestNormalizeStatusTimestamp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in, want string
 		ok       bool
@@ -29,6 +30,7 @@ func TestNormalizeStatusTimestamp(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
 			got, ok := NormalizeStatusTimestamp(tt.in)
 			assert.Equal(t, tt.ok, ok)
 			assert.Equal(t, tt.want, got)

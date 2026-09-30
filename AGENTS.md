@@ -13,8 +13,8 @@ a deviation from a MUST rule of the standard is only valid if it is listed under
 "Deviations" below with its reason. When code and this file disagree, fix one of them in
 the same change.
 
-**Current state:** v3 is implemented and follows the standard; the remaining gaps are listed
-under "Migration backlog".
+**Current state:** v3 is implemented and follows the standard; new gaps go under
+"Migration backlog".
 
 ---
 
@@ -509,8 +509,7 @@ runs):
    merge) after CI is green. Pushing a branch without a PR triggers no CI, and a newer push
    to the PR cancels the superseded run.
 
-1. **`t.Parallel()` (standard 9):** no test uses it yet; add it to table-driven tests
-   without shared state.
+No open items.
 
 ---
 
