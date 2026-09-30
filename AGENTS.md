@@ -2,7 +2,7 @@
 
 ## Standard
 
-This project follows the **Go Project Standard v3.0**
+This project follows the **Go Project Standard v3.1**
 (local reference: `/home/dom/Dokumente/Git/go-project-standard.md`; will be replaced by a URL).
 That document holds the rules for every Go project: dependency injection, composition root,
 errors, logging, lifecycle, code style, naming, testing, tooling, Git workflow (branches,
@@ -497,17 +497,6 @@ None. Gaps in the code are backlog items below, not accepted deviations. Add a r
 ## 10. Migration Backlog
 
 Known gaps between the current code and standard v3. Update this list when an item is done.
-
-**Batch workflow** (keeps "every change through a PR, CI green before merge" with few CI
-runs):
-
-1. Create one batch branch from `main` (e.g. `refactor/migration-backlog`).
-2. Each item gets its own local `refactor/…` or `fix/…` branch cut from the batch branch;
-   run `make check` and `go test -race ./...` before merging it back with `git merge --no-ff`.
-   Item branches are never pushed.
-3. Push the batch branch once, when every item is merged; open one PR and merge it (regular
-   merge) after CI is green. Pushing a branch without a PR triggers no CI, and a newer push
-   to the PR cancels the superseded run.
 
 No open items.
 
