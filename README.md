@@ -9,13 +9,8 @@ Monitoring for Solis hybrid inverters over Modbus (TCP or RTU). One Go binary po
 inverter, stores daily energy and status/fault changes in SQLite, computes monthly/yearly/total
 values, and serves a React dashboard (REST + WebSocket).
 
-## Screenshots
 
-<img width="2554" height="1299" alt="solis02" src="https://github.com/user-attachments/assets/df3be693-1289-4a87-8aa1-fad199e92220" />
-
-<img width="2548" height="1299" alt="solis03" src="https://github.com/user-attachments/assets/de4beb8f-04eb-406b-ae7f-a67bacd320c1" />
-
-<img width="397" height="873" alt="solis04" src="https://github.com/user-attachments/assets/cc011509-130c-4bb1-93ca-b9e0eee2162e" />
+![Screenshot](.github/assets/screenshot.webp)
 
 ## Quick start (Docker)
 
