@@ -5,7 +5,8 @@
     "dockerfile",
     "docker-compose",
     "github-actions",
-    "npm"
+    "npm",
+    "custom.regex"
   ],
   "npm": {
     "managerFilePatterns": [
@@ -17,7 +18,6 @@
     "config:recommended",
     ":dependencyDashboard",
     ":enableVulnerabilityAlertsWithLabel('security')",
-    ":preserveSemverRanges",
     ":rebaseStalePrs",
     "group:recommended",
     ":semanticCommits"
@@ -27,12 +27,12 @@
   "packageRules": [
     {
       "matchManagers": ["gomod"],
-      "groupName": "Go dependencies"
+      "groupName": "Go dependencies",
+      "postUpdateOptions": ["gomodTidy"]
     },
     {
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["golang"],
-      "postUpdateOptions": ["gomodTidy"]
+      "matchManagers": ["custom.regex"],
+      "groupName": "Go tools"
     },
     {
       "matchManagers": ["dockerfile"],
@@ -48,9 +48,37 @@
     },
     {
       "matchManagers": ["npm"],
-      "groupName": "npm dependencies"
+      "groupName": "npm dependencies",
+      "rangeStrategy": "bump"
+    },
+    {
+      "description": "typescript-eslint supports only typescript <6.1; lift once it supports TS 7",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
     }
   ],
+  "customManagers": [
+    {
+      "description": "Go tools run as `go run <module>[/cmd/<tool>]@vX.Y.Z` in CI, the pre-commit script and AGENTS.md",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^scripts/.+\\.sh$/", "/^AGENTS\\.md$/"],
+      "matchStrings": ["go run (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[^\\s]+)"],
+      "datasourceTemplate": "go"
+    },
+    {
+      "description": "golangci-lint version pinned in golangci-lint-action",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["golangci/golangci-lint-action@\\S+\\s+with:\\s+version:\\s*(?<currentValue>v[\\d.]+)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
+    }
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"]
+  },
   "vulnerabilityAlerts": {
     "enabled": true,
     "labels": ["security"]

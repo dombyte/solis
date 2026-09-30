@@ -9,6 +9,7 @@ import (
 )
 
 func TestParseDuration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in   string
 		want time.Duration
@@ -26,6 +27,7 @@ func TestParseDuration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
 			got, err := ParseDuration(tt.in)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
@@ -34,9 +36,11 @@ func TestParseDuration(t *testing.T) {
 }
 
 func TestParseDuration_Invalid(t *testing.T) {
+	t.Parallel()
 	// 300y and 200y+200y overflow int64 nanoseconds (~292y) and must not wrap (RT-L4).
 	for _, in := range []string{"", "d", "1", "-1d", "1x", "1..2d", "1d-2h", "300y", "200y200y"} {
 		t.Run(in, func(t *testing.T) {
+			t.Parallel()
 			_, err := ParseDuration(in)
 			assert.ErrorIs(t, err, ErrInvalidDuration)
 			var de *DurationError

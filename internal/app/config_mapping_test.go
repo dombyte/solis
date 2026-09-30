@@ -26,6 +26,7 @@ func ruleConfig(t *testing.T) *config.AppConfig {
 }
 
 func TestConfigRules(t *testing.T) {
+	t.Parallel()
 	rtu := func(m config.ModbusSettings) config.ModbusSettings {
 		m.Address, m.Timeout, m.SlaveID = "rtu:///dev/ttyUSB0", time.Second, 1
 		return m
@@ -91,6 +92,7 @@ func TestConfigRules(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := ruleConfig(t)
 			tt.mutate(cfg)
 			err := cfg.Validate(ConfigRules()...)

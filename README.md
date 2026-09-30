@@ -31,7 +31,9 @@ Without Docker: `make build && ./solis` (linux/darwin; the database lock uses `f
 
 ## Configuration
 
-[`example/config.yaml`](example/config.yaml) is the commented template. Every option can be
+[`example/config.yaml`](example/config.yaml) is the commented template. The app reads
+`./config.yaml`; pass `-config <path>` before the subcommand to use another file
+(`solis -config /etc/solis.yaml`, `solis -config /etc/solis.yaml backfill`). Every option can be
 overridden with `SOLIS_` + its path, e.g. `SOLIS_MODBUS_ADDRESS=tcp://192.168.1.200:502`.
 Invalid values fail startup.
 
@@ -164,7 +166,8 @@ refuses periods whose daily rows retention already deleted.
 ```bash
 make build           # binary with version info
 make check           # format, lint, race tests, deadcode, govulncheck (check-only)
-docker compose -f docker-compose.dev.yaml up --build
+make docker          # dev image with version info (docker-compose.dev.yaml)
+docker compose -f docker-compose.dev.yaml up
 
 cd frontend && npm install
 npm run dev                                         # proxies /api and /ws to :8080

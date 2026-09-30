@@ -28,48 +28,50 @@ func validConfig() AppConfig {
 }
 
 func TestValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(*AppConfig)
 		want   string
 	}{
 		{"valid", func(*AppConfig) {}, ""},
-		{"app debug", func(c *AppConfig) { c.App.Debug = "DEBG" }, "invalid debug level"},
+		{"app debug", func(c *AppConfig) { c.App.Debug = "DEBG" }, "app.debug: invalid debug level"},
 		{"app debug lower", func(c *AppConfig) { c.App.Debug = "warn" }, ""},
-		{"app timeout", func(c *AppConfig) { c.App.Timeout = 0 }, "app timeout"},
+		{"app timeout", func(c *AppConfig) { c.App.Timeout = 0 }, "app.timeout: must be at least"},
 		{
 			"app timeout below 1s", func(c *AppConfig) { c.App.Timeout = 30 * time.Nanosecond },
-			"app timeout must be at least 1s",
+			"app.timeout: must be at least 1s, got 30ns",
 		},
-		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "invalid server port"},
-		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "interval must be at least"},
+		{"app port", func(c *AppConfig) { c.App.Port = 0 }, "app.port: invalid server port: 0"},
+		{"poll interval", func(c *AppConfig) { c.Poller.Interval = 0 }, "poller.interval: must be at least"},
 		{
 			"poll interval ms", func(c *AppConfig) { c.Poller.Interval = 5 * time.Millisecond },
-			"interval must be at least 1s",
+			"poller.interval: must be at least 1s, got 5ms",
 		},
 		{
 			"negative retry delay", func(c *AppConfig) { c.Poller.BlockRetryDelay = -1 },
-			"block_retry_delay",
+			"poller.block_retry_delay: must be >= 0",
 		},
-		{"negative block interval", func(c *AppConfig) { c.Poller.BlockInterval = -1 }, "block_interval"},
-		{"slave id 0", func(c *AppConfig) { c.Modbus.SlaveID = 0 }, "slave_id must be 1-247"},
+		{"negative block interval", func(c *AppConfig) { c.Poller.BlockInterval = -1 }, "poller.block_interval: must be >= 0"},
+		{"slave id 0", func(c *AppConfig) { c.Modbus.SlaveID = 0 }, "modbus.slave_id: must be 1-247"},
 		{"slave id 300", func(c *AppConfig) { c.Modbus.SlaveID = 300 }, "got 300"},
 		{"slave id 247", func(c *AppConfig) { c.Modbus.SlaveID = 247 }, ""},
-		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "block_attempts"},
-		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poll_timeout"},
-		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage path"},
-		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "error_retention"},
+		{"attempts", func(c *AppConfig) { c.Poller.BlockAttempts = 0 }, "poller.block_attempts: must be at least 1"},
+		{"poll timeout", func(c *AppConfig) { c.Poller.PollTimeout = 0 }, "poller.poll_timeout: must be positive"},
+		{"storage path", func(c *AppConfig) { c.Storage.Path = "" }, "storage.path: is required"},
+		{"retention", func(c *AppConfig) { c.Storage.ErrorRetention = 0 }, "storage.error_retention: must be positive"},
 		{
 			"daily retention", func(c *AppConfig) { c.Storage.DailyRetention = 0 },
-			"daily_retention",
+			"storage.daily_retention: must be positive",
 		},
-		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "synchronous"},
-		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "temp_store"},
-		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "max_backups"},
-		{"backup interval", func(c *AppConfig) { c.Storage.BackupInterval = -1 }, "backup_interval"},
+		{"sync", func(c *AppConfig) { c.Storage.Synchronous = "X" }, "storage.synchronous: invalid mode"},
+		{"temp", func(c *AppConfig) { c.Storage.TempStore = "X" }, "storage.temp_store: invalid value"},
+		{"backups", func(c *AppConfig) { c.Storage.MaxBackups = -1 }, "storage.max_backups: must be >= 0"},
+		{"backup interval", func(c *AppConfig) { c.Storage.BackupInterval = -1 }, "storage.backup_interval: must be >= 0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := validConfig()
 			tt.mutate(&cfg)
 			err := cfg.Validate()
@@ -96,16 +98,39 @@ func TestValidate_Rules(t *testing.T) {
 	assert.ErrorIs(t, err, errRule)
 	var ve *ValidationError
 	require.ErrorAs(t, err, &ve)
-	assert.Equal(t, "rule", ve.Section)
+	assert.Equal(t, "rule", ve.Field, "a rule error without a field")
+
+	named := func(*AppConfig) error { return &ValidationError{Field: "rollover.time", Err: errRule} }
+	many := func(*AppConfig) error {
+		return ValidationErrors{{Field: "a", Err: errRule}, {Field: "b", Err: errRule}}
+	}
+	var errs ValidationErrors
+	require.ErrorAs(t, cfg.Validate(named, many), &errs)
+	fields := make([]string, len(errs))
+	for i, e := range errs {
+		fields[i] = e.Field
+	}
+	assert.Equal(t, []string{"rollover.time", "a", "b"}, fields, "rules keep their fields")
 }
 
-func TestValidate_NamesSection(t *testing.T) {
+// Validate reports every problem with its field path, not only the first one.
+func TestValidate_ReportsAllProblems(t *testing.T) {
 	cfg := validConfig()
+	cfg.App.Port = 0
 	cfg.Poller.Interval = 0
-	var ve *ValidationError
-	require.ErrorAs(t, cfg.Validate(), &ve)
-	assert.Equal(t, "poller", ve.Section)
-	assert.EqualError(t, ve, "invalid config: poller: poller interval must be at least 1s, got 0s")
+	cfg.Modbus.SlaveID = 0
+	cfg.Storage.Path = ""
+	err := cfg.Validate(func(*AppConfig) error { return errors.New("rule failed") })
+	require.ErrorIs(t, err, ErrInvalidConfig)
+	assert.EqualError(t, err, "invalid config: "+
+		"app.port: invalid server port: 0 (must be 1-65535); "+
+		"poller.interval: must be at least 1s, got 0s; "+
+		"modbus.slave_id: must be 1-247, got 0; "+
+		"storage.path: is required; "+
+		"rule: rule failed")
+	var errs ValidationErrors
+	require.ErrorAs(t, err, &errs)
+	assert.Len(t, errs, 5)
 }
 
 func writeConfig(t *testing.T, content string) string {
@@ -244,7 +269,7 @@ func TestLoadConfig_BareNumberDurationRejected(t *testing.T) {
 func TestLoadConfig_SlaveIDOutOfRange(t *testing.T) {
 	_, err := LoadConfig(writeConfig(t, "modbus:\n  slave_id: 300\n"))
 	require.ErrorIs(t, err, ErrInvalidConfig)
-	assert.Contains(t, err.Error(), "slave_id must be 1-247, got 300")
+	assert.Contains(t, err.Error(), "modbus.slave_id: must be 1-247, got 300")
 }
 
 func TestLoadConfig_RemovedSettingViaEnvWarns(t *testing.T) {

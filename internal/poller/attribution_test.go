@@ -198,6 +198,7 @@ func TestAttribute_PreMidnightResetUsesWindowNewDay(t *testing.T) {
 }
 
 func TestAttribute_DSTNights(t *testing.T) {
+	t.Parallel()
 	loc := berlin(t)
 	tests := []struct {
 		name  string
@@ -233,6 +234,7 @@ func TestAttribute_DSTNights(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			d := seeded(t, tt.roll, []string{"pv"}, tt.seed, nil)
 			runSteps(t, d, loc, tt.steps)
 		})

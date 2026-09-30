@@ -278,6 +278,7 @@ func TestReportFormatAndCounts(t *testing.T) {
 }
 
 func TestCheckPurged(t *testing.T) {
+	t.Parallel()
 	now := period.Of(time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	tests := []struct {
 		purged  string
@@ -292,6 +293,7 @@ func TestCheckPurged(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%s/%d", tt.purged, tt.years), func(t *testing.T) {
+			t.Parallel()
 			tx := mocks.NewMockBackfillTx(t)
 			tx.EXPECT().PurgedBefore().Return(tt.purged)
 			err := checkPurged(tx, now, tt.years)

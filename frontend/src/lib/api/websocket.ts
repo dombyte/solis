@@ -3,13 +3,20 @@ import type { WebSocketMessage } from '../../types';
 type MessageListener = (message: WebSocketMessage) => void;
 
 const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 30000;
+const RECONNECT_MAX_MS = 5000;
 const RECONNECT_JITTER = 0.2;
+/** A socket still CONNECTING after this long is dropped and retried. */
+const CONNECT_TIMEOUT_MS = 5000;
+/** How often an open connection is probed with a `ping`. */
+const PING_INTERVAL_MS = 20000;
+/** A probe without any frame back within this time marks the connection dead. */
+const PONG_TIMEOUT_MS = 5000;
 
 /**
  * Delay before reconnect attempt `attempt` (1-based): exponential from 1 s, capped at
- * 30 s, with ±20 % jitter so many open dashboards do not reconnect in lockstep after a
- * server restart. `random` is injectable for checks (defaults to Math.random).
+ * 5 s (one LAN server: a short cap brings the dashboard back soon after a restart), with
+ * ±20 % jitter so open dashboards do not reconnect in lockstep. `random` is injectable
+ * for checks (defaults to Math.random).
  */
 function reconnectDelay(attempt: number, random: () => number = Math.random): number {
   const exp = Math.min(RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1), RECONNECT_MAX_MS);
@@ -22,14 +29,14 @@ function reconnectDelay(attempt: number, random: () => number = Math.random): nu
  * multiple components can want the same key without double-subscribing or dropping it
  * early; the full active key set is resent on every (re)connect.
  */
-const MESSAGE_TYPES = new Set(['snapshot', 'update', 'error']);
+const MESSAGE_TYPES = new Set(['snapshot', 'update', 'error', 'pong']);
 
 /** Minimal runtime check of a server frame before it reaches the store (FE-L11). */
 function isWebSocketMessage(m: unknown): m is WebSocketMessage {
   if (typeof m !== 'object' || m === null) return false;
   const { type, values } = m as { type?: unknown; values?: unknown };
   if (typeof type !== 'string' || !MESSAGE_TYPES.has(type)) return false;
-  return type === 'error' || (typeof values === 'object' && values !== null);
+  return type === 'error' || type === 'pong' || (typeof values === 'object' && values !== null);
 }
 
 class SolisWebSocket {
@@ -37,6 +44,9 @@ class SolisWebSocket {
   private url: string;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private connected = false;
   private shouldReconnect = true;
   private listeners: Set<MessageListener> = new Set();
@@ -66,8 +76,9 @@ class SolisWebSocket {
       this.url = '/ws';
     }
 
-    // Reconnecting never gives up (see scheduleReconnect); these events only skip the
-    // current backoff wait when the network returns or the tab becomes visible again.
+    // Reconnecting never gives up (see scheduleReconnect); these events skip the current
+    // backoff wait when the network returns or the tab becomes visible again, and probe an
+    // open connection that may have died silently (sleep, network change).
     if (typeof window !== 'undefined') {
       window.addEventListener('online', this.reconnectNow);
       window.addEventListener('focus', this.reconnectNow);
@@ -83,10 +94,65 @@ class SolisWebSocket {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    if (this.shouldReconnect && !this.connected) {
+    if (!this.shouldReconnect) return;
+    if (this.connected) {
+      this.probe();
+    } else {
       this.connect();
     }
   };
+
+  /**
+   * Liveness check: the server answers `ping` with `pong`, and any frame counts as an
+   * answer. Browsers hide WebSocket control-frame pongs from JavaScript and never notice
+   * a half-open TCP connection on an idle socket, so without this a dead connection would
+   * look connected indefinitely.
+   */
+  private probe(): void {
+    if (!this.connected || this.pongTimer) return;
+    this.send({ type: 'ping' });
+    this.pongTimer = setTimeout(() => {
+      this.pongTimer = null;
+      console.warn('WebSocket did not answer ping, reconnecting');
+      this.dropSocket();
+    }, PONG_TIMEOUT_MS);
+  }
+
+  private clearTimers(): void {
+    for (const timer of [this.connectTimer, this.pongTimer]) {
+      if (timer) clearTimeout(timer);
+    }
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.connectTimer = null;
+    this.pongTimer = null;
+    this.pingTimer = null;
+  }
+
+  /**
+   * Closes the current socket without waiting for its close event (a half-open or stuck
+   * socket may take minutes to report it), then reconnects as if it had closed.
+   */
+  private dropSocket(): void {
+    const ws = this.ws;
+    if (!ws) return;
+    ws.onopen = ws.onclose = ws.onerror = ws.onmessage = null;
+    try {
+      ws.close();
+    } catch {
+      // closing a socket that is already failing may throw; it is discarded either way
+    }
+    this.handleClose();
+  }
+
+  private handleClose(): void {
+    this.clearTimers();
+    this.connected = false;
+    this.ws = null;
+    this.onDisconnectCallbacks.forEach(cb => cb());
+    if (this.shouldReconnect) {
+      this.scheduleReconnect();
+    }
+  }
 
   connect(): void {
     // Don't create a new connection if we're already connected or connecting
@@ -114,30 +180,34 @@ class SolisWebSocket {
     }
 
     this.ws = new WebSocket(wsUrl);
+    // A connect to a host that is gone can hang far longer than the backoff; retry instead.
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      if (this.ws?.readyState === WebSocket.CONNECTING) this.dropSocket();
+    }, CONNECT_TIMEOUT_MS);
 
     this.ws.onopen = () => {
+      this.clearTimers();
       this.connected = true;
       this.reconnectAttempts = 0;
+      this.pingTimer = setInterval(() => this.probe(), PING_INTERVAL_MS);
       this.onConnectCallbacks.forEach(cb => cb());
       // Re-subscribe to the full active key set; the hub has no memory of this client.
       this.resubscribeAll();
     };
 
-    this.ws.onclose = () => {
-      this.connected = false;
-      this.onDisconnectCallbacks.forEach(cb => cb());
-      // Clear the reference to allow creating a new socket
-      this.ws = null;
-      if (this.shouldReconnect) {
-        this.scheduleReconnect();
-      }
-    };
+    this.ws.onclose = () => this.handleClose();
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
     };
 
     this.ws.onmessage = (event) => {
+      // Any frame proves the connection is alive.
+      if (this.pongTimer) {
+        clearTimeout(this.pongTimer);
+        this.pongTimer = null;
+      }
       try {
         const message: unknown = JSON.parse(event.data);
         if (!isWebSocketMessage(message)) {
@@ -205,7 +275,7 @@ class SolisWebSocket {
         this.ws.send(JSON.stringify(message));
       } catch (error) {
         console.warn('Failed to send WebSocket message:', error);
-        this.connected = false;
+        this.dropSocket();
       }
     }
   }

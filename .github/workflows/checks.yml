@@ -7,12 +7,40 @@ on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
+concurrency: # a newer push to a PR cancels its superseded run; main and tags always finish
+  group: checks-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
+  # A push to main that is the merge commit of a PR skips the checks: the PR already
+  # ran them. Direct pushes, PRs and release tags always run.
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/main ]; then
+            merged=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq "[.[] | select(.merge_commit_sha == \"$GITHUB_SHA\")] | length") || merged=0
+            if [ "$merged" -gt 0 ]; then run=false; fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
   go:
     name: Build, test, deadcode, govulncheck
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +73,8 @@ jobs:
 
   golangci-lint:
     name: golangci-lint
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -57,11 +87,13 @@ jobs:
       # length, complexity, magic numbers, global state and the panic policy.
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.13
+          version: v2.14
           args: --config .golangci.yml
 
   frontend:
     name: Frontend typecheck, lint, knip
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -69,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: npm
