@@ -18,6 +18,7 @@ const (
 	TypeSubscribe   = "subscribe"
 	TypeUnsubscribe = "unsubscribe"
 	TypePing        = "ping"
+	TypePong        = "pong"
 	TypeSnapshot    = "snapshot"
 	TypeUpdate      = "update"
 	TypeError       = "error"
@@ -57,6 +58,12 @@ type UpdateMessage struct {
 	TS      string              `json:"ts"`
 	Values  map[string]ValueDTO `json:"values"`
 	Removed []string            `json:"removed,omitempty"`
+}
+
+// PongMessage answers a client ping so the client can detect a dead connection
+// (browsers do not expose WebSocket control-frame pongs to JavaScript).
+type PongMessage struct {
+	Type string `json:"type"`
 }
 
 // ErrorMessage reports a protocol problem; the connection stays open.
