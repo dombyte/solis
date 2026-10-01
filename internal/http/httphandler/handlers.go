@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
@@ -29,6 +30,8 @@ type HandlerDeps struct {
 	// Timeout bounds each storage read (app.timeout) so a slow history query cannot hold
 	// the single SQLite connection the poller writes through; 0 = request context only.
 	Timeout time.Duration
+	// Build is the binary's build information, served by /api/version.
+	Build buildinfo.Info
 }
 
 // GetHealthHandler serves the supervisor snapshot: 200 for ok/degraded, 503 when any
@@ -41,6 +44,14 @@ func GetHealthHandler(deps HandlerDeps) http.Handler {
 			status = http.StatusServiceUnavailable
 		}
 		WriteJSON(w, status, snap)
+	})
+}
+
+// GetVersionHandler serves the binary's build information. The frontend and the API docs
+// are embedded in the binary, so this is the version of all three.
+func GetVersionHandler(deps HandlerDeps) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		WriteJSON(w, http.StatusOK, deps.Build)
 	})
 }
 

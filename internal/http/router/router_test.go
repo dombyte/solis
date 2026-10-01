@@ -3,36 +3,30 @@ package router
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/http/httphandler"
 	"github.com/dombyte/solis/internal/http/httphandler/mocks"
 	"github.com/dombyte/solis/internal/util/clocktest"
 )
 
-func writeFile(t *testing.T, path, content string) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
-}
+func file(content string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(content)} }
 
 func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 	t.Helper()
-	fe, docs := t.TempDir(), t.TempDir()
-	writeFile(t, filepath.Join(fe, "index.html"), "INDEX")
-	writeFile(t, filepath.Join(fe, "assets", "app.js"), "JS")
-	writeFile(t, filepath.Join(fe, "assets", ".env"), "SECRET")
-	writeFile(t, filepath.Join(fe, "robots.txt"), "ROBOTS")
-	writeFile(t, filepath.Join(fe, "favicon.svg"), "<svg/>")
-	writeFile(t, filepath.Join(docs, "index.html"), "DOCS")
+	fe := fstest.MapFS{
+		"index.html":    file("INDEX"),
+		"assets/app.js": file("JS"), "assets/.env": file("SECRET"),
+		"robots.txt": file("ROBOTS"), "favicon.svg": file("<svg/>"), ".hidden": file("HIDDEN"),
+	}
+	docs := fstest.MapFS{"index.html": file("DOCS")}
 	svc := mocks.NewMockReadService(t)
 	ws := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
@@ -41,8 +35,9 @@ func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 		Handlers: httphandler.HandlerDeps{
 			Service: svc,
 			Errors:  httphandler.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
+			Build: buildinfo.Info{Version: "3.1.0", Commit: "<abc>"},
 		},
-		WebSocket: ws, FrontendDir: fe, DocsDir: docs, Log: zerolog.Nop(),
+		WebSocket: ws, Frontend: fe, Docs: docs, Log: zerolog.Nop(),
 	})
 }
 
@@ -79,6 +74,8 @@ func TestRoutes(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, get(r, "/api/unknown").Code)
 	assert.Equal(t, http.StatusMovedPermanently, get(r, "/docs").Code)
 	assert.Equal(t, "DOCS", get(r, "/docs/").Body.String())
+	assert.JSONEq(t, `{"version":"3.1.0","commit":"<abc>","build_date":"","go_version":""}`,
+		get(r, "/api/version").Body.String())
 
 	// A cross-origin preflight is no longer answered with an allow.
 	rec = httptest.NewRecorder()
@@ -102,16 +99,17 @@ func TestRoutes_StaticDirsDoNotList(t *testing.T) {
 	}
 	assert.Equal(t, "JS", get(r, "/assets/app.js").Body.String())
 	assert.Equal(t, "DOCS", get(r, "/docs/").Body.String())
+	assert.Equal(t, "INDEX", get(r, "/.hidden").Body.String(), "dotfile: SPA, not the file")
 }
 
 func TestRoutes_WithoutDistFolders(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
 	r := SetupRoutes(Deps{
-		Handlers:    httphandler.HandlerDeps{Service: svc},
-		FrontendDir: filepath.Join(t.TempDir(), "absent"), DocsDir: "/nonexistent",
-		Log: zerolog.Nop(),
+		Handlers: httphandler.HandlerDeps{Service: svc},
+		Frontend: fstest.MapFS{}, Log: zerolog.Nop(), // Docs nil: not built either
 	})
 	assert.Equal(t, http.StatusNotFound, get(r, "/").Code)
+	assert.Equal(t, http.StatusNotFound, get(r, "/docs/").Code)
 	assert.Equal(t, http.StatusNotFound, get(r, "/ws").Code)
 }
 

@@ -5,10 +5,10 @@ before:
   hooks:
     # CI already enforces a tidy go.mod; verify only, never rewrite the tree mid-release.
     - go mod verify
-    # Frontend and API docs are built once here and shipped in both the archives and
-    # the images (the binary serves ./frontend/dist and ./docs/dist from disk).
-    - make frontend VITE_GIT_COMMIT_HASH={{ .Version }}-{{ .ShortCommit }}
-    - make docs
+    # Frontend and API docs are built once here, with the release version the binaries
+    # get, before the Go builds embed them (go:embed); archives and images ship only the
+    # binary.
+    - make assets VERSION={{ .Version }}
 
 builds:
   - id: solis-multi-arch
@@ -51,8 +51,6 @@ archives:
       - LICENSE
       - README.md
       - example/config.yaml
-      - frontend/dist
-      - docs/dist
 
 changelog:
   sort: asc
@@ -137,9 +135,6 @@ dockers_v2:
       - linux/arm64
       - linux/arm/v7
     dockerfile: Dockerfile.goreleaser
-    extra_files:
-      - frontend/dist
-      - docs/dist
     labels: &oci
       org.opencontainers.image.title: Solis Monitor
       org.opencontainers.image.description: >-

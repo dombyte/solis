@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/maintenance"
@@ -114,7 +115,7 @@ func TestEndToEnd_PollAggregateServe(t *testing.T) {
 	base := fmt.Sprintf("http://127.0.0.1:%d", hport)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, cfg, zerolog.Nop()) }()
+	go func() { done <- Run(ctx, cfg, buildinfo.Info{Version: "test"}, zerolog.Nop()) }()
 
 	var snap health.Snapshot
 	require.Eventually(t, func() bool {
@@ -122,6 +123,9 @@ func TestEndToEnd_PollAggregateServe(t *testing.T) {
 			snap.Components["modbus"].State == "healthy" &&
 			snap.Components["poller"].State == "healthy"
 	}, 10*time.Second, 20*time.Millisecond)
+	var build buildinfo.Info
+	require.Equal(t, http.StatusOK, getJSON(t, base+"/api/version", &build))
+	assert.Equal(t, "test", build.Version)
 
 	// Aggregator computed the month from the stored daily row.
 	var monthly map[string]any
@@ -181,7 +185,7 @@ func expectWSUpdate(t *testing.T, dev *inverter, hport int) {
 func TestRun_StartupErrorsAbort(t *testing.T) {
 	cfg := testConfig(t, freePort(t), freePort(t))
 	cfg.Rollover.Time = "25:00"
-	err := Run(context.Background(), cfg, zerolog.Nop())
+	err := Run(context.Background(), cfg, buildinfo.Info{}, zerolog.Nop())
 	require.Error(t, err)
 
 	// Busy HTTP port aborts startup before any component starts.
@@ -189,12 +193,13 @@ func TestRun_StartupErrorsAbort(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = l.Close() }()
 	cfg = testConfig(t, freePort(t), l.Addr().(*net.TCPAddr).Port)
-	assert.Error(t, Run(context.Background(), cfg, zerolog.Nop()))
+	assert.Error(t, Run(context.Background(), cfg, buildinfo.Info{}, zerolog.Nop()))
 
 	// A maintenance job holding the lock prevents startup.
 	cfg = testConfig(t, freePort(t), freePort(t))
 	job, err := maintenance.AcquireExclusive(cfg.Storage.Path)
 	require.NoError(t, err)
 	defer func() { _ = job.Release() }()
-	assert.True(t, errors.Is(Run(context.Background(), cfg, zerolog.Nop()), maintenance.ErrLocked))
+	err = Run(context.Background(), cfg, buildinfo.Info{}, zerolog.Nop())
+	assert.True(t, errors.Is(err, maintenance.ErrLocked))
 }

@@ -2,15 +2,12 @@ import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useSubscription } from '../lib/hooks/useSubscription';
 import { POWER_FLOW_KEYS } from '../components/dashboard/flow/model';
-import { useVersionCheck } from '../lib/hooks/useVersionCheck';
+import { APP_VERSION, useVersionCheck } from '../lib/hooks/useVersionCheck';
 import { useMobile } from '../hooks/useMobile';
 import { useState, useEffect, useCallback } from 'react';
 
 export function Info() {
   const isMobile = useMobile();
-
-  // Get version from import.meta.env if available
-  const version = import.meta.env.VITE_GIT_COMMIT_HASH || import.meta.env.VITE_GIT_VERSION || 'dev';
 
   // WebSocket connection is initialized at app level. The store only stamps lastUpdated
   // when a subscribed value changes, so Info subscribes to the live power keys (they
@@ -21,6 +18,8 @@ export function Info() {
 
   // Version check
   const { hasUpdate, checkForUpdate, triggerUpdate } = useVersionCheck();
+  // Built with the binary's version (VITE_APP_VERSION); release versions have no "v".
+  const version = /^\d/.test(APP_VERSION) ? `v${APP_VERSION}` : APP_VERSION;
   const [checking, setChecking] = useState(false);
   const [lastCheckTime, setLastCheckTime] = useState<number | null>(null);
   const [checkStatus, setCheckStatus] = useState<'idle' | 'checking' | 'update-available' | 'up-to-date'>('idle');
@@ -139,7 +138,7 @@ export function Info() {
             <div>
               <h2 className="text-lg font-semibold mb-1">Version</h2>
               <p className="text-muted-foreground">
-                <code className="bg-muted px-2 py-1 rounded">v{version}</code>
+                <code className="bg-muted px-2 py-1 rounded">{version}</code>
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">

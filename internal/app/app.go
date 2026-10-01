@@ -10,13 +10,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
 
+	"github.com/dombyte/solis/docs"
+	"github.com/dombyte/solis/frontend"
 	"github.com/dombyte/solis/internal/aggregator"
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/cache"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/database"
@@ -42,6 +46,7 @@ const probeTimeout = 2 * time.Second
 // App holds the long-lived parts of one application run.
 type App struct {
 	cfg   *config.AppConfig
+	info  buildinfo.Info
 	log   zerolog.Logger
 	clock util.Clock
 
@@ -63,10 +68,13 @@ type App struct {
 // shutdown, nil) or a fatal health escalation (the wrapped health.ErrHealthFatal); a
 // startup error is returned as is. Once the shutdown began it is bounded by
 // ShutdownTimeout; on ErrShutdownTimeout the caller must exit the process. Run never
-// restarts the app: every non-nil result means "exit non-zero".
-func Run(ctx context.Context, cfg *config.AppConfig, root zerolog.Logger) error {
+// restarts the app: every non-nil result means "exit non-zero". build is served by
+// /api/version.
+func Run(
+	ctx context.Context, cfg *config.AppConfig, build buildinfo.Info, root zerolog.Logger,
+) error {
 	a := &App{
-		cfg: cfg, log: logging.Component(root, "app"), clock: util.NewRealClock(),
+		cfg: cfg, info: build, log: logging.Component(root, "app"), clock: util.NewRealClock(),
 		stopping: make(chan struct{}),
 	}
 	stop := context.AfterFunc(ctx, a.beginShutdown)
@@ -223,18 +231,40 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 	if err != nil {
 		return err
 	}
+	fe, apiDocs, err := webAssets(httpLog)
+	if err != nil {
+		return err
+	}
 	mux := router.SetupRoutes(router.Deps{
 		Handlers: httphandler.HandlerDeps{
 			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
-			Clock: a.clock, Timeout: a.cfg.App.Timeout,
+			Clock: a.clock, Timeout: a.cfg.App.Timeout, Build: a.info,
 		},
-		WebSocket: ws, Log: httpLog,
+		WebSocket: ws, Frontend: fe, Docs: apiDocs, Log: httpLog,
 	})
 	a.http = server.New(serverSettings(a.cfg.App), mux, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
 	a.sup.Watch("eventbus", a.busProbe)
 	a.sup.Watch("http", a.http.Probe)
 	return a.http.Start()
+}
+
+// webAssets returns the SPA and the Swagger UI embedded in the binary. A binary built
+// before `make assets` has neither; it still serves the API, with a warning.
+func webAssets(log zerolog.Logger) (fe, apiDocs fs.FS, err error) {
+	if fe, err = frontend.Dist(); err != nil {
+		return nil, nil, fmt.Errorf("app: embedded frontend: %w", err)
+	}
+	if apiDocs, err = docs.Dist(); err != nil {
+		return nil, nil, fmt.Errorf("app: embedded docs: %w", err)
+	}
+	if !router.HasIndex(fe) {
+		log.Warn().Msg("binary built without the frontend (make frontend): no web UI")
+	}
+	if !router.HasIndex(apiDocs) {
+		log.Warn().Msg("binary built without the API docs (make docs): no /docs")
+	}
+	return fe, apiDocs, nil
 }
 
 func (a *App) storageProbe() (health.State, string) {

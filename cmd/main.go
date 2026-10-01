@@ -18,6 +18,7 @@ import (
 	_ "time/tzdata" // fallback zoneinfo so TZ=Europe/Berlin never silently becomes UTC
 
 	"github.com/dombyte/solis/internal/app"
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/config"
 	"github.com/dombyte/solis/internal/logging"
 )
@@ -35,10 +36,11 @@ var (
 	GoVersion = "unknown"
 )
 
-// buildInfo renders the build information for the startup log and `solis version`.
-func buildInfo() string {
-	return fmt.Sprintf("solis %s (commit %s, built %s, %s)", Version, Commit, BuildDate,
-		GoVersion)
+// buildInfo collects the linker-set build information.
+func buildInfo() buildinfo.Info {
+	return buildinfo.Info{
+		Version: Version, Commit: Commit, BuildDate: BuildDate, GoVersion: GoVersion,
+	}
 }
 
 func main() {
@@ -78,7 +80,7 @@ func runCommand(args []string, configPath string, stdout, stderr io.Writer) int 
 		printUsage(stdout)
 		return 0
 	case "version":
-		_, _ = fmt.Fprintln(stdout, buildInfo())
+		_, _ = fmt.Fprintln(stdout, buildInfo().String())
 		return 0
 	default:
 		// #nosec G705 -- writes to the process's own stderr, not an HTTP response

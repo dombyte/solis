@@ -110,6 +110,7 @@ Addresses, types and scales are defined in `internal/solis/table.go`.
 ```
 GET /health                                            # 200 ok|degraded, 503 failed
 GET /api/keys                                          # all registers + metadata
+GET /api/version                                       # build info (binary, UI and docs)
 GET /api/data/{key}                                    # current value
 GET /api/data/{daily_key}?start=2024-01-01&end=2024-01-31
 GET /api/data/{monthly_key}?start=2024-01&end=2024-12
@@ -164,7 +165,8 @@ refuses periods whose daily rows retention already deleted.
 ## Development
 
 ```bash
-make build           # binary with version info
+make all             # web assets + binary (the UI and API docs are embedded)
+make build           # binary with version info; embeds the assets of the last `make assets`
 make check           # format, lint, race tests, deadcode, govulncheck (check-only)
 make docker          # dev image with version info (docker-compose.dev.yaml)
 docker compose -f docker-compose.dev.yaml up

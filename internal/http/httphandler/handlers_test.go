@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/http/httphandler/mocks"
@@ -76,6 +77,18 @@ func TestHealth_FailClosed(t *testing.T) {
 			assert.Equal(t, "restart budget exhausted", body["reason"])
 		}
 	}
+}
+
+func TestVersion(t *testing.T) {
+	build := buildinfo.Info{
+		Version: "3.1.0", Commit: "abc1234", BuildDate: "2026-10-01T00:00:00Z", GoVersion: "go1.26",
+	}
+	rec := httptest.NewRecorder()
+	GetVersionHandler(HandlerDeps{Build: build}).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.JSONEq(t, `{"version":"3.1.0","commit":"abc1234",`+
+		`"build_date":"2026-10-01T00:00:00Z","go_version":"go1.26"}`, rec.Body.String())
 }
 
 func TestKeys(t *testing.T) {
