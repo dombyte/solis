@@ -9,7 +9,8 @@ info:
     **API Base URL:** The API is served from the root of the application. All API endpoints are under `/api/`.
     
     **Documentation URL:** API documentation (Swagger UI) is available at `/docs/`.
-  version: 3.0.0
+  # Replaced at build time with VITE_APP_VERSION (the binary's version, see the Makefile).
+  version: dev
   contact:
     name: API Support
 
@@ -120,6 +121,30 @@ paths:
                   unit: ""
                   store: "status"
                   description: "Solis Status ()"
+
+  /api/version:
+    get:
+      tags:
+        - Health
+      summary: Build information
+      description: |
+        Returns the build information of the running binary. The web UI and these API
+        docs are embedded in the binary and built with the same version. The UI polls this
+        endpoint and compares it with the version it was built with to detect an upgraded
+        server.
+      operationId: getVersion
+      responses:
+        '200':
+          description: Build information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildInfo'
+              example:
+                version: "3.1.0"
+                commit: "77cf3f1"
+                build_date: "2026-10-01T12:00:00Z"
+                go_version: "go1.26.8"
 
   /api/data/{key}:
     get:
@@ -436,6 +461,24 @@ components:
           example: "2026-08-03T10:00:00Z"
 
     # Register Metadata
+    BuildInfo:
+      type: object
+      required: [version, commit, build_date, go_version]
+      properties:
+        version:
+          type: string
+          description: Release version (`dev` for local builds without a tag)
+          example: "3.1.0"
+        commit:
+          type: string
+          description: Short commit hash (`unknown` when not set at build time)
+        build_date:
+          type: string
+          description: Build (commit) date, RFC 3339 (`unknown` when not set at build time)
+        go_version:
+          type: string
+          description: Go toolchain the binary was built with
+
     RegisterInfo:
       type: object
       required:

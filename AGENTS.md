@@ -26,9 +26,9 @@ serves a React dashboard (REST + WebSocket) from the same Go binary.
 
 - **Input:** one inverter over Modbus TCP or RTU; the poller is the only Modbus user.
 - **Outputs:** SQLite (daily/monthly/yearly/total values, status history), REST API,
-  WebSocket live values, the SPA and Swagger UI served from disk (`frontend/dist`,
-  `docs/dist`).
-- **Runtime:** a single binary; without a subcommand it runs the server, `solis backfill`
+  WebSocket live values, the SPA and Swagger UI embedded in the binary (`go:embed` of
+  the prebuilt `frontend/dist`, `docs/dist`).
+- **Runtime:** a single self-contained binary; without a subcommand it runs the server, `solis backfill`
   runs a maintenance job. Shipped as binaries (linux, darwin) and a multi-arch `scratch`
   image on ghcr.io.
 
@@ -45,8 +45,9 @@ go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...       # known vulnerabilit
 go tool mockery                                             # regenerate mocks (.mockery.yaml; version pinned in go.mod)
 go test -race ./...                         # all tests, as in CI
 go test ./internal/solis -run TestBlockPlanGolden
-make build                                  # ./solis with version info (ldflags)
 make assets                                 # frontend/dist + docs/dist (make frontend / docs)
+make build                                  # ./solis with version info (ldflags), embeds the dists
+make all                                    # assets, then build
 make docker                                 # dev image (docker-compose.dev.yaml) with version info
 go run ./cmd                                # server (reads ./config.yaml; -config <path>)
 go run ./cmd backfill --years 0             # maintenance job (app must be stopped), exits 0/1
@@ -63,9 +64,11 @@ cd frontend && npm run typecheck && npm run lint && npm run knip
 ## 3. Project Structure
 
 ```
-cmd/                     main.go (subcommand dispatch, signal ctx, exit code), serve.go, backfill.go
+cmd/                     main.go (subcommand dispatch, signal ctx, exit code, ldflags build info),
+                         serve.go, backfill.go
 internal/
   app/                   composition root: Create* factories, health adapters, logger wiring
+  buildinfo/             build information (version, commit, …) passed down from cmd
   config/                YAML/env config, structural Validate(); domain rules injected by app
   period/                Period (day/month/year keys from one captured instant), rollover window
   eventbus/              event bus (ValuesUpdated, PeriodClosed), non-blocking, per-subscriber policy
@@ -88,8 +91,8 @@ internal/
   util/                  math, data types, Clock, Slot[T], DependencyError/RequireAll;
                          util/clocktest is the fake Clock for tests
   <pkg>/mocks/           mockery-generated mocks (never hand-edit)
-frontend/                React 19 + Vite + Tailwind 4 + zustand SPA
-docs/                    Swagger UI + openapi.yaml
+frontend/                React 19 + Vite + Tailwind 4 + zustand SPA; embed.go embeds dist/
+docs/                    Swagger UI + openapi.yaml; embed.go embeds dist/
 example/                 docker-compose (TCP, RTU) and config.yaml templates for users
 ```
 
@@ -149,8 +152,9 @@ modbus      → stdlib + simonvetter + util (Clock) + an injected zerolog.Logger
               (external layer: no config/health)
 service     → storage (ReadStore only), health, history, period, solis + own interfaces
               (CacheReader, HealthSnapshotter)
-httphandler → service, health, period, solis, util
-app         → everything (composition root)
+httphandler → service, health, period, solis, buildinfo, util
+buildinfo   → stdlib only
+app         → everything (composition root), incl. the frontend and docs embed packages
 ```
 
 - "storage (store types)" means the interfaces, DTOs (`PollWrite`, `DailyRow`, …) and
@@ -246,13 +250,30 @@ LastBeat() time.Time              // atomic timestamp, updated by the component'
   parse, call `Service.Data`/`Keys`/`Health`, map errors, write JSON.
 - Middleware (`Recover(log)`, `Logger(log)`, `SecurityHeaders`) is
   `func(http.Handler) http.Handler` with an injected logger where it logs.
-- Routes (`router.SetupRoutes(Deps)`): `/health`, `/api/keys`, `/api/data/{key}`, `/ws`,
-  `/docs/`, and the SPA. No CORS middleware.
+- Routes (`router.SetupRoutes(Deps)`): `/health`, `/api/keys`, `/api/data/{key}`,
+  `/api/version`, `/ws`, `/docs/`, and the SPA. No CORS middleware.
+- Static files come from `fs.FS` values in `router.Deps` (`Frontend`, `Docs`); `app` passes
+  the embedded `frontend.Dist()` / `docs.Dist()`, tests pass an `fstest.MapFS`. A tree
+  without `index.html` is not mounted (binary built before `make assets`; `app` warns).
 - One error shape, documented in `docs/src/openapi.yaml`, written with
   `WriteError(w, status, msg)`: `{ "error": "Bad Request", "message": "…", "code": 400 }`.
 - `service.NewReadService(service.Deps{Store, Cache, Health, Registry, Decoder, Log})`:
   every dependency is required; the service never receives a Modbus client, poller or
   aggregator.
+
+### Version (one version for binary, UI and docs)
+
+- The binary's build information (ldflags → `buildinfo.Info`, `HandlerDeps.Build`) is
+  served by `GET /api/version`. The frontend and the Swagger UI are built with the same
+  version (`VITE_APP_VERSION=$(VERSION)` in `make frontend`/`make docs`; goreleaser and
+  the Dockerfile pass the release/build version), so binary, UI and docs show one version.
+  No `version.json`.
+- The frontend polls `/api/version` and compares it with its compiled version: a
+  different one means the server was upgraded (update banner → reload). `dev` on either
+  side never reports an update.
+- `go:embed all:dist*` also matches the committed `dist.md`, so Go builds, tests and lint
+  work without npm; release builds always run `make assets` first (goreleaser before
+  hooks, Dockerfile node stages).
 
 ### Health endpoint (fail-closed)
 
@@ -462,6 +483,8 @@ Deliberate choices, with the reason, for behaviour that is not obvious from the 
   through a `util.Slot` so the poller always reads the current client after a restart.
 - **Derived values:** `battery_power_signed` is produced by `Decoder.Derive` after a full
   poll (it needs two registers).
+- **Embedded web assets:** the archives and the image ship only the binary; the dist
+  folders are build inputs, not runtime files.
 - **Read plan:** 3 Modbus reads (grid power at 33130 so it falls inside an existing block),
   pinned by the block-plan golden test.
 - **Shutdown:** single-phase with a hard deadline; no second-signal force mode.

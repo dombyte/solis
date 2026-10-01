@@ -5,7 +5,6 @@ services:
       context: .
       dockerfile: Dockerfile
       args: # set by `make docker`; plain `docker compose build` falls back to dev/unknown
-        VITE_GIT_COMMIT_HASH: ${VITE_GIT_COMMIT_HASH:-dev}
         VERSION: ${VERSION:-dev}
         COMMIT: ${COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}

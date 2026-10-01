@@ -46,7 +46,7 @@ export default defineConfig({
         },
       },
     }),
-   // Copy data files to dist after build so they're available
+    // licenses.json is written after public/ was copied; copy it into dist/data.
     {
       name: 'copy-data-to-dist',
       apply: 'build',
@@ -59,15 +59,10 @@ export default defineConfig({
           mkdirSync(destDir, { recursive: true });
         }
 
-        // Copy all files from public/data to dist/data
-        const files = ['licenses.json', 'version.json'];
-        files.forEach(file => {
-          const src = path.join(dataDir, file);
-          const dest = path.join(destDir, file);
-          if (existsSync(src)) {
-            copyFileSync(src, dest);
-          }
-        });
+        const src = path.join(dataDir, 'licenses.json');
+        if (existsSync(src)) {
+          copyFileSync(src, path.join(destDir, 'licenses.json'));
+        }
       },
     },
   ],

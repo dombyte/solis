@@ -3,10 +3,10 @@ import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
 import { useMobile } from '../../hooks/useMobile';
 
 export function UpdateBanner() {
-  const { hasUpdate, triggerUpdate } = useVersionCheck();
+  const { hasUpdate, dismissed, triggerUpdate, dismissUpdate } = useVersionCheck();
   const isMobile = useMobile();
 
-  if (!hasUpdate) return null;
+  if (!hasUpdate || dismissed) return null;
 
   return (
     // Above the fixed mobile nav on mobile (App reserves its height below the content).
@@ -21,12 +21,22 @@ export function UpdateBanner() {
             </p>
           </div>
         </div>
-        <button
-          onClick={triggerUpdate}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
-        >
-          Update Now
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={triggerUpdate}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors whitespace-nowrap"
+          >
+            Update Now
+          </button>
+          <button
+            onClick={dismissUpdate}
+            aria-label="Dismiss update notice"
+            title="Dismiss"
+            className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <LineAwesomeIcon icon="la-times" size="lg" />
+          </button>
+        </div>
       </div>
     </div>
   );

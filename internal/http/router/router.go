@@ -2,10 +2,9 @@
 package router
 
 import (
+	"io/fs"
 	"net/http"
-	"os"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -16,22 +15,17 @@ import (
 	"github.com/dombyte/solis/internal/http/middleware"
 )
 
-// Default locations of the built frontend and docs.
-const (
-	FrontendDist = "./frontend/dist"
-	DocsDist     = "./docs/dist"
-)
-
 // Deps are the router dependencies.
 type Deps struct {
 	// Handlers are the API handler dependencies.
 	Handlers httphandler.HandlerDeps
 	// WebSocket serves /ws.
 	WebSocket http.Handler
-	// FrontendDir and DocsDir override the dist folders (tests); empty = defaults.
-	FrontendDir string
-	DocsDir     string
-	Log         zerolog.Logger
+	// Frontend and Docs are the built SPA and Swagger UI (embedded in the binary); each is
+	// only mounted when it has an index.html.
+	Frontend fs.FS
+	Docs     fs.FS
+	Log      zerolog.Logger
 }
 
 // backendPrefixes never fall through to the SPA.
@@ -52,12 +46,6 @@ func staticFiles() map[string]string {
 
 // SetupRoutes builds the router.
 func SetupRoutes(d Deps) *chi.Mux {
-	if d.FrontendDir == "" {
-		d.FrontendDir = FrontendDist
-	}
-	if d.DocsDir == "" {
-		d.DocsDir = DocsDist
-	}
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID) // first, so the logger and recoverer see the id
 	r.Use(middleware.Recover(d.Log))
@@ -74,89 +62,114 @@ func SetupRoutes(d Deps) *chi.Mux {
 	r.Method(http.MethodGet, "/health", httphandler.GetHealthHandler(d.Handlers))
 	r.Route("/api", func(r chi.Router) {
 		r.Method(http.MethodGet, "/keys", httphandler.GetKeysHandler(d.Handlers))
+		r.Method(http.MethodGet, "/version", httphandler.GetVersionHandler(d.Handlers))
 		r.Method(http.MethodGet, "/data/{key}", httphandler.GetDataHandler(d.Handlers))
 	})
-	mountDocs(r, d.DocsDir)
-	mountFrontend(r, d.FrontendDir)
+	mountDocs(r, d.Docs)
+	mountFrontend(r, d.Frontend)
 	return r
 }
 
-func mountDocs(r chi.Router, dir string) {
-	if _, err := os.Stat(dir); err != nil {
+// HasIndex reports whether fsys holds an index.html (a built SPA or Swagger UI).
+func HasIndex(fsys fs.FS) bool {
+	if fsys == nil {
+		return false
+	}
+	_, err := fs.Stat(fsys, "index.html")
+	return err == nil
+}
+
+func mountDocs(r chi.Router, fsys fs.FS) {
+	if !HasIndex(fsys) {
 		return
 	}
 	r.Handle("/docs", http.RedirectHandler("/docs/", http.StatusMovedPermanently))
-	r.Handle("/docs/*", http.StripPrefix("/docs/", staticDir(dir)))
+	r.Handle("/docs/*", http.StripPrefix("/docs/", staticDir(fsys, ".")))
 }
 
-func mountFrontend(r chi.Router, dir string) {
-	if _, err := os.Stat(dir); err != nil {
+func mountFrontend(r chi.Router, fsys fs.FS) {
+	if !HasIndex(fsys) {
 		return
 	}
-	r.Handle("/assets/*", http.StripPrefix("/assets/", staticDir(filepath.Join(dir, "assets"))))
-	r.Handle("/data/*", http.StripPrefix("/data/", staticDir(filepath.Join(dir, "data"))))
+	r.Handle("/assets/*", http.StripPrefix("/assets/", staticDir(fsys, "assets")))
+	r.Handle("/data/*", http.StripPrefix("/data/", staticDir(fsys, "data")))
 	for name, ct := range staticFiles() {
-		r.Handle("/"+name, serveFile(filepath.Join(dir, name), ct))
+		r.Handle("/"+name, serveFile(fsys, name, ct))
 	}
-	index := filepath.Join(dir, "index.html")
-	r.Get("/", func(w http.ResponseWriter, req *http.Request) { http.ServeFile(w, req, index) })
-	r.NotFound(spaFallback(dir, index))
+	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
+		http.ServeFileFS(w, req, fsys, "index.html")
+	})
+	r.NotFound(spaFallback(fsys))
 }
 
-// staticDir serves the files under dir without directory listings or dotfiles: a
-// directory is only served when it has an index.html, anything else is a 404.
-func staticDir(dir string) http.Handler {
-	files := http.FileServer(http.Dir(dir))
+// staticDir serves the files below dir of fsys without directory listings or dotfiles:
+// a directory is only served when it has an index.html, anything else is a 404.
+func staticDir(fsys fs.FS, dir string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clean := path.Clean("/" + r.URL.Path)
-		if hiddenPath(clean) {
+		rel := fsPath(r.URL.Path)
+		if hiddenPath(rel) {
 			http.NotFound(w, r)
 			return
 		}
-		full := filepath.Join(dir, filepath.FromSlash(clean))
-		// #nosec G703 -- full is Join(dir, Clean("/"+URL.Path)): rooted under dir
-		if st, err := os.Stat(full); err == nil && st.IsDir() {
-			if _, err := os.Stat(filepath.Join(full, "index.html")); err != nil {
+		name := path.Join(dir, rel)
+		st, err := fs.Stat(fsys, name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if st.IsDir() {
+			name = path.Join(name, "index.html")
+			if _, err := fs.Stat(fsys, name); err != nil {
 				http.NotFound(w, r)
 				return
 			}
 		}
-		files.ServeHTTP(w, r)
+		// #nosec G703 -- name is Join(dir, fsPath(URL.Path)): cleaned and rooted in fsys
+		http.ServeFileFS(w, r, fsys, name)
 	})
 }
 
-// hiddenPath reports whether any segment of the cleaned URL path is a dotfile.
-func hiddenPath(clean string) bool {
-	for _, seg := range strings.Split(clean, "/") {
-		if strings.HasPrefix(seg, ".") {
+// fsPath turns a URL path into an fs.FS name: cleaned and rooted, so no ".." survives,
+// without the leading slash ("." for the root).
+func fsPath(urlPath string) string {
+	clean := path.Clean("/" + urlPath)
+	if clean == "/" {
+		return "."
+	}
+	return clean[1:]
+}
+
+// hiddenPath reports whether any segment of the fs path is a dotfile ("." is the root).
+func hiddenPath(name string) bool {
+	for _, seg := range strings.Split(name, "/") {
+		if seg != "." && strings.HasPrefix(seg, ".") {
 			return true
 		}
 	}
 	return false
 }
 
-func serveFile(path, contentType string) http.Handler {
+func serveFile(fsys fs.FS, name, contentType string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentType)
-		http.ServeFile(w, r, path)
+		http.ServeFileFS(w, r, fsys, name)
 	})
 }
 
-// spaFallback serves existing files under dir and index.html for client-side routes.
-func spaFallback(dir, index string) http.HandlerFunc {
+// spaFallback serves existing files of fsys and index.html for client-side routes.
+func spaFallback(fsys fs.FS) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || isBackendPath(r.URL.Path) {
 			http.NotFound(w, r)
 			return
 		}
-		clean := filepath.Clean("/" + r.URL.Path) // rooted: no traversal above dir
-		path := filepath.Join(dir, clean)
-		// #nosec G703 -- path is Join(dir, Clean("/"+URL.Path)): rooted under dir, no traversal
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
-			http.ServeFile(w, r, path)
+		name := fsPath(r.URL.Path)
+		if st, err := fs.Stat(fsys, name); err == nil && !st.IsDir() && !hiddenPath(name) {
+			// #nosec G703 -- name is fsPath(URL.Path): cleaned and rooted in fsys
+			http.ServeFileFS(w, r, fsys, name)
 			return
 		}
-		http.ServeFile(w, r, index)
+		http.ServeFileFS(w, r, fsys, "index.html")
 	}
 }
 

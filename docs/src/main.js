@@ -10,9 +10,16 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   document.addEventListener('DOMContentLoaded', initSwagger);
 }
 
+// Built with the binary's version (VITE_APP_VERSION, see the Makefile); the spec file
+// only holds a placeholder.
+function withAppVersion(spec) {
+  const version = import.meta.env.VITE_APP_VERSION;
+  return version ? { ...spec, info: { ...spec.info, version } } : spec;
+}
+
 function initSwagger() {
   const ui = SwaggerUIBundle({
-    spec,
+    spec: withAppVersion(spec),
     dom_id: '#swagger',
     presets: [
       SwaggerUIBundle.presets.apis,

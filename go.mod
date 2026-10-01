@@ -3,7 +3,10 @@ module github.com/dombyte/solis
 go 1.26.8
 
 // frontend dependencies ship stray Go packages (e.g. flatted); keep them out of ./...
-ignore ./frontend/node_modules
+ignore (
+	./docs/node_modules
+	./frontend/node_modules
+)
 
 require (
 	github.com/go-chi/chi/v5 v5.3.2

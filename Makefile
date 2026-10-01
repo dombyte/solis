@@ -6,27 +6,28 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 GOVERSION := $(shell go version | awk '{print $$3}')
 
-# Version shown in the web UI (frontend/public/data/version.json); goreleaser overrides it.
-VITE_GIT_COMMIT_HASH ?= $(VERSION)
-
 # Build flags for small binary
 LDFLAGS := -s -w
 BUILD_FLAGS := -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildDate=$(DATE) -X main.GoVersion=$(GOVERSION) $(LDFLAGS)"
 
+# The web assets are built with the same version (VITE_APP_VERSION) as the binary; the
+# frontend compares it with GET /api/version. goreleaser passes VERSION=<release version>.
+
+# Embeds whatever frontend/dist and docs/dist hold: run `make assets` first (or `make all`).
 .PHONY: build
 build:
 	CGO_ENABLED=0 go build $(BUILD_FLAGS) -o $(BINARY_NAME) ./cmd
 
-# Web assets the binary serves from disk (./frontend/dist, ./docs/dist).
+# Web assets embedded into the binary (frontend/dist, docs/dist); build them before `build`.
 .PHONY: frontend
 frontend:
 	npm --prefix frontend ci
-	VITE_GIT_COMMIT_HASH=$(VITE_GIT_COMMIT_HASH) npm --prefix frontend run build
+	VITE_APP_VERSION=$(VERSION) npm --prefix frontend run build
 
 .PHONY: docs
 docs:
 	npm --prefix docs ci
-	npm --prefix docs run build
+	VITE_APP_VERSION=$(VERSION) npm --prefix docs run build
 
 .PHONY: assets
 assets: frontend docs
@@ -35,7 +36,6 @@ assets: frontend docs
 .PHONY: docker
 docker:
 	VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_DATE=$(DATE) \
-		VITE_GIT_COMMIT_HASH=$(VITE_GIT_COMMIT_HASH) \
 		docker compose -f docker-compose.dev.yaml build
 
 .PHONY: clean

@@ -18,5 +18,5 @@ func runServer(ctx context.Context, configPath string) error {
 	for _, w := range cfg.Warnings {
 		root.Warn().Str("component", "config").Msg(w)
 	}
-	return app.Run(ctx, cfg, root)
+	return app.Run(ctx, cfg, buildInfo(), root)
 }
