@@ -514,7 +514,7 @@ Gaps in the code are backlog items below, not accepted deviations. Add a row her
 
 | Rule | Deviation | Reason |
 |---|---|---|
-| Tool versions pinned as `go run tool@vX.Y.Z` | mockery is a `tool` directive in `go.mod` (`go tool mockery`) | `go run …@version` verifies its ~20 modules against sum.golang.org on every CI run (outside the `go.sum`-keyed cache); a checksum-DB hiccup failed the mock drift job. With `go.sum` hashes it runs offline from the cache. Bump with `go get -tool github.com/vektra/mockery/v2@vX.Y.Z` |
+| Tool versions pinned as `go run tool@vX.Y.Z` | mockery is a `tool` directive in `go.mod` (`go tool mockery`) | `go run …@version` verifies its ~20 modules against sum.golang.org on every CI run (outside the `go.sum`-keyed cache); a checksum-DB hiccup failed the mock drift job. With `go.sum` hashes it runs offline from the cache. Bump with `go get -tool github.com/vektra/mockery/v3@vX.Y.Z` |
 
 ---
 
