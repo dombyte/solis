@@ -45,12 +45,25 @@
       "enabled": false
     },
     {
+      "description": "golangci-lint majors change the .golangci.yml format; upgrade by hand",
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["golangci/golangci-lint"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "matchManagers": ["dockerfile"],
       "groupName": "Docker images"
     },
     {
       "matchManagers": ["docker-compose"],
       "groupName": "Docker Compose"
+    },
+    {
+      "description": "The example compose files use the solis image at :latest on purpose",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": ["ghcr.io/dombyte/solis"],
+      "enabled": false
     },
     {
       "matchManagers": ["github-actions"],
@@ -75,6 +88,15 @@
       "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^scripts/.+\\.sh$/", "/^AGENTS\\.md$/"],
       "matchStrings": ["go run (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[^\\s]+)"],
       "datasourceTemplate": "go"
+    },
+    {
+      "description": "golangci-lint version pinned in the CI action (`version: vX.Y`); the github-actions manager only tracks the action itself",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["golangci/golangci-lint-action@\\S+\\s+with:\\s+version:\\s*(?<currentValue>v\\d+\\.\\d+(?:\\.\\d+)?)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver-coerced"
     }
   ],
   "lockFileMaintenance": {
