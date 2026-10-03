@@ -50,7 +50,7 @@ print_result $? "golangci-lint run"
 
 # 3. Unused exported code (golangci's unused only sees unexported identifiers)
 echo "Checking for dead code..."
-DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.50.0 -test ./... 2>&1)
+DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.51.0 -test ./... 2>&1)
 if [ -n "$DEAD" ]; then
     echo "$DEAD"
     print_result 1 "deadcode"
