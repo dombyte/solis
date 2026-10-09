@@ -15,7 +15,7 @@ COPY docs/ .
 ARG VERSION=dev
 RUN VITE_APP_VERSION=${VERSION} npm run build
 
-FROM golang:1.27.1-alpine AS builder
+FROM golang:1.27.2-alpine AS builder
 WORKDIR /app
 RUN apk --no-cache add ca-certificates tzdata
 
