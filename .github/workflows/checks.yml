@@ -60,7 +60,7 @@ jobs:
 
       - name: Dead code
         run: |
-          DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.51.0 -test ./...)
+          DEAD=$(go run golang.org/x/tools/cmd/deadcode@v0.52.0 -test ./...)
           if [ -n "$DEAD" ]; then echo "$DEAD"; exit 1; fi
 
       - name: Vulnerabilities
