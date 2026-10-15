@@ -18,8 +18,8 @@ Shipped as linux/darwin binaries and a multi-arch `scratch` image on ghcr.io.
 make check                                  # ./scripts/pre-commit.sh, check-only (no mockery)
 golangci-lint fmt --config .golangci.yml    # gofumpt + goimports (prefix github.com/dombyte/solis)
 golangci-lint run --config .golangci.yml
-go run golang.org/x/tools/cmd/deadcode@v0.51.0 -test ./...
-go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+go tool deadcode -test ./...
+go tool govulncheck ./...
 go tool mockery                             # regenerate mocks (.mockery.yaml)
 go test -race ./...                         # as in CI
 make assets | build | all | docker          # dists; ./solis with ldflags; both; dev image
@@ -32,10 +32,15 @@ cd frontend && npm run typecheck && npm run lint && npm run knip
 - `make check` runs the same checks as CI (`checks.yml`: plus tidy check, mock drift,
   frontend checks); run it by hand before every merge. `.golangci.yml` is the source of
   the lint and size rules — don't relax it without a deviation in section 12.
-- Tool versions are pinned and bumped deliberately, same locally and in CI.
+- Tool versions are pinned and bumped deliberately, same locally and in CI. Go tools
+  (mockery, deadcode, govulncheck) are `tool` directives in `go.mod`, run with
+  `go tool <name>` and bumped with `go get -tool <module>@vX.Y.Z`: a pinned `go run` checks
+  its modules against sum.golang.org on every CI run, and a checksum-DB hiccup failed CI.
+  golangci-lint is not one (it would pull ~300 modules into the app's graph; its
+  maintainers support only prebuilt binaries).
 - Renovate is the only dependency updater. `renovate.json` MUST track every pinned version
-  (gomod, Dockerfiles, compose, GitHub Actions, npm in `frontend/` + `docs/`, regex managers
-  for pinned `go run` tools and the golangci-lint `version:`); a change that adds a pin
+  (gomod incl. the Go tools, Dockerfiles, compose, GitHub Actions, npm in `frontend/` +
+  `docs/`, a regex manager for the golangci-lint `version:`); a change that adds a pin
   extends it.
 - Release: SemVer tag `vX.Y.Z` on `main` → `release.yml` reruns the checks, goreleaser
   (`make assets` in its before hooks) builds archives and images (`latest` only for stable).
@@ -442,8 +447,6 @@ refactor(storage)!: remove V1/V2 migrations and refuse pre-V2 databases
 
 ## 12. Deviations and Backlog
 
-| Rule | Deviation | Reason |
-|---|---|---|
-| Go tools pinned in `go run` commands | mockery is a `tool` directive in `go.mod` (`go tool mockery`) | a pinned `go run` checks ~20 modules against sum.golang.org on every CI run; a checksum-DB hiccup failed the mock drift job. Bump: `go get -tool github.com/vektra/mockery/v3@vX.Y.Z` |
+Deviations: none.
 
 Backlog (gaps between code and these rules): none open.

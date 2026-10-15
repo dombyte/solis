@@ -34,13 +34,8 @@
       "postUpdateOptions": ["gomodTidy"]
     },
     {
-      "matchManagers": ["custom.regex"],
-      "groupName": "Go tools"
-    },
-    {
-      "description": "A Go major version is a new module path (mockery/v2 -> mockery/v3); the regex manager only swaps the version",
-      "matchManagers": ["custom.regex"],
-      "matchDatasources": ["go"],
+      "description": "A Go major version is a new module path (mockery/v3 -> mockery/v4) and needs code changes; update by hand",
+      "matchManagers": ["gomod"],
       "matchUpdateTypes": ["major"],
       "enabled": false
     },
@@ -82,13 +77,6 @@
     }
   ],
   "customManagers": [
-    {
-      "description": "Go tools run as `go run <module>[/cmd/<tool>]@vX.Y.Z` in CI, the pre-commit script and AGENTS.md",
-      "customType": "regex",
-      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/", "/^scripts/.+\\.sh$/", "/^AGENTS\\.md$/"],
-      "matchStrings": ["go run (?<depName>[^@\\s]+?)(?:/cmd/[^@\\s]+)?@(?<currentValue>v[^\\s]+)"],
-      "datasourceTemplate": "go"
-    },
     {
       "description": "golangci-lint version pinned in the CI action (`version: vX.Y`); the github-actions manager only tracks the action itself",
       "customType": "regex",
