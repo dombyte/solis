@@ -2,7 +2,7 @@
 # (see before.hooks in .goreleaser.yaml) and copied into the build context.
 # ca-certificates and zoneinfo are arch-independent: this stage runs natively on the
 # build host, so no step here needs QEMU (release.yml still sets it up, as goreleaser requires).
-FROM --platform=$BUILDPLATFORM alpine:3.24.2 AS builder
+FROM --platform=$BUILDPLATFORM alpine:3.24.3 AS builder
 RUN apk --no-cache add ca-certificates tzdata
 
 FROM scratch
