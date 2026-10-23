@@ -1,6 +1,6 @@
 module github.com/dombyte/solis
 
-go 1.26.8
+go 1.27.3
 
 // frontend dependencies ship stray Go packages (e.g. flatted); keep them out of ./...
 ignore (
