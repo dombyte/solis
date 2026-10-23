@@ -51,6 +51,13 @@
       "groupName": "Docker images"
     },
     {
+      "description": "The go directive sets CI's Go version (setup-go go-version-file); keep it in step with the golang image",
+      "matchDatasources": ["golang-version", "docker"],
+      "matchPackageNames": ["go", "golang"],
+      "rangeStrategy": "bump",
+      "groupName": "Go toolchain"
+    },
+    {
       "matchManagers": ["docker-compose"],
       "groupName": "Docker Compose"
     },
