@@ -577,6 +577,26 @@ func TestCleanupAll_FreezeAware(t *testing.T) {
 	}
 }
 
+// A cleanup that deleted no daily row lost no history and must not set the watermark,
+// else backfill refuses closed years nothing was ever deleted from (regression: every
+// startup recorded today - retention).
+func TestCleanupAll_NoDailyDeletedKeepsWatermark(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-08-05"))
+	s.cfg.DailyRetention = 365 * 24 * time.Hour
+	_, _, err := s.EnsureCutover(ctx, period.Of(day("2026-08-05")))
+	require.NoError(t, err)
+	insertRows(t, s,
+		`INSERT INTO daily_values (date, register_key, value, raw_value)
+		VALUES ('2026-08-01', 'pv_energy_daily', 1, 1)`,
+		`INSERT INTO monthly_values (month, register_key, value, raw_value)
+		VALUES ('2025-07', 'pv_energy_monthly', 1, 1)`)
+	require.NoError(t, s.CleanupAll(ctx))
+	assert.Equal(t, 0, countRows(t, s, "monthly_values"), "monthly row still purged")
+	assert.Equal(t, 1, countRows(t, s, "daily_values"))
+	require.NoError(t, s.loadMeta(ctx))
+	assert.Empty(t, s.meta.purgedBefore)
+}
+
 func TestHistoryFormats(t *testing.T) {
 	s, clk, _ := newStore(t, day("2026-09-20"))
 	require.NoError(t, s.WritePoll(ctx, PollWrite{

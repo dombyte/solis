@@ -19,8 +19,8 @@ const vacuumInterval = 72 * time.Hour
 // Daily, monthly and yearly rows share daily_retention, but only periods that can never
 // be recomputed again are deleted: everything before the first open day/month/year of
 // the freeze watermarks and the total baseline. Computed values therefore never shrink.
-// The earliest kept day is recorded as the purge watermark so `solis backfill` refuses
-// to recompute periods whose daily rows are gone.
+// Once daily rows were actually deleted, the earliest kept day is recorded as the purge
+// watermark so `solis backfill` refuses to recompute periods whose daily rows are gone.
 func (s *Storage) CleanupAll(ctx context.Context) error {
 	s.cleanupMu.Lock()
 	defer s.cleanupMu.Unlock()
@@ -41,8 +41,10 @@ func (s *Storage) CleanupAll(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// cleanupPeriods deletes daily/monthly/yearly rows before min(wanted, first open day) and
-// advances the purge watermark in the same transaction.
+// cleanupPeriods deletes daily/monthly/yearly rows before min(wanted, first open day) and,
+// if daily rows were deleted, advances the purge watermark in the same transaction. A
+// cleanup that deleted no daily row lost no history, so it leaves the watermark alone
+// (backfill would otherwise refuse closed years nothing was ever deleted from).
 func (s *Storage) cleanupPeriods(ctx context.Context, wanted string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -54,28 +56,45 @@ func (s *Storage) cleanupPeriods(ctx context.Context, wanted string) (int64, err
 	if cutoff <= s.meta.purgedBefore {
 		return 0, nil
 	}
+	var deleted, daily int64
+	err = s.withTx(ctx, func(tx *txn) error {
+		var err error
+		deleted, daily, err = purgePeriods(ctx, tx, cutoff)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	if daily > 0 {
+		s.meta.purgedBefore = cutoff
+	}
+	return deleted, nil
+}
+
+// purgePeriods deletes daily/monthly/yearly rows before cutoff, writes the purge watermark
+// if daily rows were deleted, and returns the number of rows deleted in total and from
+// daily_values.
+func purgePeriods(ctx context.Context, tx *txn, cutoff string) (total, daily int64, err error) {
 	month, year := cutoff[:len(period.MonthLayout)], cutoff[:len(period.YearLayout)]
 	stmts := []struct{ table, sql, arg string }{
 		{"daily_values", `DELETE FROM daily_values WHERE date < ?`, cutoff},
 		{"monthly_values", `DELETE FROM monthly_values WHERE month < ?`, month},
 		{"yearly_values", `DELETE FROM yearly_values WHERE year < ?`, year},
 	}
-	var deleted int64
-	err = s.withTx(ctx, func(tx *txn) error {
-		for _, st := range stmts {
-			n, err := execCount(ctx, tx, st.sql, st.arg)
-			if err != nil {
-				return fmt.Errorf("storage: cleanup %s: %w", st.table, err)
-			}
-			deleted += n
+	for _, st := range stmts {
+		n, err := execCount(ctx, tx, st.sql, st.arg)
+		if err != nil {
+			return 0, 0, fmt.Errorf("storage: cleanup %s: %w", st.table, err)
 		}
-		return putMeta(tx, metaPurgedBefore, cutoff)
-	})
-	if err != nil {
-		return 0, err
+		total += n
+		if st.table == "daily_values" {
+			daily = n
+		}
 	}
-	s.meta.purgedBefore = cutoff
-	return deleted, nil
+	if daily == 0 {
+		return total, 0, nil
+	}
+	return total, daily, putMeta(tx, metaPurgedBefore, cutoff)
 }
 
 // firstOpenDay is the earliest day any computed value may still be recomputed from:
