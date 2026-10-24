@@ -281,22 +281,34 @@ func TestCheckPurged(t *testing.T) {
 	t.Parallel()
 	now := period.Of(time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	tests := []struct {
+		name    string
 		purged  string
 		years   int
+		force   bool
+		cutover string
 		refused bool
 	}{
-		{"", 3, false},
-		{"2025-08-05", 0, false},
-		{"2025-08-05", 1, true},  // closed years and the baseline need all daily rows
-		{"2026-03-01", 0, true},  // defensive: the current year itself is incomplete
-		{"2026-01-01", 0, false}, // cleanup never passes the first open day
+		{"nothing purged", "", 3, false, "2026-06-01", false},
+		{"current year intact", "2025-08-05", 0, false, "2026-06-01", false},
+		{"closed year purged", "2025-08-05", 1, false, "2024-03-01", true},
+		// 2025 itself is intact, but the baseline sums from 2024-01-01.
+		{"baseline range purged", "2024-06-01", 1, false, "2024-03-01", true},
+		// Regression: cleanup recorded today - retention long before any history; the
+		// baseline (2025) precedes the cutover year, so nothing is refreshed.
+		{"purge before cutover", "2016-10-04", 1, false, "2026-06-01", false},
+		{"purge before baseline range", "2016-10-04", 3, false, "2023-01-01", false},
+		{"force needs all history", "2016-10-04", 1, true, "2023-01-01", true},
+		{"current year purged", "2026-03-01", 0, false, "2026-06-01", true},
+		{"first open day", "2026-01-01", 0, false, "2026-06-01", false},
 	}
 	for _, tt := range tests {
-		t.Run(fmt.Sprintf("%s/%d", tt.purged, tt.years), func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			tx := mocks.NewMockBackfillTx(t)
 			tx.EXPECT().PurgedBefore().Return(tt.purged)
-			err := checkPurged(tx, now, tt.years)
+			tx.EXPECT().Baseline().Return("2025", nil).Maybe()
+			tx.EXPECT().Cutover().Return(tt.cutover).Maybe()
+			err := checkPurged(tx, now, Options{Years: tt.years, Force: tt.force})
 			if tt.refused {
 				assert.ErrorIs(t, err, ErrPurgedHistory)
 				var pe *PurgedHistoryError

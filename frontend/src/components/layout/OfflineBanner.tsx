@@ -1,4 +1,4 @@
-import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
+import { WifiOff } from 'lucide-react';
 
 interface OfflineBannerProps {
   isOnline: boolean;
@@ -13,7 +13,8 @@ export function OfflineBanner({ isOnline, isChecking = false }: OfflineBannerPro
     <div className="fixed top-4 left-4 right-4 z-60 max-w-[calc(100vw-2rem)]">
       <div className="flex items-center justify-between gap-4 p-4 bg-warning/30 border border-warning rounded-lg shadow-lg backdrop-blur-sm w-full" role="alert">
         <div className="flex items-center gap-3">
-          <LineAwesomeIcon icon="la-wifi-slash" size="lg" className="text-warning" />
+          {/* line-awesome has no wifi-slash glyph (never had); lucide does. */}
+          <WifiOff className="size-5 shrink-0 text-warning" aria-hidden="true" />
           <div>
             <h3 className="font-semibold text-foreground">Connection to the monitor lost</h3>
             <p className="text-sm text-muted-foreground">

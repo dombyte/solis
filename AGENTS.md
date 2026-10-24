@@ -345,14 +345,16 @@ solis.Register{
 - Refuses while the app runs: exclusive `flock` next to the DB (server holds a shared one).
   Always backs up first, verified with `PRAGMA integrity_check` (`database.CreateBackup`);
   no backup → no write → exit 1.
-- Refuses periods whose daily rows retention deleted (meta `purged_before`); with any
-  purge, `--years N > 0` fails rather than write partial sums.
+- Refuses periods whose daily rows retention deleted (meta `purged_before`, set only once
+  cleanup deleted daily rows): fails rather than write partial sums when the purge reaches
+  the oldest recomputed year or, with `--years N > 0`, the baseline range.
 - Periods starting before the oldest daily row are skipped (stored value kept, reported).
 - Baseline refresh sums daily rows from the cutover year's 1 January through the baseline
   year (as the live aggregator folds); nothing is refreshed while the baseline year precedes
   the cutover.
 - `--force` recomputes periods without complete daily history (partial sums) and rebuilds
-  the baseline from all daily rows; the `purged_before` refusal still applies.
+  the baseline from all daily rows; the `purged_before` refusal still applies (with
+  `--years N > 0`, any purge then fails).
 - Output: backup path; one line per row (`monthly  pv_energy_monthly        2026-08
   412.30 kWh -> 409.87 kWh`, `n/a` if no row); one `skipped` line per incomplete period;
   a summary (recomputed / unchanged / lower / skipped).

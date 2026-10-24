@@ -160,7 +160,7 @@ func writeHeader(out io.Writer, backup string, force bool) error {
 func Recompute(tx storage.BackfillTx, reg Registry, now period.Period, opts Options) (
 	Report, error,
 ) {
-	if err := checkPurged(tx, now, opts.Years); err != nil {
+	if err := checkPurged(tx, now, opts); err != nil {
 		return Report{}, err
 	}
 	first, err := tx.FirstDailyDay()
@@ -190,21 +190,29 @@ func (r *recomputer) run(years int) error {
 }
 
 // checkPurged refuses a job that would recompute from daily rows retention already
-// deleted: the oldest touched year must start on or after the purge watermark, and the
-// baseline (refreshed when a closed year is touched) needs the complete history.
-func checkPurged(tx storage.BackfillTx, now period.Period, years int) error {
+// deleted: the oldest touched year must start on or after the purge watermark, and so
+// must the baseline range refreshed when a closed year is touched (from the cutover
+// year, or all history with Force). A purge before that range loses nothing the job sums.
+func checkPurged(tx storage.BackfillTx, now period.Period, opts Options) error {
 	purged := tx.PurgedBefore()
 	if purged == "" {
 		return nil
 	}
-	oldest, err := period.AddYears(now.Year, -years)
+	oldest, err := period.AddYears(now.Year, -opts.Years)
 	if err != nil {
 		return err
 	}
-	if years > 0 || oldest+"-01-01" < purged {
+	if oldest+"-01-01" < purged || (opts.Years > 0 && baselinePurged(tx, purged, opts.Force)) {
 		return &PurgedHistoryError{PurgedBefore: purged}
 	}
 	return nil
+}
+
+// baselinePurged reports whether a baseline refresh would sum days before purged.
+func baselinePurged(tx storage.BackfillTx, purged string, force bool) bool {
+	year, _ := tx.Baseline()
+	from, ok := baselineFrom(tx, year, force)
+	return ok && from < purged
 }
 
 // recomputer carries one Recompute run.
@@ -317,7 +325,7 @@ func (r *recomputer) sums(keys []string, from, to string) (aggregation.Values, e
 // has been folded there is nothing to refresh.
 func (r *recomputer) refreshBaseline() error {
 	year, old := r.tx.Baseline()
-	from, ok := r.baselineFrom(year)
+	from, ok := baselineFrom(r.tx, year, r.force)
 	if !ok {
 		return nil
 	}
@@ -337,17 +345,17 @@ func (r *recomputer) refreshBaseline() error {
 	return r.tx.PutBaseline(next)
 }
 
-// baselineFrom is the first day summed into the baseline: the cutover year's 1 January, or
-// the start of all history with Force (then pre-cutover years are included). false means
-// there is nothing to refresh.
-func (r *recomputer) baselineFrom(year string) (string, bool) {
+// baselineFrom is the first day summed into the baseline of year: the cutover year's
+// 1 January, or the start of all history with force (then pre-cutover years are
+// included). false means there is nothing to refresh.
+func baselineFrom(tx storage.BackfillTx, year string, force bool) (string, bool) {
 	if year == "" {
 		return "", false
 	}
-	if r.force {
+	if force {
 		return "", true
 	}
-	cutover := r.tx.Cutover()
+	cutover := tx.Cutover()
 	if len(cutover) < len("2006") || year < cutover[:4] {
 		return "", false
 	}
