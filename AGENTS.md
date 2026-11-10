@@ -424,6 +424,8 @@ solis.Register{
   counted twice. After a confirmed reset any decrease on the closing day is the reset.
   Seeding returns day closes missed while down; closes are written even while Modbus is
   disconnected.
+- **Backup schedule:** `storage.backup_interval` counts from the newest existing backup,
+  not from process start (first run: at once), so frequent restarts never postpone it.
 - **Embedded web assets:** archives and image ship only the binary; dists are build inputs.
 - **simonvetter returns `[]byte`:** words are converted by hand (~10–20 ns/read),
   negligible next to network latency.

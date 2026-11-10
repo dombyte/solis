@@ -185,13 +185,19 @@ func (m *Manager) cleanupBackups() {
 	}
 }
 
-// RunPeriodicBackups creates online backups every BackupInterval until ctx is done.
+// RunPeriodicBackups creates online backups every BackupInterval until ctx is done. The
+// interval counts from the newest existing backup, not from the start of the process: an
+// app that restarts more often than the interval (updates, nightly reboots) would
+// otherwise never reach its first tick and never back up.
 func (m *Manager) RunPeriodicBackups(ctx context.Context) {
 	if !m.backup.Enabled || m.backup.BackupInterval <= 0 {
 		m.log.Info().Msg("periodic backups disabled")
 		return
 	}
-	m.every(ctx, m.backup.BackupInterval, false, func() {
+	if !m.sleep(ctx, m.untilBackupDue()) {
+		return
+	}
+	m.every(ctx, m.backup.BackupInterval, true, func() {
 		if path, err := CreateBackup(ctx, m.cfg.Path, m.backup, m.clock.Now(), m.log); err != nil {
 			m.log.Error().Err(err).Msg("online backup failed")
 		} else {
@@ -199,6 +205,35 @@ func (m *Manager) RunPeriodicBackups(ctx context.Context) {
 		}
 		m.cleanupBackups()
 	})
+}
+
+// untilBackupDue is the time left until the next backup is due: BackupInterval after the
+// newest backup, 0 when there is none (or the directory cannot be read: better one
+// backup too many than none).
+func (m *Manager) untilBackupDue() time.Duration {
+	backups, err := ListBackups(m.cfg.Path)
+	if err != nil || len(backups) == 0 {
+		return 0
+	}
+	age := m.clock.Now().Sub(backups[0].Timestamp) // newest first
+	// A backup stamped in the future (clock change) must not postpone the next one by
+	// more than one interval.
+	return min(m.backup.BackupInterval, max(0, m.backup.BackupInterval-age))
+}
+
+// sleep waits d on the injected clock; false means ctx ended first.
+func (m *Manager) sleep(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	t := m.clock.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C():
+		return true
+	}
 }
 
 // RunPeriodicCleanup runs retention cleanup now and every CleanupInterval until ctx is

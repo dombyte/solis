@@ -111,14 +111,71 @@ func TestRunPeriodicBackups(t *testing.T) {
 	done := make(chan struct{})
 	go func() { m.RunPeriodicBackups(ctx); close(done) }()
 
+	backups := func(n int) func() bool {
+		return func() bool {
+			b, _ := ListBackups(path)
+			return len(b) == n
+		}
+	}
+	// No backup exists yet: the first one is due at once, not an interval after start.
+	assert.Eventually(t, backups(1), 2*time.Second, 5*time.Millisecond)
 	require.True(t, clk.BlockUntil(1))
 	clk.Advance(time.Hour)
+	assert.Eventually(t, backups(2), 2*time.Second, 5*time.Millisecond)
+	cancel()
+	<-done
+}
+
+// A restart must not postpone the next backup: the interval counts from the newest
+// backup, so an app restarted more often than the interval still backs up.
+func TestRunPeriodicBackups_CountsFromNewestBackup(t *testing.T) {
+	start := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	clk := clocktest.New(start)
+	path := filepath.Join(t.TempDir(), "solis.db")
+	require.NoError(t, createTestDB(path))
+	m := newManager(t, path, clk)
+	interval := m.backup.BackupInterval
+	_, err := WriteBackup(context.Background(), path, start.Add(-interval/4), zerolog.Nop())
+	require.NoError(t, err)
+	assert.Equal(t, interval-interval/4, m.untilBackupDue())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { m.RunPeriodicBackups(ctx); close(done) }()
+	require.True(t, clk.BlockUntil(1))
+	b, err := ListBackups(path)
+	require.NoError(t, err)
+	assert.Len(t, b, 1, "not due yet")
+	clk.Advance(interval - interval/4)
 	assert.Eventually(t, func() bool {
 		b, _ := ListBackups(path)
-		return len(b) == 1
+		return len(b) == 2
 	}, 2*time.Second, 5*time.Millisecond)
 	cancel()
 	<-done
+}
+
+func TestUntilBackupDue(t *testing.T) {
+	start := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	clk := clocktest.New(start)
+	path := filepath.Join(t.TempDir(), "solis.db")
+	require.NoError(t, createTestDB(path))
+	m := newManager(t, path, clk)
+	interval := m.backup.BackupInterval
+	assert.Zero(t, m.untilBackupDue(), "no backup yet")
+
+	_, err := WriteBackup(context.Background(), path, start.Add(-2*interval), zerolog.Nop())
+	require.NoError(t, err)
+	assert.Zero(t, m.untilBackupDue(), "overdue")
+
+	_, err = WriteBackup(context.Background(), path, start.Add(3*interval), zerolog.Nop())
+	require.NoError(t, err)
+	assert.Equal(t, interval, m.untilBackupDue(), "a backup from the future waits one interval")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	assert.False(t, m.sleep(ctx, time.Hour))
+	assert.False(t, m.sleep(ctx, 0))
 }
 
 func TestRunPeriodic_Disabled(t *testing.T) {
