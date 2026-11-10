@@ -426,6 +426,7 @@ solis.Register{
   disconnected.
 - **Backup schedule:** `storage.backup_interval` counts from the newest existing backup,
   not from process start (first run: at once), so frequent restarts never postpone it.
+  A backup that was not finished and verified is deleted, never left for the rotation.
 - **Embedded web assets:** archives and image ship only the binary; dists are build inputs.
 - **simonvetter returns `[]byte`:** words are converted by hand (~10–20 ns/read),
   negligible next to network latency.

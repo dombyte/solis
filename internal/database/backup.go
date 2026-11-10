@@ -144,6 +144,20 @@ func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
 		return err
 	}
 	defer closeInto(&err, conn, "connection")
+	if err := finishBackup(ctx, conn, destPath); err != nil {
+		// A copy that was not finished and verified must not stay: the rotation would
+		// count it as a backup and delete a good one for it.
+		if rmErr := removeBackupFiles(destPath); rmErr != nil {
+			log.Warn().Err(rmErr).Msg("failed to remove incomplete backup file")
+		}
+		return err
+	}
+	return verifyBackupFile(ctx, destPath, log)
+}
+
+// finishBackup copies the database into destPath and makes the copy a standalone,
+// owner-only file.
+func finishBackup(ctx context.Context, conn *sql.Conn, destPath string) error {
 	if err := performBackupCopy(conn, destPath); err != nil {
 		return err
 	}
@@ -154,7 +168,7 @@ func createSQLiteBackup(ctx context.Context, sourcePath, destPath string,
 	if err := os.Chmod(destPath, backupFilePerm); err != nil {
 		return fmt.Errorf("restrict backup permissions: %w", err)
 	}
-	return verifyBackupFile(ctx, destPath, log)
+	return nil
 }
 
 // useRollbackJournal switches the finished copy out of WAL mode. The backup API copies
