@@ -60,6 +60,8 @@ type App struct {
 	sup     *health.Supervisor
 	http    *server.Server
 
+	storagePings pingTolerance
+
 	stopping     chan struct{} // closed once the shutdown began (signal or fatal)
 	stoppingOnce sync.Once
 }
@@ -75,7 +77,7 @@ func Run(
 ) error {
 	a := &App{
 		cfg: cfg, info: build, log: logging.Component(root, "app"), clock: util.NewRealClock(),
-		stopping: make(chan struct{}),
+		stopping: make(chan struct{}), storagePings: pingTolerance{limit: storageProbeFailures},
 	}
 	stop := context.AfterFunc(ctx, a.beginShutdown)
 	defer stop()
@@ -267,15 +269,39 @@ func webAssets(log zerolog.Logger) (fe, apiDocs fs.FS, err error) {
 	return fe, apiDocs, nil
 }
 
+// storageProbeFailures is the number of consecutive failed pings after which the storage
+// counts as failed (which is fatal). The pool has one connection, so a ping also times out
+// while a long statement holds it (VACUUM after a retention cleanup, a slow disk); one
+// slow ping must not stop the app.
+const storageProbeFailures = 3
+
 func (a *App) storageProbe() (health.State, string) {
 	// Bound to the root context: during shutdown the probe stops at once instead of
 	// holding the supervisor lock for the full timeout (review RT-L6).
 	ctx, cancel := context.WithTimeout(a.sup.Context(), probeTimeout)
 	defer cancel()
-	if err := a.store.Ping(ctx); err != nil {
-		return health.Failed, err.Error()
+	return a.storagePings.observe(a.store.Ping(ctx))
+}
+
+// pingTolerance turns ping results into a health state: Recovering (shown as degraded)
+// for the first failures, Failed from the limit-th consecutive one. Only the supervisor's
+// sweep calls it, so it needs no lock.
+type pingTolerance struct {
+	limit    int
+	failures int
+}
+
+func (p *pingTolerance) observe(err error) (health.State, string) {
+	if err == nil {
+		p.failures = 0
+		return health.Healthy, ""
 	}
-	return health.Healthy, ""
+	p.failures++
+	reason := fmt.Sprintf("ping failed %d of %d times: %v", p.failures, p.limit, err)
+	if p.failures < p.limit {
+		return health.Recovering, reason
+	}
+	return health.Failed, reason
 }
 
 func (a *App) busProbe() (health.State, string) {
