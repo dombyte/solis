@@ -15,7 +15,10 @@ import (
 
 // Row limits keep history queries bounded.
 const (
-	maxErrorRows  = 50000
+	// maxErrorRows is what one status history response returns: the newest changes. A
+	// bitmask register changes many times a day, so years of retention must not turn
+	// one click into a multi-megabyte response.
+	maxErrorRows  = 1000
 	maxPeriodRows = 10000
 	maxYearRows   = 1000
 )

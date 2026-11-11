@@ -98,6 +98,7 @@ Package rules:
   missing instead of frozen; the next good poll restores them.
 - **storage**: single connection, WAL; enforces closed-period immutability
   (`ErrPeriodClosed`) and write domains; period sums run in SQL with explicit bounds.
+  A status history read returns the newest 1000 changes.
 - **http**: handlers in `httphandler` (no business logic; they call `service`), middleware
   in `middleware` (never mixed), all routes in `router/router.go`, lifecycle in `server`.
 
