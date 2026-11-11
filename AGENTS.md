@@ -93,7 +93,9 @@ Package rules:
   via `util.Slot` so the poller always reads the current client after a restart.
 - **solis**: everything Solis-specific; generic code goes to `util`; no Modbus client logic.
 - **poller**: non-overlapping loop (next poll = interval after previous start); owns day
-  attribution and rollover; emits `PeriodClosed`.
+  attribution and rollover; emits `PeriodClosed`. After 3 failed cycles in a row it drops
+  its live and status keys from the cache (daily counters stay), so clients see them as
+  missing instead of frozen; the next good poll restores them.
 - **storage**: single connection, WAL; enforces closed-period immutability
   (`ErrPeriodClosed`) and write domains; period sums run in SQL with explicit bounds.
 - **http**: handlers in `httphandler` (no business logic; they call `service`), middleware

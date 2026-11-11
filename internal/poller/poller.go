@@ -99,6 +99,7 @@ type Poller struct {
 
 	// Loop-owned state.
 	seeded        bool
+	failures      int // failed poll cycles in a row
 	lastStatus    map[string]float64
 	lastDaily     map[string]*solis.Value
 	pendingCloses map[string]string
@@ -187,15 +188,45 @@ func (p *Poller) loop(ctx context.Context) {
 	}
 }
 
-// pollCycle is one poll: seed if needed, read, attribute, persist, cache, emit.
+// staleAfter is the number of failed poll cycles in a row after which the live values
+// leave the cache: a dashboard must not show the last power reading as current while the
+// inverter cannot be read.
+const staleAfter = 3
+
+// pollCycle is one poll. After staleAfter failed cycles in a row the stale live values
+// are dropped; the next good poll brings them back.
 func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 	p.Beat()
 	defer p.Beat()
+	if p.poll(ctx, start) {
+		p.failures = 0
+		return
+	}
+	if p.failures++; p.failures == staleAfter {
+		p.dropLive(start)
+	}
+}
+
+// dropLive replaces the poller's cache domain with the daily counters only. They stay
+// valid without the inverter (the stored day rows are the same values); live power and
+// status keys are removed, so subscribers see them as missing instead of frozen.
+func (p *Poller) dropLive(now time.Time) {
+	keep := make(map[string]*solis.Value, len(p.lastDaily))
+	for k, v := range p.lastDaily {
+		keep[k] = v
+	}
+	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, keep, now)
+	p.d.Log.Warn().Int("failed_polls", p.failures).
+		Msg("live values dropped from the cache: no successful poll")
+}
+
+// poll seeds if needed, reads, attributes, persists, caches and emits; false = failed.
+func (p *Poller) poll(ctx context.Context, start time.Time) bool {
 	if !p.seeded {
 		if err := p.seed(ctx, start); err != nil {
 			p.d.Log.Error().Err(err).Str("tag", "storage_failure").Msg("seeding failed")
 			p.Set(health.Recovering, "seeding failed: "+err.Error())
-			return
+			return false
 		}
 		p.d.Log.Debug().Msg("seeding complete")
 	}
@@ -203,24 +234,25 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 	if !ok || !reader.IsConnected() {
 		p.closeUnread(ctx, start)
 		p.Set(health.Recovering, "modbus not connected")
-		return
+		return false
 	}
 	values, err := p.readAll(ctx, reader, start)
 	if err != nil {
 		p.d.Log.Warn().Err(err).Msg("poll failed")
 		p.closeUnread(ctx, start)
 		p.Set(health.Recovering, "poll failed: "+err.Error())
-		return
+		return false
 	}
 	p.d.Log.Debug().Int("values", len(values)).Msg("poll cycle read complete")
 	p.d.Decoder.Derive(values, start)
 	if err := p.persist(ctx, values, start); err != nil {
 		p.d.Log.Error().Err(err).Str("tag", "storage_failure").Msg("storing poll failed")
 		p.Set(health.Recovering, "storage: "+err.Error())
-		return
+		return false
 	}
 	p.d.Log.Debug().Dur("duration", p.d.Clock.Now().Sub(start)).Msg("poll cycle complete")
 	p.Set(health.Healthy, "")
+	return true
 }
 
 // storageContext bounds a storage call.
