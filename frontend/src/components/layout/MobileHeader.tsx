@@ -9,6 +9,7 @@ export function MobileHeader() {
     const path = location.pathname;
     if (path === '/' || path.startsWith('/dashboard')) return 'Dashboard';
     if (path.startsWith('/history')) return 'History';
+    if (path.startsWith('/reports')) return 'Reports';
     if (path.startsWith('/status')) return 'Status';
     if (path.startsWith('/info')) return 'Info';
     return 'Solis Monitor';

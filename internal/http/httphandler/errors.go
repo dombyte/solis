@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/dombyte/solis/internal/report"
 	"github.com/dombyte/solis/internal/service"
 )
 
@@ -47,6 +48,7 @@ func DefaultRules() []Rule {
 		{service.ErrNoData, http.StatusNotFound},
 		{service.ErrWrongKind, http.StatusBadRequest},
 		{service.ErrInvalidRange, http.StatusBadRequest},
+		{report.ErrInvalidRange, http.StatusBadRequest},
 		{context.DeadlineExceeded, http.StatusGatewayTimeout},
 		{context.Canceled, StatusClientClosedRequest},
 	}

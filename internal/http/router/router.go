@@ -64,6 +64,7 @@ func SetupRoutes(d Deps) *chi.Mux {
 		r.Method(http.MethodGet, "/keys", httphandler.GetKeysHandler(d.Handlers))
 		r.Method(http.MethodGet, "/version", httphandler.GetVersionHandler(d.Handlers))
 		r.Method(http.MethodGet, "/data/{key}", httphandler.GetDataHandler(d.Handlers))
+		r.Method(http.MethodGet, "/report", httphandler.GetReportHandler(d.Handlers))
 	})
 	mountDocs(r, d.Docs)
 	mountFrontend(r, d.Frontend)

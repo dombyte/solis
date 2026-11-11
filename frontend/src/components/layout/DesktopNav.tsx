@@ -21,6 +21,7 @@ export function DesktopNav() {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: 'la-home' },
     { path: '/history', label: 'History', icon: 'la-chart-line' },
+    { path: '/reports', label: 'Reports', icon: 'la-file-invoice' },
     { path: '/status', label: 'Status', icon: 'la-info-circle' },
     { path: '/info', label: 'Info', icon: 'la-file-alt' },
   ];

@@ -10,6 +10,7 @@ import (
 
 	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/report"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	"github.com/dombyte/solis/internal/util"
@@ -20,6 +21,7 @@ type ReadService interface {
 	Health() health.Snapshot
 	Keys() []solis.Register
 	Data(ctx context.Context, q service.DataQuery) (service.DataResult, error)
+	Report(ctx context.Context, q service.ReportQuery) (report.Report, error)
 }
 
 // HandlerDeps are the handler dependencies.

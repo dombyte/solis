@@ -15,6 +15,7 @@ export function MobileNav() {
   const navItems = [
     { path: '/dashboard', icon: 'la-home', label: 'Dashboard' },
     { path: '/history', icon: 'la-chart-line', label: 'History' },
+    { path: '/reports', icon: 'la-file-invoice', label: 'Reports' },
     { path: '/status', icon: 'la-info-circle', label: 'Status' },
     { path: '/info', icon: 'la-file-alt', label: 'Info' },
   ];
