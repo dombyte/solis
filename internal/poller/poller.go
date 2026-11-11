@@ -201,13 +201,14 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 	}
 	reader, ok := p.d.Source.Load()
 	if !ok || !reader.IsConnected() {
-		p.closeDisconnected(ctx, start)
+		p.closeUnread(ctx, start)
 		p.Set(health.Recovering, "modbus not connected")
 		return
 	}
 	values, err := p.readAll(ctx, reader, start)
 	if err != nil {
 		p.d.Log.Warn().Err(err).Msg("poll failed")
+		p.closeUnread(ctx, start)
 		p.Set(health.Recovering, "poll failed: "+err.Error())
 		return
 	}

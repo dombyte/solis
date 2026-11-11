@@ -427,7 +427,7 @@ solis.Register{
   just before its own reset looks the same) until it decreases or the window ends. A
   reset is confirmed for the whole poll before any value is attributed (map order).
   Seeding returns day closes missed while down; closes are written even while Modbus is
-  disconnected.
+  disconnected or connected but not answering.
 - **Backup schedule:** `storage.backup_interval` counts from the newest existing backup,
   not from process start (first run: at once), so frequent restarts never postpone it.
   A backup that was not finished and verified is deleted, never left for the rotation.

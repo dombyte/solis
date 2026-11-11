@@ -90,10 +90,11 @@ func (p *Poller) persist(ctx context.Context, values map[string]*solis.Value, no
 	return nil
 }
 
-// closeDisconnected writes the due day closes while Modbus is unreachable, so an outage
-// across midnight does not stall the closed-day watermarks (review ACQ-L5). Nothing was
-// read, so the cache is left untouched.
-func (p *Poller) closeDisconnected(ctx context.Context, now time.Time) {
+// closeUnread writes the due day closes of a cycle that read nothing (Modbus down, or
+// connected but not answering: an opened serial port says nothing about the inverter),
+// so an outage across midnight does not stall the closed-day watermarks (review ACQ-L5).
+// The cache is left untouched.
+func (p *Poller) closeUnread(ctx context.Context, now time.Time) {
 	if err := p.forceClose(now); err != nil {
 		p.d.Log.Error().Err(err).Msg("forced close failed")
 		return
