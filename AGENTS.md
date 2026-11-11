@@ -421,7 +421,11 @@ solis.Register{
   The inverter resets all daily counters together: a key that cannot show its own reset
   (no base or base 0) follows a reset another key confirmed in the same window, and is held
   (not written) from the opening day's midnight until then, so post-reset energy is never
-  counted twice. After a confirmed reset any decrease on the closing day is the reset.
+  counted twice. After a confirmed reset any decrease on the closing day is the reset,
+  and from midnight on a key that has not decreased is held too (after an outage its
+  counter may already exceed yesterday's value; it is never moved, since a value read
+  just before its own reset looks the same) until it decreases or the window ends. A
+  reset is confirmed for the whole poll before any value is attributed (map order).
   Seeding returns day closes missed while down; closes are written even while Modbus is
   disconnected.
 - **Backup schedule:** `storage.backup_interval` counts from the newest existing backup,

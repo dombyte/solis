@@ -148,9 +148,10 @@ func (p *Poller) attribute(values map[string]*solis.Value, now time.Time) (
 ) {
 	var w storage.PollWrite
 	cacheVals := make(map[string]*solis.Value, len(values))
+	daily := p.dailyValues(values)
+	p.attr.Confirm(daily, now)
 	for k, v := range values {
-		reg, _ := p.d.Registry.ByKey(k)
-		if reg.Store != solis.StoreDaily {
+		if _, ok := daily[k]; !ok {
 			cacheVals[k] = v
 			continue
 		}
@@ -175,6 +176,17 @@ func (p *Poller) attribute(values map[string]*solis.Value, now time.Time) (
 		cacheVals[k] = v
 	}
 	return w, cacheVals
+}
+
+// dailyValues picks the decoded values of the daily counters out of a poll.
+func (p *Poller) dailyValues(values map[string]*solis.Value) map[string]float64 {
+	daily := make(map[string]float64)
+	for k, v := range values {
+		if reg, _ := p.d.Registry.ByKey(k); reg.Store == solis.StoreDaily {
+			daily[k] = v.DecodedValue
+		}
+	}
+	return daily
 }
 
 // statusChanges returns status rows whose value differs from the last stored one.

@@ -140,15 +140,33 @@ func (d *DayAttributor) ForceClose(now time.Time) (map[string]string, error) {
 	return out, nil
 }
 
-// Attribute decides where value v of key belongs at now. Call ForceClose first in each
-// poll so the key's open day is never behind the expected day.
+// Confirm is the first pass of a poll: it records a reset that any key of values (daily
+// key -> decoded value) shows in the current window, before a single value is
+// attributed. The inverter resets all counters together, so the keys of one poll must
+// agree on the reset whatever order they are attributed in.
+func (d *DayAttributor) Confirm(values map[string]float64, now time.Time) {
+	w, in := d.roll.WindowAt(now)
+	if !in {
+		return
+	}
+	for k, v := range values {
+		if st, ok := d.keys[k]; ok && st.showsReset(w.Closing, v) {
+			d.confirmed = w.Opening
+			return
+		}
+	}
+}
+
+// Attribute decides where value v of key belongs at now. Call ForceClose and Confirm
+// first in each poll so the key's open day is never behind the expected day and every
+// key sees a reset confirmed in the same poll.
 func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribution {
 	st, ok := d.keys[key]
 	if !ok {
 		return Attribution{Decision: Discard, Warn: "unknown daily key " + key}
 	}
 	w, in := d.roll.WindowAt(now)
-	if a, blind := d.blindReset(st, v, w, in, now); blind {
+	if a, followed := d.followReset(st, v, w, in, now); followed {
 		return a
 	}
 	if !st.hasBase || v >= st.base { // value fits: normal max-write
@@ -161,27 +179,51 @@ func (d *DayAttributor) Attribute(key string, v float64, now time.Time) Attribut
 	return st.decreaseOutsideWindow(key, v)
 }
 
-// blindReset handles a key on the closing day that cannot see the reset itself: with no
-// base or a base of 0 the counter never decreases. Such a key follows a reset another
-// key confirmed in this window; without a confirmation its values are held (discarded
-// silently) from the opening day's midnight on, so post-reset energy is never written
-// to the closing day and counted again on the opening day (review ACQ-H1). It reports
-// false when the normal rules apply (the key can detect its reset, or it is still
-// before midnight without a confirmation).
-func (d *DayAttributor) blindReset(st *keyState, v float64, w period.Window, in bool,
+// followReset handles a key on the closing day whose own value does not show the reset.
+//
+// A blind key (no base, or a base of 0, so the counter never decreases) follows a reset
+// another key confirmed in this window; without a confirmation its values are held
+// (discarded silently) from the opening day's midnight on, so post-reset energy is never
+// written to the closing day and counted again on the opening day (review ACQ-H1).
+//
+// A key with a base that has not decreased is held as well once the reset is confirmed
+// and midnight has passed: after an outage across midnight its counter can already be at
+// or above yesterday's (small) value, and max-writing that into the closing day would
+// count the energy twice. It is not moved, because a value read just before its own
+// reset looks the same (the blocks of one poll are read one after another); its decrease
+// or the forced close at the window end moves it.
+//
+// It reports false when the normal rules apply.
+func (d *DayAttributor) followReset(st *keyState, v float64, w period.Window, in bool,
 	now time.Time,
 ) (Attribution, bool) {
-	switch {
-	case !in || st.openDay != w.Closing || (st.hasBase && st.base > 0):
+	if !in || st.openDay != w.Closing {
 		return Attribution{}, false
-	case d.confirmed == w.Opening:
+	}
+	confirmed := d.confirmed == w.Opening
+	if confirmed && st.blind() {
 		st.openDay, st.base, st.hasBase = w.Opening, v, true
 		return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}, true
-	case now.Before(w.Midnight):
-		return Attribution{}, false
-	default:
+	}
+	if !now.Before(w.Midnight) && st.held(v, confirmed) {
 		return Attribution{Decision: Discard}, true
 	}
+	return Attribution{}, false
+}
+
+// blind reports whether the key cannot show its own reset: without a base, or with a
+// base of 0, the counter never decreases.
+func (k *keyState) blind() bool { return !k.hasBase || k.base == 0 }
+
+// held reports whether value v is kept back after midnight: always for a blind key, and
+// for any other key once the reset is confirmed and v has not decreased.
+func (k *keyState) held(v float64, confirmed bool) bool {
+	return k.blind() || (confirmed && v >= k.base)
+}
+
+// showsReset reports whether v is a reset of a key still on the closing day.
+func (k *keyState) showsReset(closing string, v float64) bool {
+	return k.openDay == closing && !k.blind() && isReset(k.base, v)
 }
 
 // decreaseOutsideWindow discards a decrease outside the window. A reset-sized drop on a
