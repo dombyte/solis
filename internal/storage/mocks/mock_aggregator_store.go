@@ -168,25 +168,27 @@ func (_c *MockAggregatorStore_HasDailyData_Call) RunAndReturn(run func(ctx conte
 }
 
 // SumDaily provides a mock function for the type MockAggregatorStore
-func (_mock *MockAggregatorStore) SumDaily(ctx context.Context, key string, from string, to string) (float64, error) {
-	ret := _mock.Called(ctx, key, from, to)
+func (_mock *MockAggregatorStore) SumDaily(ctx context.Context, keys []string, from string, to string) (map[string]float64, error) {
+	ret := _mock.Called(ctx, keys, from, to)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SumDaily")
 	}
 
-	var r0 float64
+	var r0 map[string]float64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (float64, error)); ok {
-		return returnFunc(ctx, key, from, to)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, string, string) (map[string]float64, error)); ok {
+		return returnFunc(ctx, keys, from, to)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) float64); ok {
-		r0 = returnFunc(ctx, key, from, to)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, string, string) map[string]float64); ok {
+		r0 = returnFunc(ctx, keys, from, to)
 	} else {
-		r0 = ret.Get(0).(float64)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]float64)
+		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) error); ok {
-		r1 = returnFunc(ctx, key, from, to)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string, string, string) error); ok {
+		r1 = returnFunc(ctx, keys, from, to)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -200,22 +202,22 @@ type MockAggregatorStore_SumDaily_Call struct {
 
 // SumDaily is a helper method to define mock.On call
 //   - ctx context.Context
-//   - key string
+//   - keys []string
 //   - from string
 //   - to string
-func (_e *MockAggregatorStore_Expecter) SumDaily(ctx any, key any, from any, to any) *MockAggregatorStore_SumDaily_Call {
-	return &MockAggregatorStore_SumDaily_Call{Call: _e.mock.On("SumDaily", ctx, key, from, to)}
+func (_e *MockAggregatorStore_Expecter) SumDaily(ctx any, keys any, from any, to any) *MockAggregatorStore_SumDaily_Call {
+	return &MockAggregatorStore_SumDaily_Call{Call: _e.mock.On("SumDaily", ctx, keys, from, to)}
 }
 
-func (_c *MockAggregatorStore_SumDaily_Call) Run(run func(ctx context.Context, key string, from string, to string)) *MockAggregatorStore_SumDaily_Call {
+func (_c *MockAggregatorStore_SumDaily_Call) Run(run func(ctx context.Context, keys []string, from string, to string)) *MockAggregatorStore_SumDaily_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 []string
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].([]string)
 		}
 		var arg2 string
 		if args[2] != nil {
@@ -235,12 +237,12 @@ func (_c *MockAggregatorStore_SumDaily_Call) Run(run func(ctx context.Context, k
 	return _c
 }
 
-func (_c *MockAggregatorStore_SumDaily_Call) Return(f float64, err error) *MockAggregatorStore_SumDaily_Call {
-	_c.Call.Return(f, err)
+func (_c *MockAggregatorStore_SumDaily_Call) Return(stringToFloat64 map[string]float64, err error) *MockAggregatorStore_SumDaily_Call {
+	_c.Call.Return(stringToFloat64, err)
 	return _c
 }
 
-func (_c *MockAggregatorStore_SumDaily_Call) RunAndReturn(run func(ctx context.Context, key string, from string, to string) (float64, error)) *MockAggregatorStore_SumDaily_Call {
+func (_c *MockAggregatorStore_SumDaily_Call) RunAndReturn(run func(ctx context.Context, keys []string, from string, to string) (map[string]float64, error)) *MockAggregatorStore_SumDaily_Call {
 	_c.Call.Return(run)
 	return _c
 }

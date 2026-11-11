@@ -72,6 +72,9 @@ type Aggregator struct {
 	stopped bool
 
 	lastRun time.Time
+	// written holds the rows of the last committed run (loop-owned): unchanged rows are
+	// not written again.
+	written map[rowID]float64
 }
 
 // New validates dependencies and returns a stopped aggregator.

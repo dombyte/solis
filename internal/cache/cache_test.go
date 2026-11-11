@@ -30,10 +30,7 @@ func TestReplaceDomain_KeepsOtherDomains(t *testing.T) {
 	assert.InDelta(t, 3.0, c.Get("a").DecodedValue, 0)
 	assert.Nil(t, c.Get("b"))
 	assert.InDelta(t, 9.0, c.Get("m").DecodedValue, 0)
-	assert.Equal(t, 2, c.Size())
-	assert.Equal(t, t0.Add(time.Second), c.LastUpdate(eventbus.DomainPoller))
-	assert.Equal(t, t0, c.LastUpdate(eventbus.DomainAggregator))
-	assert.True(t, c.LastUpdate("none").IsZero())
+	assert.Len(t, c.GetMultiple([]string{"a", "b", "m"}), 2)
 }
 
 func TestMerge_DoesNotRemove(t *testing.T) {
@@ -95,7 +92,7 @@ func TestConcurrentAccess(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	assert.Equal(t, 1, c.Size())
+	assert.Len(t, c.GetMultiple([]string{"a", "b"}), 1)
 }
 
 // A write for a key another domain owns is dropped (and logged), so a component cannot

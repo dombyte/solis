@@ -120,35 +120,47 @@ func dsn(cfg Settings) string {
 }
 
 // schemaSQL mirrors the V1 migration plus the V3 meta table; IF NOT EXISTS keeps it a
-// no-op on migrated databases.
+// no-op on migrated databases. The UNIQUE constraints are the (register_key, period)
+// lookup indexes.
 func schemaSQL() []string {
-	return []string{
+	return append([]string{
 		`CREATE TABLE IF NOT EXISTS daily_values (id INTEGER PRIMARY KEY AUTOINCREMENT,
 			date DATE NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL,
 			raw_value REAL NOT NULL, UNIQUE(register_key, date))`,
-		`CREATE INDEX IF NOT EXISTS idx_daily_key_date ON daily_values(register_key, date)`,
 		`CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_values(date)`,
 		`CREATE TABLE IF NOT EXISTS monthly_values (id INTEGER PRIMARY KEY AUTOINCREMENT,
 			month TEXT NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL,
 			raw_value REAL NOT NULL, UNIQUE(register_key, month))`,
-		`CREATE INDEX IF NOT EXISTS idx_monthly_key_month ON monthly_values(register_key, month)`,
 		`CREATE INDEX IF NOT EXISTS idx_monthly_month ON monthly_values(month)`,
 		`CREATE TABLE IF NOT EXISTS yearly_values (id INTEGER PRIMARY KEY AUTOINCREMENT,
 			year TEXT NOT NULL, register_key TEXT NOT NULL, value REAL NOT NULL,
 			raw_value REAL NOT NULL, UNIQUE(register_key, year))`,
-		`CREATE INDEX IF NOT EXISTS idx_yearly_key_year ON yearly_values(register_key, year)`,
 		`CREATE INDEX IF NOT EXISTS idx_yearly_year ON yearly_values(year)`,
 		`CREATE TABLE IF NOT EXISTS total_values (id INTEGER PRIMARY KEY AUTOINCREMENT,
 			register_key TEXT NOT NULL UNIQUE, value REAL NOT NULL, raw_value REAL NOT NULL,
 			timestamp DATETIME NOT NULL)`,
-		`CREATE INDEX IF NOT EXISTS idx_total_key ON total_values(register_key)`,
 		`CREATE TABLE IF NOT EXISTS error_data (id INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp DATETIME NOT NULL, register_key TEXT NOT NULL, raw_value REAL NOT NULL,
 			string_value TEXT, UNIQUE(register_key, timestamp))`,
-		`CREATE INDEX IF NOT EXISTS idx_error_key_timestamp ON error_data(register_key, timestamp)`,
 		`CREATE INDEX IF NOT EXISTS idx_error_timestamp ON error_data(timestamp)`,
 		migrations.V3MetaTableSQL,
+	}, dropDuplicateIndexes()...)
+}
+
+// dropDuplicateIndexes removes the V1 indexes that repeat a UNIQUE constraint's own
+// index column for column: twice the index pages and insert work for the same lookups.
+// It is plain idempotent DDL rather than a schema version bump, so an older binary still
+// opens the database (and merely creates them again).
+func dropDuplicateIndexes() []string {
+	names := []string{
+		"idx_daily_key_date", "idx_monthly_key_month", "idx_yearly_key_year", "idx_total_key",
+		"idx_error_key_timestamp",
 	}
+	stmts := make([]string, 0, len(names))
+	for _, n := range names {
+		stmts = append(stmts, "DROP INDEX IF EXISTS "+n)
+	}
+	return stmts
 }
 
 func (s *Storage) initSchema(ctx context.Context) error {

@@ -160,7 +160,7 @@ paths:
         - **`monthly` registers**: historical monthly data if `start`/`end` are given, otherwise the latest value
         - **`yearly` registers**: historical yearly data if `start`/`end` are given, otherwise the latest value
         - **`total` registers**: always the lifetime/total value; `start`/`end` are rejected with 400
-        - **`status` registers** (e.g. `solis_status`, `grid_fault_1`): all historical status entries with decoded information; `start`/`end` are rejected with 400
+        - **`status` registers** (e.g. `solis_status`, `grid_fault_1`): the newest 1000 status changes with decoded information; `start`/`end` are rejected with 400
         - `none` registers also reject `start`/`end` with 400 (no history is stored)
 
         Values are stored at full precision; the JSON response rounds `value`/`raw_value` to two
@@ -601,7 +601,7 @@ components:
           example: "Solis Status"
         history:
           type: array
-          description: Array of all historical status entries sorted by timestamp (latest first)
+          description: The newest 1000 status changes, sorted by timestamp (latest first)
           items:
             $ref: '#/components/schemas/StatusHistoryEntry'
 

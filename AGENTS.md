@@ -93,9 +93,14 @@ Package rules:
   via `util.Slot` so the poller always reads the current client after a restart.
 - **solis**: everything Solis-specific; generic code goes to `util`; no Modbus client logic.
 - **poller**: non-overlapping loop (next poll = interval after previous start); owns day
-  attribution and rollover; emits `PeriodClosed`.
+  attribution and rollover; emits `PeriodClosed`. After 3 failed cycles in a row it drops
+  its live and status keys from the cache (daily counters stay), so clients see them as
+  missing instead of frozen; the next good poll restores them.
 - **storage**: single connection, WAL; enforces closed-period immutability
   (`ErrPeriodClosed`) and write domains; period sums run in SQL with explicit bounds.
+  The `UNIQUE(register_key, <period>)` constraints are the lookup indexes; the V1
+  duplicates of them are dropped at start (idempotent DDL, no schema version bump). A
+  status history read returns the newest 1000 changes.
 - **http**: handlers in `httphandler` (no business logic; they call `service`), middleware
   in `middleware` (never mixed), all routes in `router/router.go`, lifecycle in `server`.
 
@@ -222,8 +227,11 @@ LastBeat() time.Time              // atomic, updated by the component's own loop
 - ❌ **No writes outside your write domain** (section 5).
 - ❌ **No locks on top of the Modbus library** — simonvetter serializes requests; lock only
   state you own (e.g. reconnect).
-- Fetch only what you need: query per key with SQL bounds (v2 filtered all rows in Go,
-  ~14× slower).
+- Fetch only what you need: sum in SQL with explicit bounds, one grouped query for the
+  keys of a period (v2 filtered all rows in Go, ~14× slower).
+- Write only what changed: the aggregator keeps the rows of its last committed run and
+  skips identical ones; a run without a change opens no transaction (it used to rewrite
+  every computed row every 4× poll interval, day and night).
 - I/O functions take the caller's `ctx` (no `context.Background()` below `cmd`/`app`); SQL
   uses `…Context` variants.
 - Dangerous behaviour belongs in CLI jobs, never in config toggles.
@@ -421,9 +429,13 @@ solis.Register{
   The inverter resets all daily counters together: a key that cannot show its own reset
   (no base or base 0) follows a reset another key confirmed in the same window, and is held
   (not written) from the opening day's midnight until then, so post-reset energy is never
-  counted twice. After a confirmed reset any decrease on the closing day is the reset.
+  counted twice. After a confirmed reset any decrease on the closing day is the reset,
+  and from midnight on a key that has not decreased is held too (after an outage its
+  counter may already exceed yesterday's value; it is never moved, since a value read
+  just before its own reset looks the same) until it decreases or the window ends. A
+  reset is confirmed for the whole poll before any value is attributed (map order).
   Seeding returns day closes missed while down; closes are written even while Modbus is
-  disconnected.
+  disconnected or connected but not answering.
 - **Backup schedule:** `storage.backup_interval` counts from the newest existing backup,
   not from process start (first run: at once), so frequent restarts never postpone it.
   A backup that was not finished and verified is deleted, never left for the rotation.

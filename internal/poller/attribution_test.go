@@ -69,9 +69,10 @@ func TestAttribute_MidnightResetPerKey(t *testing.T) {
 		// Value fits: max-write continues after the window opens and after midnight.
 		{"2026-08-05 23:30", "pv", 30.5, WriteCurrent, "2026-08-05", "", false},
 		{"2026-08-06 00:01", "pv", 30.6, WriteCurrent, "2026-08-05", "", false},
-		// pv resets: only pv's day closes.
+		// pv resets: only pv's day closes. grid has not decreased yet: its value is held,
+		// neither written to the closing day nor moved to the new one.
 		{"2026-08-06 00:05", "pv", 0.1, WriteNewDay, "2026-08-06", "2026-08-05", false},
-		{"2026-08-06 00:05", "grid", 5.2, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-06 00:05", "grid", 5.2, Discard, "", "", false},
 		{"2026-08-06 00:10", "pv", 0.2, WriteCurrent, "2026-08-06", "", false},
 		// grid resets later inside the window.
 		{"2026-08-06 00:20", "grid", 0, WriteNewDay, "2026-08-06", "2026-08-05", false},
@@ -353,4 +354,52 @@ func TestAttribute_LateResetAfterForcedCloseIsExplained(t *testing.T) {
 	assert.Contains(t, got.Warn, "after its day was force-closed")
 	got = d.Attribute("pv", 0.2, now.Add(time.Minute))
 	assert.Contains(t, got.Warn, "outside the rollover window", "explained only once")
+}
+
+// After an outage across midnight a counter can already be at or above yesterday's small
+// value. It must not be max-written into the closing day (and counted again on the
+// opening day), whatever order the keys of the poll are attributed in.
+func TestAttribute_OutageAcrossMidnightNeverInflatesClosingDay(t *testing.T) {
+	loc := berlin(t)
+	for _, first := range []string{"pv", "grid"} {
+		d := seeded(t, "23:59", []string{"pv", "grid"}, time.Date(2026, 8, 5, 23, 50, 0, 0, loc),
+			map[string]map[string]float64{"2026-08-05": {"pv": 30, "grid": 0.4}})
+		now := time.Date(2026, 8, 6, 0, 40, 0, 0, loc)
+		_, err := d.ForceClose(now)
+		require.NoError(t, err)
+		poll := map[string]float64{"pv": 0, "grid": 0.5}
+		d.Confirm(poll, now)
+		got := map[string]Attribution{}
+		for _, k := range []string{first, map[string]string{"pv": "grid", "grid": "pv"}[first]} {
+			got[k] = d.Attribute(k, poll[k], now)
+		}
+		assert.Equal(t, WriteNewDay, got["pv"].Decision, "%s first", first)
+		assert.Equal(t, Discard, got["grid"].Decision, "%s first: held", first)
+		assert.Empty(t, got["grid"].Warn)
+
+		// The window ends without a decrease: the forced close moves grid to the new day.
+		end := time.Date(2026, 8, 6, 1, 0, 0, 0, loc)
+		forced, err := d.ForceClose(end)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"grid": "2026-08-05"}, forced)
+		a := d.Attribute("grid", 0.6, end)
+		assert.Equal(t, WriteCurrent, a.Decision)
+		assert.Equal(t, "2026-08-06", a.Day)
+	}
+}
+
+// A value read just before its own reset (blocks are read one after another) is held for
+// that poll and resets on the next one.
+func TestAttribute_ResetBetweenBlockReads(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv", "grid"}, time.Date(2026, 8, 5, 23, 50, 0, 0, loc),
+		map[string]map[string]float64{"2026-08-05": {"pv": 30, "grid": 5}})
+	now := time.Date(2026, 8, 6, 0, 0, 2, 0, loc)
+	poll := map[string]float64{"pv": 0, "grid": 5}
+	d.Confirm(poll, now)
+	assert.Equal(t, Discard, d.Attribute("grid", 5, now).Decision)
+	assert.Equal(t, WriteNewDay, d.Attribute("pv", 0, now).Decision)
+	next := d.Attribute("grid", 0, now.Add(5*time.Second))
+	assert.Equal(t, WriteNewDay, next.Decision)
+	assert.Equal(t, "2026-08-05", next.Closed)
 }

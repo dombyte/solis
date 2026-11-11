@@ -16,22 +16,20 @@ import (
 
 // Cache is a thread-safe map of the latest values, partitioned into write domains.
 type Cache struct {
-	mu      sync.RWMutex
-	data    map[string]*solis.Value
-	owner   map[string]string    // key -> domain
-	updated map[string]time.Time // domain -> last write
-	pub     eventbus.Publisher
-	log     zerolog.Logger
+	mu    sync.RWMutex
+	data  map[string]*solis.Value
+	owner map[string]string // key -> domain
+	pub   eventbus.Publisher
+	log   zerolog.Logger
 }
 
 // New creates an empty cache publishing on pub with the injected logger.
 func New(pub eventbus.Publisher, log zerolog.Logger) *Cache {
 	return &Cache{
-		data:    make(map[string]*solis.Value),
-		owner:   make(map[string]string),
-		updated: make(map[string]time.Time),
-		pub:     pub,
-		log:     log,
+		data:  make(map[string]*solis.Value),
+		owner: make(map[string]string),
+		pub:   pub,
+		log:   log,
 	}
 }
 
@@ -51,7 +49,7 @@ func (c *Cache) ReplaceDomain(domain string, values map[string]*solis.Value, at 
 			}
 		}
 	}
-	keys := c.put(domain, values, at)
+	keys := c.put(domain, values)
 	c.mu.Unlock()
 	written := len(keys)
 	if len(removed) > 0 {
@@ -66,7 +64,7 @@ func (c *Cache) ReplaceDomain(domain string, values map[string]*solis.Value, at 
 // Merge upserts values into domain without removing other keys of the domain.
 func (c *Cache) Merge(domain string, values map[string]*solis.Value, at time.Time) {
 	c.mu.Lock()
-	keys := c.put(domain, values, at)
+	keys := c.put(domain, values)
 	c.mu.Unlock()
 	if len(keys) == 0 {
 		return // nothing written: no event (consumers would re-read for nothing)
@@ -78,7 +76,7 @@ func (c *Cache) Merge(domain string, values map[string]*solis.Value, at time.Tim
 // put stores values; caller holds mu. A key owned by another domain is not taken over:
 // the write is dropped and logged, so a poller/aggregator bug cannot steal a key that the
 // owner's next ReplaceDomain would then fail to remove (review RT-L7).
-func (c *Cache) put(domain string, values map[string]*solis.Value, at time.Time) []string {
+func (c *Cache) put(domain string, values map[string]*solis.Value) []string {
 	keys := make([]string, 0, len(values))
 	for k, v := range values {
 		if owner, ok := c.owner[k]; ok && owner != domain {
@@ -90,7 +88,6 @@ func (c *Cache) put(domain string, values map[string]*solis.Value, at time.Time)
 		c.owner[k] = domain
 		keys = append(keys, k)
 	}
-	c.updated[domain] = at
 	sort.Strings(keys)
 	return keys
 }
@@ -119,19 +116,4 @@ func (c *Cache) GetMultiple(keys []string) map[string]*solis.Value {
 		}
 	}
 	return out
-}
-
-// LastUpdate returns when domain was last written (zero if never). For the poller
-// domain this is the last successful poll time.
-func (c *Cache) LastUpdate(domain string) time.Time {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.updated[domain]
-}
-
-// Size returns the number of cached keys.
-func (c *Cache) Size() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.data)
 }
