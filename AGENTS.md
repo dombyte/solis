@@ -225,8 +225,11 @@ LastBeat() time.Time              // atomic, updated by the component's own loop
 - ❌ **No writes outside your write domain** (section 5).
 - ❌ **No locks on top of the Modbus library** — simonvetter serializes requests; lock only
   state you own (e.g. reconnect).
-- Fetch only what you need: query per key with SQL bounds (v2 filtered all rows in Go,
-  ~14× slower).
+- Fetch only what you need: sum in SQL with explicit bounds, one grouped query for the
+  keys of a period (v2 filtered all rows in Go, ~14× slower).
+- Write only what changed: the aggregator keeps the rows of its last committed run and
+  skips identical ones; a run without a change opens no transaction (it used to rewrite
+  every computed row every 4× poll interval, day and night).
 - I/O functions take the caller's `ctx` (no `context.Background()` below `cmd`/`app`); SQL
   uses `…Context` variants.
 - Dangerous behaviour belongs in CLI jobs, never in config toggles.

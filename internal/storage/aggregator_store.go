@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/dombyte/solis/internal/period"
@@ -23,10 +24,42 @@ func (s *Storage) HasDailyData(ctx context.Context) (bool, error) {
 	return n == 1, nil
 }
 
-// SumDaily sums the daily values of key with from <= date <= to. The upper bound is
-// explicit (the open day) and also guards against stale future-dated rows.
-func (s *Storage) SumDaily(ctx context.Context, key, from, to string) (float64, error) {
-	return sumDaily(ctx, s.db, key, from, to)
+// SumDaily sums the daily values of keys with from <= date <= to in one grouped query
+// (one index range per key). The upper bound is explicit (the open day) and also guards
+// against stale future-dated rows. Every requested key is present in the result; a key
+// without rows sums to 0.
+func (s *Storage) SumDaily(ctx context.Context, keys []string, from, to string) (
+	map[string]float64, error,
+) {
+	out := make(map[string]float64, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	args := []any{from, to}
+	for _, k := range keys {
+		out[k] = 0
+		args = append(args, k)
+	}
+	// #nosec G202 -- only "?" placeholders are concatenated; the keys are bound arguments
+	rows, err := s.db.QueryContext(ctx, `SELECT register_key, SUM(value) FROM daily_values
+		WHERE date >= ? AND date <= ? AND register_key IN (?`+
+		strings.Repeat(", ?", len(keys)-1)+`) GROUP BY register_key`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage: sum daily: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key string
+		var sum float64
+		if err := rows.Scan(&key, &sum); err != nil {
+			return nil, fmt.Errorf("storage: sum daily: %w", err)
+		}
+		out[key] = sum
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: sum daily: %w", err)
+	}
+	return out, nil
 }
 
 type queryer interface {

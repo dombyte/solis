@@ -49,16 +49,60 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 			return err
 		}
 	}
-	if err := a.d.Store.WriteComputed(ctx, rs.write); err != nil {
-		if !storage.IsRejection(err) {
-			return err
-		}
-		// Rejected rows were skipped; everything else (rows, freezes, fold) committed,
-		// so the run succeeded and the cache is merged (review AGG-M3).
-		a.logRejections(err)
+	if err := a.persist(ctx, rs.write); err != nil {
+		return err
 	}
 	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(rs.current, now), now)
 	return nil
+}
+
+// persist writes the rows whose value changed since the last committed run, plus the
+// freezes and folds. Most runs recompute identical values (the daily counters stand still
+// at night and between 0.1 kWh steps); writing them again would cost a real transaction
+// every few poll intervals for nothing. A run without any change writes nothing.
+func (a *Aggregator) persist(ctx context.Context, w storage.ComputedWrite) error {
+	all := w.Rows
+	w.Rows = a.changed(all)
+	if len(w.Rows)+len(w.Freezes)+len(w.Folds) > 0 {
+		if err := a.d.Store.WriteComputed(ctx, w); err != nil {
+			if !storage.IsRejection(err) {
+				return err
+			}
+			// Rejected rows were skipped; everything else (rows, freezes, fold) committed,
+			// so the run succeeded and the cache is merged (review AGG-M3).
+			a.logRejections(err)
+		}
+	}
+	a.remember(all)
+	return nil
+}
+
+// rowID identifies one computed row across runs.
+type rowID struct {
+	level  period.Level
+	period string
+	key    string
+}
+
+// changed returns the rows that differ from the last committed run.
+func (a *Aggregator) changed(rows []storage.PeriodRow) []storage.PeriodRow {
+	out := make([]storage.PeriodRow, 0, len(rows))
+	for _, r := range rows {
+		if v, ok := a.written[rowID{r.Level, r.Period, r.Key}]; !ok || v != r.Value {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// remember replaces the written set with this run's rows, so it never outgrows one plan.
+// A row storage rejected is remembered too: it is rejected for good (closed period or
+// write domain) and was logged once.
+func (a *Aggregator) remember(rows []storage.PeriodRow) {
+	a.written = make(map[rowID]float64, len(rows))
+	for _, r := range rows {
+		a.written[rowID{r.Level, r.Period, r.Key}] = r.Value
+	}
 }
 
 // warnNetGap logs net days that fell out of the catch-up window (review AGG-L1).
@@ -92,19 +136,11 @@ func joinedErrors(err error) []error {
 	return []error{err}
 }
 
-// sums runs one SQL sum per daily source key.
+// sums runs one grouped SQL sum over the daily source keys.
 func (a *Aggregator) sums(ctx context.Context, sources []string, from, to string) (
 	aggregation.Values, error,
 ) {
-	out := make(aggregation.Values, len(sources))
-	for _, k := range sources {
-		v, err := a.d.Store.SumDaily(ctx, k, from, to)
-		if err != nil {
-			return nil, err
-		}
-		out[k] = v
-	}
-	return out, nil
+	return a.d.Store.SumDaily(ctx, sources, from, to)
 }
 
 // netDays recomputes net daily rows (export - import of the stored daily rows).

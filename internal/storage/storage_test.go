@@ -275,21 +275,36 @@ func TestSumDaily_ExplicitBounds(t *testing.T) {
 	}
 	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: rows}))
 
-	sum, err := s.SumDaily(ctx, "pv_energy_daily", "2026-08-01", "2026-08-05")
+	sum, err := sumOne(s, "pv_energy_daily", "2026-08-01", "2026-08-05")
 	require.NoError(t, err)
 	assert.InDelta(t, 30.0, sum, 1e-9, "future-dated 2026-08-09 excluded by the bound")
 
-	all, err := s.SumDaily(ctx, "pv_energy_daily", "", "2026-12-31")
+	all, err := sumOne(s, "pv_energy_daily", "", "2026-12-31")
 	require.NoError(t, err)
 	assert.InDelta(t, 50.0, all, 1e-9)
 
-	none, err := s.SumDaily(ctx, "grid_import_daily", "2026-08-01", "2026-08-31")
+	none, err := sumOne(s, "grid_import_daily", "2026-08-01", "2026-08-31")
 	require.NoError(t, err)
 	assert.Zero(t, none)
+
+	both, err := s.SumDaily(ctx, []string{"pv_energy_daily", "grid_import_daily"},
+		"2026-08-01", "2026-08-05")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"pv_energy_daily": 30, "grid_import_daily": 0}, both)
+
+	empty, err := s.SumDaily(ctx, nil, "", "2026-12-31")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 
 	has, err := s.HasDailyData(ctx)
 	require.NoError(t, err)
 	assert.True(t, has)
+}
+
+// sumOne sums one key through the grouped query.
+func sumOne(s *Storage, key, from, to string) (float64, error) {
+	m, err := s.SumDaily(ctx, []string{key}, from, to)
+	return m[key], err
 }
 
 func TestBaselineFold_Idempotent(t *testing.T) {

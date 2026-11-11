@@ -32,8 +32,9 @@ type PollerStore interface {
 type AggregatorStore interface {
 	// HasDailyData reports whether any daily row exists (cold-start gate).
 	HasDailyData(ctx context.Context) (bool, error)
-	// SumDaily sums daily values of key for from <= date <= to ("" from = unbounded).
-	SumDaily(ctx context.Context, key, from, to string) (float64, error)
+	// SumDaily sums the daily values of every key for from <= date <= to ("" from =
+	// unbounded) in one grouped query; a key without rows sums to 0.
+	SumDaily(ctx context.Context, keys []string, from, to string) (map[string]float64, error)
 	// CloseState returns watermarks, cutover and baseline.
 	CloseState(ctx context.Context) (CloseState, error)
 	// WriteComputed upserts computed rows, applies freezes and a baseline fold atomically.
