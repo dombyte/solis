@@ -1,6 +1,6 @@
 import { useTheme } from '../theme-provider';
 import { Button } from '../ui/button';
-import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
+import { Moon, Sun } from 'lucide-react';
 
 export function ThemeToggle() {
   // Toggle away from what is actually shown (like the "d" shortcut), so under "system"
@@ -14,9 +14,9 @@ export function ThemeToggle() {
   return (
     <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8">
       {resolvedTheme === 'light' ? (
-        <LineAwesomeIcon icon="la-moon" size="lg" />
+        <Moon className="size-5" aria-hidden="true" />
       ) : (
-        <LineAwesomeIcon icon="la-sun" size="lg" />
+        <Sun className="size-5" aria-hidden="true" />
       )}
       <span className="sr-only">Toggle theme</span>
     </Button>

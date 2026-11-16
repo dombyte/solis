@@ -19,7 +19,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: 'Power Flow',
     description: 'Live power flow visualization',
     category: 'power_flow',
-    layout: 'grid',
     order: 1,
   },
   {
@@ -27,7 +26,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: 'System Status',
     description: 'System status and fault information',
     category: 'status',
-    layout: 'list',
     order: 2,
   },
   {
@@ -35,7 +33,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: "Today",
     description: "Energy produced and consumed today",
     category: 'energy',
-    layout: 'list',
     order: 2,
   },
   {
@@ -43,7 +40,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: "This Month",
     description: "Energy produced and consumed this month",
     category: 'energy',
-    layout: 'list',
     order: 3,
   },
   {
@@ -51,7 +47,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: "This Year",
     description: "Energy produced and consumed this year",
     category: 'energy',
-    layout: 'list',
     order: 4,
   },
   {
@@ -59,7 +54,6 @@ const groupDefs: Omit<GroupConfig, 'dataIds'>[] = [
     title: 'Total',
     description: 'Energy produced and consumed since monitoring started',
     category: 'energy',
-    layout: 'list',
     order: 5,
   },
 ];

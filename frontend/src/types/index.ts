@@ -26,7 +26,6 @@ export interface GroupConfig {
   description?: string;
   dataIds: string[];       // Internal IDs from data.ts
   category?: string;
-  layout?: 'grid' | 'list' | 'compact';
   columns?: number;
   visible?: boolean;
   order?: number;

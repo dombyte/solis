@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useRef } from 'react';
 import { format } from 'date-fns';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useSubscription } from '../lib/hooks/useSubscription';
-import { useMobile } from '../hooks/useMobile';
+import { Page } from '../components/layout/Page';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '../components/ui/dialog';
@@ -13,9 +13,9 @@ import { api } from '../lib/api/client';
 import { getSourceById, apiDataObjects } from '../lib/config/data';
 import type { RegisterValue, SolisStatusDecoded, FaultStatusDecoded } from '../types';
 
-export function Status(): React.ReactElement {
-  const isMobile = useMobile();
+const GRID_CLASS = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6';
 
+export function Status(): React.ReactElement {
   const isLoading = useRegisterStore(state => state.isLoading);
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
   const registerValues = useRegisterStore(state => state.registerValues);
@@ -167,26 +167,20 @@ export function Status(): React.ReactElement {
   // Loading state - show skeletons if no metadata or (loading and no values)
   if (!hasMetadata || (isLoading && !hasValues)) {
     return (
-      <div className="p-2 sm:p-4 md:p-6 lg:p-8 w-full overflow-x-hidden">
-        <div className="w-full overflow-x-hidden">
-          {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status</h1> : null}
-          <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
-            {statusRegisterIds.map(id => (
-              <SkeletonCard key={id} className="w-full" />
-            ))}
-          </div>
+      <Page title="Status">
+        <div className={GRID_CLASS}>
+          {statusRegisterIds.map(id => (
+            <SkeletonCard key={id} className="w-full" />
+          ))}
         </div>
-      </div>
+      </Page>
     );
   }
 
   return (
-    <div className="p-2 sm:p-4 md:p-6 lg:p-8 w-full overflow-x-hidden">
-      <div className="w-full overflow-x-hidden">
-        {!isMobile ? <h1 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6 px-2">Status Overview</h1> : null}
-        
+    <Page title="Status">
         {/* Status Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6 px-2 pb-6 sm:pb-8 lg:pb-10">
+        <div className={GRID_CLASS}>
           {statusRegisters.map(reg => {
             const value = registerValues.get(reg.id);
             const displayValue = formatStatusValue(value);
@@ -314,7 +308,6 @@ export function Status(): React.ReactElement {
             </div>
           </DialogContent>
         </Dialog>
-      </div>
-    </div>
+    </Page>
   );
 }

@@ -107,7 +107,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
         opacity,
         transition: 'opacity 0.5s ease'
       }} 
-      className="w-full min-w-0"  // Responsive width like DataCard
+      className="w-full min-w-0"
     >
       <div>
         {/* Cards */}

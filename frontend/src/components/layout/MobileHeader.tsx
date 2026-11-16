@@ -1,21 +1,11 @@
 import { useLocation } from 'react-router-dom';
 import { MobileThemeToggle } from './MobileThemeToggle';
+import { pageTitle } from './nav';
 
 export function MobileHeader() {
   const location = useLocation();
 
-  // Extract page title from path
-  const getPageTitle = (): string => {
-    const path = location.pathname;
-    if (path === '/' || path.startsWith('/dashboard')) return 'Dashboard';
-    if (path.startsWith('/history')) return 'History';
-    if (path.startsWith('/reports')) return 'Reports';
-    if (path.startsWith('/status')) return 'Status';
-    if (path.startsWith('/info')) return 'Info';
-    return 'Solis Monitor';
-  };
-
-  const title = getPageTitle();
+  const title = pageTitle(location.pathname);
 
   return (
     <div className="flex items-center justify-between px-4 py-3 w-full">

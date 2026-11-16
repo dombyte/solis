@@ -2,7 +2,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useState } from 'react';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { cn } from '../../lib/utils';
-import { LineAwesomeIcon } from '../ui/LineAwesomeIcon';
+import { ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { NAV_ITEMS, isNavActive } from './nav';
 import { Button } from '../ui/button';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -11,20 +12,7 @@ export function DesktopNav() {
   const isLoading = useRegisterStore(state => state.isLoading);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const isActive = (path: string) => {
-    if (location.pathname === path) return true;
-    if (path === '/dashboard' && (location.pathname === '/' || location.pathname.startsWith('/dashboard'))) return true;
-    if (location.pathname.startsWith(path)) return true;
-    return false;
-  };
-
-  const navItems = [
-    { path: '/dashboard', label: 'Dashboard', icon: 'la-home' },
-    { path: '/history', label: 'History', icon: 'la-chart-line' },
-    { path: '/reports', label: 'Reports', icon: 'la-file-invoice' },
-    { path: '/status', label: 'Status', icon: 'la-info-circle' },
-    { path: '/info', label: 'Info', icon: 'la-file-alt' },
-  ];
+  const isActive = (path: string) => isNavActive(location.pathname, path);
 
   if (isLoading) {
     return (
@@ -61,7 +49,7 @@ export function DesktopNav() {
 
           {/* Navigation items */}
           <div className="flex-1 px-2 py-4 space-y-1 overflow-y-auto overflow-x-hidden">
-              {navItems.map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <Button
                   key={item.path}
                   variant={isActive(item.path) ? 'default' : 'ghost'}
@@ -77,7 +65,7 @@ export function DesktopNav() {
                     aria-current={isActive(item.path) ? 'page' : undefined}
                     className="flex items-center justify-center w-full overflow-hidden"
                   >
-                    <LineAwesomeIcon icon={item.icon} size="lg" />
+                    <item.icon className="size-5 shrink-0" aria-hidden="true" />
                     {!isCollapsed && (
                       <span className="text-sm ml-2 whitespace-nowrap">{item.label}</span>
                     )}
@@ -95,10 +83,9 @@ export function DesktopNav() {
               onClick={() => setIsCollapsed(!isCollapsed)}
               aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              <LineAwesomeIcon
-                icon={isCollapsed ? 'la-angle-double-right' : 'la-angle-double-left'}
-                size="lg"
-              />
+              {isCollapsed
+                ? <ChevronsRight className="size-5" aria-hidden="true" />
+                : <ChevronsLeft className="size-5" aria-hidden="true" />}
               <span className="sr-only">{isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}</span>
             </Button>
           </div>

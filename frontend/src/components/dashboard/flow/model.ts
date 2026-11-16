@@ -232,8 +232,7 @@ export function buildFlowViewModel(
     grid_power: getValue('grid_power'),
   };
 
-  // Status values + alert detection - reuses the same isAlertStatus logic as
-  // the Status page (StatusDisplay.tsx) so the two surfaces never disagree.
+  // Status values + alert detection (shared isAlertStatus rule).
   const solis = getRegisterAndValue('solis_status');
   const operating = getRegisterAndValue('operating_status');
   const solisStatus = getStatusName(solis.value);
@@ -405,8 +404,7 @@ export function getBatterySubStatus(batteryPower: number | null): string {
 
 /**
  * Plain-text summary of the whole diagram for screen readers (read on demand, not a
- * live region: announcing every WebSocket tick would flood assistive tech). Only
- * status changes are live (StatusDisplay).
+ * live region: announcing every WebSocket tick would flood assistive tech).
  */
 export function buildFlowSummary(viewModel: FlowViewModel): string {
   const { nodes, inverter } = viewModel;

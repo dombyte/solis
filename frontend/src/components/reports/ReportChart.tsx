@@ -2,6 +2,7 @@ import { format, parseISO } from 'date-fns';
 import type { ReportBucket, ReportResponse } from '../../lib/api/report';
 import { formatNumber } from '../../lib/utils/reportFormat';
 import { cn } from '../../lib/utils';
+import { SURFACE } from '../ui/surface';
 
 const MAX_TICKS = 12;
 const GRID_LINES = 5;
@@ -50,7 +51,7 @@ export function ReportChart({ report }: { report: ReportResponse }) {
     : 'No data.';
 
   return (
-    <section aria-labelledby="report-chart-title" className="rounded-xl border border-border bg-card p-4 sm:p-5 flex flex-col gap-3">
+    <section aria-labelledby="report-chart-title" className={cn(SURFACE, "p-4 sm:p-5 flex flex-col gap-3")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id="report-chart-title" className="text-sm sm:text-base font-semibold">PV yield vs consumption per {per}</h3>
         <div className="flex gap-4 text-xs sm:text-sm text-muted-foreground">

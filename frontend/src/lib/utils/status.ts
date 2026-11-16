@@ -1,8 +1,7 @@
 import type { SolisStatusDecoded, RegisterMetadata, RegisterValue } from '../../types';
 
 // Check if a status should show an alert (non-standard status).
-// Shared by StatusDisplay (Status page) and the flow diagram's inverter node
-// so both surfaces agree on what counts as an alert.
+// Used by the flow diagram's inverter node.
 export function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterValue | undefined): boolean {
   if (!register || !value) return false;
 
