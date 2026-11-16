@@ -3,6 +3,7 @@ import { Chart, registerables } from 'chart.js';
 import { useTheme } from '../theme-provider';
 import { useMobile } from '../../hooks/useMobile';
 import type { ChartData } from '../../types';
+import { LOCALE, formatNumber } from '../../lib/utils/format';
 
 // Register all Chart.js components
 Chart.register(...registerables);
@@ -212,6 +213,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
         },
       }],
       options: {
+        locale: LOCALE, // axis ticks like every other number in the UI
         responsive: true,
         maintainAspectRatio: false,
         layout: {
@@ -234,7 +236,8 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
               label: (context: any) => {
                 const dataset = context.dataset;
                 const unit = dataset.unit || '';
-                return `${dataset.label}: ${context.parsed.y ?? '-'}${unit ? ' ' + unit : ''}`;
+                const y = context.parsed.y;
+                return `${dataset.label}: ${y === null || y === undefined ? '-' : formatNumber(y, 2)}${unit ? ' ' + unit : ''}`;
               }
             }
           },
@@ -262,54 +265,9 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
               minRotation: isMobile ? 60 : 45,
               // Add padding between labels
               padding: isMobile ? 8 : 5,
-              // Custom callback to format dates in DD.Mon format on mobile
-              callback: (_tickValue: string | number, index: number) => {
-                const labels = data.labels || [];
-                if (!labels[index]) return '';
-                
-                const label = labels[index];
-                
-                if (!isMobile) return label;
-                
-                // On mobile, shorten date labels
-                // Handle formats from toLocaleDateString()
-                
-                // German format: "7. Jan 2024" or "07.01.2024" or "7.1.2024"
-                // Extract day and month name
-                
-                // Format: "DD.MM.YYYY" or "D.M.YYYY"
-                const dotDateMatch = label.match(/^(\d{1,2})\.(\d{1,2})\.\d{4}$/);
-                if (dotDateMatch) {
-                  const day = dotDateMatch[1].padStart(2, '0');
-                  const monthNum = parseInt(dotDateMatch[2], 10);
-                  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                  return `${day}.${monthNames[monthNum - 1]}`;
-                }
-                
-                // Format: "D. Mon YYYY" (German locale)
-                const germanMonthMatch = label.match(/^(\d{1,2})\.\s*([A-Za-z]{3})\s*\d{4}$/);
-                if (germanMonthMatch) {
-                  const day = germanMonthMatch[1].padStart(2, '0');
-                  const month = germanMonthMatch[2];
-                  return `${day}.${month}`;
-                }
-                
-                // Format: "Mon D, YYYY" (English locale)
-                const enMonthMatch = label.match(/^([A-Za-z]{3})\s*(\d{1,2})[,\s]*\d{4}$/);
-                if (enMonthMatch) {
-                  const day = enMonthMatch[2].padStart(2, '0');
-                  const month = enMonthMatch[1];
-                  return `${day}.${month}`;
-                }
-                
-                // For monthly format (e.g., "Jan 2024"), just use the month
-                if (label.match(/^[A-Za-z]{3}\s\d{4}$/)) {
-                  return label.split(' ')[0];
-                }
-                
-                // For yearly or other formats, return as-is
-                return label;
-              }
+              // Narrow screens get the compact labels ("18 Nov", "Nov").
+              callback: (_tickValue: string | number, index: number) =>
+                (isMobile ? data.shortLabels[index] : data.labels[index]) ?? '',
             },
             border: {
               display: false
@@ -461,7 +419,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
                       // all three columns visible at 360px, even for 4-digit yearly values
                       // next to "Energy Consumption".
                       <td key={i} className="text-right py-2 px-1 sm:px-3 text-muted-foreground whitespace-nowrap tabular-nums">
-                        {v?.toFixed(2)}{stat.unit && <span className="block text-[10px] sm:inline sm:text-xs"><span className="hidden sm:inline"> </span>{stat.unit}</span>}
+                        {v === undefined || v === null ? '' : formatNumber(v, 2)}{stat.unit && <span className="block text-[10px] sm:inline sm:text-xs"><span className="hidden sm:inline"> </span>{stat.unit}</span>}
                       </td>
                     ))}
                   </tr>

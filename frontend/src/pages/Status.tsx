@@ -11,6 +11,7 @@ import { SkeletonCard } from '../components/ui/skeleton';
 import { dashboardGroups } from '../lib/config/groups';
 import { api } from '../lib/api/client';
 import { getSourceById, apiDataObjects } from '../lib/config/data';
+import { statusText } from '../lib/utils/status';
 import type { RegisterValue, SolisStatusDecoded, FaultStatusDecoded } from '../types';
 
 const GRID_CLASS = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6';
@@ -122,33 +123,8 @@ export function Status(): React.ReactElement {
     setHistoryError(null);
   }, []);
 
-  // Format status value for display
-  const formatStatusValue = useCallback((value: RegisterValue | undefined): string => {
-    if (!value) return '-';
-
-    // Use statusDecoded if available
-    if (value.statusDecoded !== undefined && value.statusDecoded !== null) {
-      if (Array.isArray(value.statusDecoded)) {
-        if (value.statusDecoded.length > 0) {
-          return (value.statusDecoded as FaultStatusDecoded).join(', ');
-        } else {
-          return 'No faults';
-        }
-      } else if (typeof value.statusDecoded === 'object' && value.statusDecoded !== null) {
-        const statusObj = value.statusDecoded as SolisStatusDecoded;
-        return statusObj.name || JSON.stringify(value.statusDecoded);
-      } else {
-        return String(value.statusDecoded);
-      }
-    }
-
-    // Use display value
-    if (value.value !== null && value.value !== undefined) {
-      return String(value.value);
-    }
-
-    return '-';
-  }, []);
+  const formatStatusValue = (value: RegisterValue | undefined): string =>
+    value ? statusText(value.statusDecoded, value.value) : '-';
 
   // Get the register metadata by id for the modal title
   const getRegisterById = useCallback((id: string) => {
@@ -212,7 +188,7 @@ export function Status(): React.ReactElement {
                     {value?.timestamp && (
                       <span className="text-xs text-muted-foreground">
                         <Clock className="h-3 w-3 inline mr-1" />
-                        {new Date(value.timestamp).toLocaleTimeString()}
+                        {format(new Date(value.timestamp), 'HH:mm:ss')}
                       </span>
                     )}
                   </div>
@@ -265,27 +241,9 @@ export function Status(): React.ReactElement {
                   <div className="font-mono text-sm space-y-1">
                     {historyData.map((dataPoint) => {
                       const date = dataPoint.date || dataPoint.month || dataPoint.year || '';
-                      const time = dataPoint.timestamp ? new Date(dataPoint.timestamp).toLocaleTimeString() : '';
+                      const time = dataPoint.timestamp ? format(new Date(dataPoint.timestamp), 'HH:mm:ss') : '';
 
-                      // Format the status value for display
-                      let displayValue: string;
-
-                      if (dataPoint.value === null || dataPoint.value === undefined) {
-                        displayValue = '-';
-                      } else if (typeof dataPoint.value === 'object' && dataPoint.value !== null) {
-                        // It's a status_decoded object or array
-                        const valueObj = dataPoint.value as SolisStatusDecoded | FaultStatusDecoded;
-                        if (Array.isArray(valueObj)) {
-                          displayValue = valueObj.join(', ');
-                        } else if (typeof valueObj === 'object' && valueObj !== null) {
-                          const statusObj = valueObj as { name?: string; description?: string };
-                          displayValue = statusObj.name || JSON.stringify(valueObj);
-                        } else {
-                          displayValue = String(dataPoint.value);
-                        }
-                      } else {
-                        displayValue = String(dataPoint.value);
-                      }
+                      const displayValue = statusText(dataPoint.value);
 
                       return (
                         <div key={dataPoint.timestamp} className="py-1.5 px-2 rounded hover:bg-muted/50 transition-colors break-words">

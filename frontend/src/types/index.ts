@@ -120,6 +120,8 @@ export interface ChartDataset {
 
 export interface ChartData {
   labels: string[];
+  /** Compact labels for narrow screens ("18 Nov", "Nov"), same order as labels. */
+  shortLabels: string[];
   datasets: ChartDataset[];
 }
 

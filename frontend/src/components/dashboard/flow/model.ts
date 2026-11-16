@@ -1,5 +1,6 @@
 import type { RegisterMetadata, RegisterValue } from '../../../types';
 import { isAlertStatus } from '../../../lib/utils/status';
+import { formatPower } from '../../../lib/utils/format';
 
 // Flow register keys that are used for the power flow diagram
 const FLOW_KEYS = [
@@ -94,17 +95,11 @@ export interface FlowViewModel {
 }
 
 /**
- * Format power value:
- * 2 decimals, W < 1000 ≤ kW; grid/battery show magnitude, sign conveyed by animation
+ * Power for a tile: grid and battery show the magnitude, the sign is conveyed by the edge
+ * animation.
  */
 function formatPowerW(value: number | null): string {
-  if (value === null || value === 0) return '0.00 W';
-  const abs = Math.abs(value);
-  const formatted = abs >= 1000 
-    ? (abs / 1000).toFixed(2) + ' kW'
-    : abs.toFixed(2) + ' W';
-  // Sign is conveyed by animation direction, not the text
-  return formatted;
+  return formatPower(Math.abs(value ?? 0));
 }
 
 /**

@@ -68,3 +68,16 @@ export function isAlertStatus(register: RegisterMetadata | undefined, value: Reg
   // Default: don't alert
   return false;
 }
+
+/**
+ * Display text of a status register: the status name, the active fault bits, "No faults"
+ * for a bitmask with no bit set, else the plain value ("-" without one).
+ */
+export function statusText(decoded: unknown, value?: unknown): string {
+  if (Array.isArray(decoded)) return decoded.length > 0 ? decoded.join(', ') : 'No faults';
+  if (decoded !== null && typeof decoded === 'object') {
+    return (decoded as { name?: string }).name || JSON.stringify(decoded);
+  }
+  if (decoded !== null && decoded !== undefined) return String(decoded);
+  return value === null || value === undefined ? '-' : String(value);
+}

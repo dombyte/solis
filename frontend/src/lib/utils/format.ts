@@ -1,74 +1,40 @@
 /**
- * Format values based on unit and precision
+ * Number formatting for the whole UI. The UI is English and the PDF report uses the same
+ * separators ("4,512.3"), so every number goes through this locale, never the browser's.
  */
-export function formatValue(
-  value: number | string | boolean | null | undefined | Record<string, unknown>,
-  unit: string = '',
-  precision?: number
-): string {
-  if (value === null || value === undefined) return '-';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  
-  // Handle objects - try to extract DecodedValue, RawValue, or StringValue
-  if (typeof value === 'object' && value !== null) {
-    const obj = value as Record<string, unknown>;
-    const decoded = obj.DecodedValue ?? obj.RawValue ?? obj.StringValue ?? obj.value ?? obj.key;
-    if (typeof decoded === 'number' || typeof decoded === 'string') {
-      return formatValue(decoded, unit, precision);
-    }
-    console.warn('formatValue received unprocessable object:', value);
-    return '-';
-  }
-  
-  const numValue = Number(value);
-  if (isNaN(numValue)) {
-    console.warn('formatValue received non-numeric value:', value);
-    return '-';
-  }
-  const prec = precision ?? (unit === '%' ? 1 : unit === 'kWh' || unit === 'Wh' ? 2 : 2);
+export const LOCALE = 'en-US';
 
-  // Handle percentage
-  if (unit === '%') {
-    return numValue.toFixed(prec);
-  }
+/** Whole watts are precise enough; anything finer is meter noise. */
+const WATT_DIGITS = 0;
+const DEFAULT_DIGITS = 2;
+const KILO = 1000;
 
-  // Handle power (W/kW)
-  if (unit === 'W') {
-    if (Math.abs(numValue) >= 1000) {
-      return (numValue / 1000).toFixed(prec);
-    }
-    return numValue.toFixed(prec);
-  }
-  
-  // Handle power already in kW
-  if (unit === 'kW') {
-    return numValue.toFixed(prec);
-  }
+/** v with exactly `digits` decimals and thousands separators ("26,154.80"). */
+export function formatNumber(v: number, digits: number): string {
+  return v.toLocaleString(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
 
-  // Handle energy (Wh/kWh)
-  if (unit === 'Wh') {
-    if (Math.abs(numValue) >= 1000) {
-      return (numValue / 1000).toFixed(prec);
-    }
-    return numValue.toFixed(prec);
-  }
-  
-  // Handle energy already in kWh
-  if (unit === 'kWh') {
-    return numValue.toFixed(prec);
-  }
+/** A formatted number and the unit it is shown in. */
+export interface Measurement {
+  value: string;
+  unit: string;
+}
 
-  // Handle voltage
-  if (unit === 'V') {
-    return numValue.toFixed(prec);
+/**
+ * Formats a value in its register unit: power below 1 kW in whole watts, from 1 kW (and
+ * energy from 1 kWh for Wh) in the kilo unit with `precision` decimals (default 2).
+ */
+export function formatMeasurement(v: number, unit: string, precision?: number): Measurement {
+  const digits = precision ?? DEFAULT_DIGITS;
+  if ((unit === 'W' || unit === 'Wh') && Math.abs(v) >= KILO) {
+    return { value: formatNumber(v / KILO, digits), unit: `k${unit}` };
   }
+  if (unit === 'W') return { value: formatNumber(v, WATT_DIGITS), unit };
+  return { value: formatNumber(v, digits), unit };
+}
 
-  // Handle current
-  if (unit === 'A') {
-    return numValue.toFixed(prec);
-  }
-
-  // Default: just format the number
-  return numValue.toFixed(prec);
+/** A power in watts as text ("801 W", "4.37 kW"). */
+export function formatPower(watts: number): string {
+  const m = formatMeasurement(watts, 'W');
+  return `${m.value} ${m.unit}`;
 }

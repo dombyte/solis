@@ -420,7 +420,15 @@ solis.Register{
   dates), preview from `/api/report` JSON, PDF/CSV downloads fetched as blobs (server
   errors shown in the page, never saved as a file). Exports live only here.
 - `useMobile()` = coarse pointer. The power-flow diagram uses the mobile variant only for
-  coarse pointer **and** width < 768 px (tablets get desktop).
+  coarse pointer **and** width < 768 px (tablets get desktop). The app shell (sidebar vs.
+  header + bottom nav) follows `useCompactLayout()` = coarse pointer **or** width < 768 px;
+  pages and titles come from `components/layout/nav.ts`.
+- Every page renders inside `components/layout/Page.tsx` (one padding, max width and title
+  style); card-like sections use `Card` or the shared `SURFACE` class, never their own.
+- Numbers only via `lib/utils/format.ts` (fixed `en-US` locale like the PDF: "4,512.3";
+  power below 1 kW in whole watts), dates via date-fns in the PDF style ("1 – 18 Nov 2026",
+  "HH:mm:ss"); never the browser locale (`toLocaleString`, `toFixed` in components).
+  Icons only from lucide-react.
 - Power-flow (`src/components/dashboard/flow/`): `model.ts`, `FlowDesktop.tsx`,
   `FlowMobile.tsx` are the layout reference; lucide-react icons; colors only from CSS
   tokens in `src/index.css` (light + dark), never hex; edge animation via CSS keyframes
