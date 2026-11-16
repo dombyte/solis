@@ -202,13 +202,19 @@ func (d *DayAttributor) followReset(st *keyState, v float64, w period.Window, in
 	}
 	confirmed := d.confirmed == w.Opening
 	if confirmed && st.blind() {
-		st.openDay, st.base, st.hasBase = w.Opening, v, true
+		st.advance(w.Opening, v)
 		return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}, true
 	}
 	if !now.Before(w.Midnight) && st.held(v, confirmed) {
 		return Attribution{Decision: Discard}, true
 	}
 	return Attribution{}, false
+}
+
+// advance moves the key to day after a seen reset, with v as its base. The day was reached
+// by a reset, not a forced close, so a later reset-sized dip is a plain glitch.
+func (k *keyState) advance(day string, v float64) {
+	k.openDay, k.base, k.hasBase, k.forced = day, v, true, false
 }
 
 // blind reports whether the key cannot show its own reset: without a base, or with a
@@ -259,7 +265,7 @@ func (d *DayAttributor) decreaseInWindow(key string, k *keyState, v float64,
 		return Attribution{Decision: Discard} // glitch dip inside the window
 	}
 	d.confirmed = w.Opening
-	k.openDay, k.base = w.Opening, v
+	k.advance(w.Opening, v)
 	return Attribution{Decision: WriteNewDay, Day: w.Opening, Closed: w.Closing}
 }
 
