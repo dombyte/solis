@@ -85,6 +85,13 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
     return () => observer.disconnect();
   }, [data]);
 
+  // The pinned y-axis column takes its width from the ticks of the first draw, which
+  // narrows the plot area after Chart.js sized the canvas; Chart.js does not notice and
+  // keeps the first width (a needless horizontal scroll). Resize once the column changed.
+  useLayoutEffect(() => {
+    chartInstanceRef.current?.resize();
+  }, [yTicks]);
+
   // Unpin only when the view moved left: the chart's own scroll to the end moves right,
   // and a container that shrinks under it (y-axis column widening) leaves scrollLeft
   // unchanged, so neither must release the pin before the ResizeObserver re-scrolls.
@@ -369,8 +376,12 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
           onScroll={handleScroll}
           className="overflow-x-auto history-chart-scroll flex-1 min-w-0"
         >
-          <div className="w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
+          {/* The canvas is taken out of the flow: Chart.js sizes it from this box, and an
+              in-flow canvas would hold the box at its first width when the page narrows
+              (e.g. a scrollbar appears), leaving a needless horizontal scroll. */}
+          <div className="relative w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
             <canvas
+              className="absolute inset-0"
               ref={chartRef}
               role="img"
               aria-label={`Bar chart of ${data.datasets.length} dataset${data.datasets.length === 1 ? '' : 's'} across ${dataPointCount} period${dataPointCount === 1 ? '' : 's'}`}
