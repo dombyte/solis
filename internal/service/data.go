@@ -10,8 +10,8 @@ import (
 	"github.com/dombyte/solis/internal/solis"
 )
 
-// defaultHistoryWindow is the default history range when start is omitted.
-const defaultHistoryWindow = 30 * 24 * time.Hour
+// defaultHistoryDays is the default history range (calendar days) when start is omitted.
+const defaultHistoryDays = 30
 
 // DataQuery is one /api/data request: a key and an optional start/end range.
 type DataQuery struct {
@@ -100,14 +100,17 @@ type TimeRange struct {
 }
 
 // ParseTimeRange parses start/end as YYYY-MM-DD, YYYY-MM or YYYY; start defaults to 30
-// days before now and end to now. A month or year end is inclusive: it expands to the
-// last day of that period (end=2026 covers all of 2026).
+// days before today and end to today (the local day of now). A month or year end is
+// inclusive: it expands to the last day of that period (end=2026 covers all of 2026).
+// Both bounds are calendar days at midnight UTC, like the parsed parameters, so a default
+// never compares as a different instant on the same day.
 func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
-	s, _, err := parseTime(start, now.Add(-defaultHistoryWindow))
+	today := calendarDay(now)
+	s, _, err := parseTime(start, today.AddDate(0, 0, -defaultHistoryDays))
 	if err != nil {
 		return TimeRange{}, err
 	}
-	e, layout, err := parseTime(end, now)
+	e, layout, err := parseTime(end, today)
 	if err != nil {
 		return TimeRange{}, err
 	}
@@ -122,6 +125,12 @@ func ParseTimeRange(start, end string, now time.Time) (TimeRange, error) {
 			s.Format(period.DayLayout), e.Format(period.DayLayout))
 	}
 	return TimeRange{Start: s, End: e}, nil
+}
+
+// calendarDay returns the calendar day of t (in t's own location) as midnight UTC.
+func calendarDay(t time.Time) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
 // parseTime returns the parsed time and the matching layout ("" for the default).
