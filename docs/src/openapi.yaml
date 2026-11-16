@@ -941,8 +941,9 @@ components:
       description: |
         A three-part split in kWh and percent. `pv_split`: solar = used directly,
         battery = charged from PV, grid = exported (adds up to the PV yield).
-        `consumption_sources`: solar = from PV,
-        battery = discharged, grid = imported.
+        `consumption_sources`: grid = imported, battery = discharged minus the
+        battery charge from the grid (that energy counts once, as grid), solar = the
+        rest (adds up to the consumption; grid_pct = 100 − self_sufficiency_pct).
       properties:
         solar: {type: number}
         battery: {type: number}

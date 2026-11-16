@@ -27,7 +27,10 @@ func flowsPage(d *doc, r report.Report, _ Meta) {
 	y = splitSection(d, y+sectionGap,
 		"Where your consumption came from · "+kwh(energyOf(s, s.Total.Consumption)), []split{
 			{colorPV, "from solar", s.Sources.Solar, s.Sources.SolarShare, true},
-			{colorBattery, "from battery", s.Sources.Battery, s.Sources.BatteryShare, false},
+			{
+				colorBattery, "from battery", s.Sources.Battery, s.Sources.BatteryShare,
+				gridCharged(s),
+			},
 			{colorImport, "from grid", s.Sources.Grid, s.Sources.GridShare, false},
 		})
 	caption(d, y+gapXS, loadsCaption(d, s))

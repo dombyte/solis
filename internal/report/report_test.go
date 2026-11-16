@@ -102,13 +102,53 @@ func TestBuild_ExampleMonth(t *testing.T) {
 	// The sources add up to the consumption, and the grid share is 1 - self-sufficiency.
 	assert.InDelta(t, 330.5, s.Sources.Solar+s.Sources.Battery+s.Sources.Grid, 1e-6)
 	assert.InDelta(t, 1-*s.SelfSufficiency, *s.Sources.GridShare, 1e-9)
-	assert.InDelta(t, 178.9, s.Sources.Solar, 1e-6)
+	// The 1.9 kWh charged from the grid count as grid, not again as battery.
+	assert.InDelta(t, 72.9-1.9, s.Sources.Battery, 1e-6)
+	assert.InDelta(t, 178.9+1.9, s.Sources.Solar, 1e-6)
 	assert.InDelta(t, 78.7/330.5, *s.Sources.GridShare, 1e-6)
+	// So "from solar" and "used directly" differ by exactly the balance difference.
+	assert.InDelta(t, *s.BalanceDiff, s.DirectUse-s.Sources.Solar, 1e-6)
 
 	assert.InDelta(t, 72.9/82.1, *s.BatteryRatio, 1e-6)
 	assert.InDelta(t, 9.9, *s.BalanceDiff, 1e-6)
 	assert.InDelta(t, 9.9/(403.7+78.7+72.9), *s.BalanceDiffShare, 1e-6)
 	assert.Len(t, r.Buckets, 31)
+}
+
+func TestSummarize_SourcesAddUpToConsumption(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                 string
+		e                    Energy
+		solar, battery, grid float64
+	}{
+		// A night of grid charging: the import fed the loads and the battery, the battery
+		// then fed the loads. Counting import and discharge both would give 20 of 10 kWh.
+		{"grid charging", Energy{Consumption: 10, Import: 11, Charge: 10, Discharge: 9}, 0, 0, 10},
+		{
+			"partly grid charged",
+			Energy{PV: 2, Consumption: 10, Import: 5, Charge: 4, Discharge: 6},
+			1, 4, 5,
+		},
+		{
+			"no grid charging",
+			Energy{PV: 8, Consumption: 10, Import: 3, Charge: 2, Discharge: 4},
+			3, 4, 3,
+		},
+		{"import above consumption", Energy{Consumption: 2, Import: 5, Charge: 3}, 0, 0, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := summarize([]Day{{Date: day("2026-10-28"), Energy: tt.e}}, 1)
+			assert.InDelta(t, tt.solar, s.Sources.Solar, delta, "solar")
+			assert.InDelta(t, tt.battery, s.Sources.Battery, delta, "battery")
+			assert.InDelta(t, tt.grid, s.Sources.Grid, delta, "grid")
+			assert.InDelta(t, tt.e.Consumption,
+				s.Sources.Solar+s.Sources.Battery+s.Sources.Grid, delta)
+			assert.InDelta(t, 1-*s.SelfSufficiency, *s.Sources.GridShare, delta)
+		})
+	}
 }
 
 func TestBuild_ExamplePatterns(t *testing.T) {

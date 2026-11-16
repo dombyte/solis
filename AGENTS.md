@@ -280,6 +280,9 @@ banner. `dev` on either side never reports an update.
   self-consumption rate = (PV − export) / PV, both from summed energy, never averaged daily
   ratios. Per day: charge from PV = min(charge, PV − export), the rest is grid charging
   (lower bound, days > 0.2 kWh flagged); direct use = PV − export − charge from PV.
+  Consumption sources: grid = import, battery = discharge − grid charge (counted once, as
+  grid), solar = the rest; capped so they add up to the consumption (grid share =
+  1 − self-sufficiency, solar differs from direct use by the balance difference).
 - The net grid value is a debug value and never part of a report.
 - Battery ratio and balance difference only from 28 complete days. Discharged ÷ charged is
   the plain quotient of two uncalibrated counters (real data: above 100 %), never called

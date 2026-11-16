@@ -62,7 +62,7 @@ func tiles(r report.Report) []tile {
 		if f.Value != nil {
 			t.unit = figureUnit(f.Kind)
 		}
-		if r.Comparison != nil {
+		if r.Comparison != nil && !noCommonDays(r.Comparison) {
 			t.delta, t.deltaColor = change(f, true)
 			t.base = tileBase(f, *r.Comparison)
 		}
@@ -179,27 +179,47 @@ func notes(r report.Report) []string {
 	direct := "* Used directly ≈ PV − export − battery charge from PV, per day. It is what " +
 		"remains of the PV yield, so it also contains the PV-side part of the balance " +
 		"difference (e.g. the inverter's conversion losses)."
-	fromSolar := "“From solar” ≈ consumption − import − discharge, measured on the " +
-		"consumption side. It is lower than “used directly” by the balance difference"
+	fromSolar := "“From solar” ≈ consumption − import − “from battery”, measured on the " +
+		"consumption side. It differs from “used directly” by the balance difference."
 	if len(s.GridChargingDays) > 0 {
 		direct += fmt.Sprintf(" On %s the battery took in more than the panels could "+
 			"supply: at least %s kWh came from the grid. Grid charging on a day with "+
 			"enough sun cannot be seen in daily counters, so the split is an estimate.",
 			dayList(s), number(s.GridCharge))
-		fromSolar += " and the battery charge from the grid"
 	}
-	out := []string{direct, fromSolar + "."}
+	if gridCharged(s) {
+		fromSolar += " The battery energy charged from the grid counts once, as “from " +
+			"grid”, so “from battery” ≈ discharge − charge from the grid."
+	}
+	out := []string{direct, fromSolar}
 	if n := batteryNote(s); n != "" {
 		out = append(out, n)
 	}
 	if !s.Complete() {
-		out = append(out, fmt.Sprintf("Data for %d of %d days; missing days are left out "+
-			"of every figure.", s.CompleteDays, s.Days))
+		out = append(out, dataNote(r))
 	}
 	if r.TodayExcluded {
 		out = append(out, todayNote(r))
 	}
 	return out
+}
+
+// dataNote says how many days have data and, for months or years, explains the * on the
+// grid chart's axis.
+func dataNote(r report.Report) string {
+	s := r.Summary
+	out := fmt.Sprintf("Data for %d of %d days; missing days are left out of every figure.",
+		s.CompleteDays, s.Days)
+	if g := gapNote(r); r.Granularity != report.ByDay && g != "" {
+		out += " " + g
+	}
+	return out
+}
+
+// gridCharged reports whether a visible amount (as displayed) of the battery charge came
+// from the grid; "from battery" is then an estimate.
+func gridCharged(s report.Summary) bool {
+	return number(s.GridCharge) != number(0)
 }
 
 // todayNote says that the requested period ended today and the report ends the day
@@ -248,6 +268,37 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// noCommonDays reports a comparison without a single day both periods have data for: it
+// has nothing to compare, so the report shows no changes instead of rows of "no data".
+func noCommonDays(c *report.Comparison) bool {
+	return c != nil && c.Matched && c.MatchedDays == 0
+}
+
+// matchedLabel names the compared days of a matched comparison (" · 10 matched days");
+// empty for a comparison of whole periods.
+func matchedLabel(c report.Comparison) string {
+	switch {
+	case !c.Matched:
+		return ""
+	case c.MatchedDays == 0:
+		return " · no days to compare"
+	default:
+		return fmt.Sprintf(" · %d matched %s", c.MatchedDays, plural(c.MatchedDays, "day", "days"))
+	}
+}
+
+// noCompareText says why a comparison without common days compares nothing.
+func noCompareText(r report.Report) string {
+	switch {
+	case r.Comparison.Summary.CompleteDays == 0:
+		return "The comparison period has no data, so nothing is compared."
+	case r.Summary.CompleteDays == 0:
+		return "This period has no data, so nothing is compared."
+	default:
+		return "The two periods have no days with data in common, so nothing is compared."
+	}
 }
 
 // matchReason says why a comparison is matched: missing days, or complete periods of

@@ -18,8 +18,9 @@ const (
 
 // Split divides one energy amount into its three parts (kWh) with their shares (0..1).
 // PV split: Solar = used directly, Battery = charged from PV, Grid = exported; the parts
-// add up to the PV yield. Consumption sources: Solar = from PV, Battery = discharged,
-// Grid = imported; the parts add up to the consumption.
+// add up to the PV yield. Consumption sources: Grid = imported, Battery = discharged minus
+// the battery charge from the grid (that energy was bought, so it counts as grid once,
+// not again as battery), Solar = the rest; the parts add up to the consumption.
 type Split struct {
 	Solar, Battery, Grid                float64
 	SolarShare, BatteryShare, GridShare *float64
@@ -92,7 +93,7 @@ func summarize(days []Day, periodDays int) Summary {
 	s.SelfSufficiency = share(t.Consumption-t.Import, t.Consumption)
 	s.SelfConsumption = share(t.PV-t.Export, t.PV)
 	s.PVSplit = newSplit(s.DirectUse, s.ChargeFromPV, t.Export)
-	s.Sources = newSplit(max(0, t.Consumption-t.Import-t.Discharge), t.Discharge, t.Import)
+	s.Sources = s.sources()
 	if s.CompleteDays >= minBalanceDays {
 		s.balance()
 	}
@@ -109,6 +110,17 @@ func (s *Summary) addDay(d Day) {
 	if d.Charge-fromPV > gridChargeTolerance+floatSlack {
 		s.GridChargingDays = append(s.GridChargingDays, d.Date)
 	}
+}
+
+// sources splits the consumption into solar, battery and grid (see Split). Each part is
+// capped by what the consumption leaves, so the parts always add up to the consumption
+// and the grid share is 1 - self-sufficiency. Uses GridCharge, so call it after addDay.
+func (s *Summary) sources() Split {
+	t := s.Total
+	cons := max(0, t.Consumption)
+	grid := min(t.Import, cons)
+	battery := min(max(0, t.Discharge-s.GridCharge), cons-grid)
+	return newSplit(max(0, cons-grid-battery), battery, grid)
 }
 
 // balance fills the battery ratio and the balance difference.

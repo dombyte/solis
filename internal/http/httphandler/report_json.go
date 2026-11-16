@@ -91,7 +91,8 @@ type ComparisonJSON struct {
 	From    string      `json:"from"`
 	To      string      `json:"to"`
 	Summary SummaryJSON `json:"summary"`
-	// Matched: days are missing, so the figures compare MatchedDays pairs of days.
+	// Matched: days are missing or the periods differ in length, so the figures compare
+	// only the MatchedDays pairs of days both periods have data for (0 = nothing compared).
 	Matched     bool `json:"matched"`
 	MatchedDays int  `json:"matched_days"`
 }

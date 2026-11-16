@@ -169,8 +169,11 @@ func incompleteBuckets(r report.Report) []report.Bucket {
 	return out
 }
 
+// incompleteMark follows the axis label of a month or year with days without data.
+const incompleteMark = "*"
+
 // gapNote is the chart caption on missing data: day charts show gaps, month and year
-// charts name the buckets whose bars sum fewer days.
+// charts name the buckets whose bars sum fewer days (marked on the axis).
 func gapNote(r report.Report) string {
 	if r.Granularity == report.ByDay {
 		return "Gaps are days without data."
@@ -183,7 +186,7 @@ func gapNote(r report.Report) string {
 	for _, b := range bs[:min(len(bs), maxNamedBuckets)] {
 		names = append(names, bucketName(b, r.Granularity)+" "+dayCount(b.Summary))
 	}
-	s := "Not all days have data: " + strings.Join(names, ", ")
+	s := incompleteMark + " Not all days have data: " + strings.Join(names, ", ")
 	if rest := len(bs) - len(names); rest > 0 {
 		s += " and " + strconv.Itoa(rest) + " more"
 	}

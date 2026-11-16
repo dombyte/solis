@@ -1,6 +1,7 @@
 package pdf
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -141,10 +142,55 @@ func TestMatchedComparison(t *testing.T) {
 
 	none := report.Comparison{Matched: true}
 	assert.Empty(t, tileBase(report.Figure{}, none), "no common days: only \"no data\"")
-	assert.Equal(t, "Compared with – · 0 matched days",
+	assert.Equal(t, "Compared with – · no days to compare",
 		strings.Replace(comparisonTitle(none), periodLabel(none.Range), "–", 1))
 	assert.Equal(t, []string{"Figure", "Oct 2026", "Oct 2025", "Change"},
 		comparisonHeader(octoberReport(true)))
+}
+
+func TestComparisonWithoutCommonDays(t *testing.T) {
+	t.Parallel()
+	r := octoberReport(true)
+	r.Comparison.Matched, r.Comparison.MatchedDays = true, 0
+	r.Comparison.Summary = report.Summary{Days: 31}
+	for i := range r.Figures {
+		r.Figures[i].Compared, r.Figures[i].Base, r.Figures[i].Change = nil, nil, nil
+	}
+	assert.True(t, noCommonDays(r.Comparison))
+	assert.False(t, noCommonDays(matchedReport().Comparison))
+	assert.False(t, noCommonDays(nil))
+	for _, tl := range tiles(r) {
+		assert.Empty(t, tl.delta, "nothing to compare: no \"no data\" on every tile")
+	}
+	assert.True(t, strings.HasSuffix(compareLine(r), " · no days to compare"), compareLine(r))
+	assert.Equal(t, "The comparison period has no data, so nothing is compared.",
+		noCompareText(r))
+	r.Comparison.Summary.CompleteDays = 5
+	assert.Contains(t, noCompareText(r), "no days with data in common")
+	r.Summary.CompleteDays = 0
+	assert.Equal(t, "This period has no data, so nothing is compared.", noCompareText(r))
+
+	var buf bytes.Buffer
+	require.NoError(t, Write(&buf, r, Meta{Generated: utc(2026, 11, 1), Version: "test"}))
+}
+
+func TestChartTicks_MarkIncompleteBuckets(t *testing.T) {
+	t.Parallel()
+	month := func(m time.Month, days, complete int) report.Bucket {
+		return report.Bucket{
+			Key: utc(2026, m, 1).Format("2006-01"), From: utc(2026, m, 1),
+			Summary: report.Summary{Days: days, CompleteDays: complete},
+		}
+	}
+	r := report.Report{Granularity: report.ByMonth, Buckets: []report.Bucket{
+		month(6, 30, 22), month(7, 31, 31), month(8, 31, 0),
+	}}
+	r.Range = report.Range{From: utc(2026, 6, 1), To: utc(2026, 8, 31)}
+	assert.Equal(t, []string{"Jun 26*", "Jul 26", "Aug 26"}, chartTicks(r),
+		"partial data is marked, no data at all is a gap")
+	r.Summary = report.Summary{Days: 92, CompleteDays: 53}
+	assert.Contains(t, notes(r), "Data for 53 of 92 days; missing days are left out of "+
+		"every figure. * Not all days have data: Jun 2026 22/30 days.")
 }
 
 func TestLoadsLine(t *testing.T) {
@@ -199,11 +245,11 @@ func TestIncompleteBuckets(t *testing.T) {
 	cut := bucket(10, 29, 20)
 	cut.Partial = true
 	assert.Equal(t, "Oct 2026 (partial, 20/29 days)", bucketRow(cut, report.ByMonth))
-	assert.Equal(t, "Not all days have data: Jun 2026 22/30 days.", gapNote(r))
+	assert.Equal(t, "* Not all days have data: Jun 2026 22/30 days.", gapNote(r))
 	assert.Contains(t, tableFootnote(r), "n/m days: only n of the m days have data.")
 
 	r.Buckets = append(r.Buckets, bucket(8, 31, 1), bucket(9, 30, 2), bucket(10, 31, 3))
-	assert.Equal(t, "Not all days have data: Jun 2026 22/30 days, Aug 2026 1/31 days, "+
+	assert.Equal(t, "* Not all days have data: Jun 2026 22/30 days, Aug 2026 1/31 days, "+
 		"Sep 2026 2/30 days and 1 more.", gapNote(r))
 	r.Buckets = r.Buckets[2:3]
 	assert.Empty(t, gapNote(r))
@@ -231,7 +277,8 @@ func TestNotes(t *testing.T) {
 	require.Len(t, ns, 2)
 	assert.Contains(t, ns[0], "On 28 Oct the battery took in more")
 	assert.Contains(t, ns[0], "at least 1.9 kWh came from the grid")
-	assert.Contains(t, ns[1], "and the battery charge from the grid")
+	assert.Contains(t, ns[1], "differs from “used directly” by the balance difference")
+	assert.Contains(t, ns[1], "“from battery” ≈ discharge − charge from the grid")
 
 	short := report.Report{
 		Range:   report.Range{From: utc(2026, 10, 1), To: utc(2026, 10, 10)},

@@ -52,8 +52,8 @@ func derivedFormulas() []formula {
 			"Per day. Also contains the PV-side balance difference.",
 		},
 		{
-			"≈ Consumption from solar", "consumption − grid import − battery discharge",
-			"The consumption covered neither by the grid nor by the battery.",
+			"≈ Consumption from solar", "consumption − import − (discharge − charge from grid)",
+			"Not covered by grid or battery; grid-charged energy counts as grid.",
 		},
 		{
 			"≈ Discharged ÷ charged", "battery discharge ÷ battery charge",

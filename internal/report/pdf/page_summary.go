@@ -1,7 +1,6 @@
 package pdf
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/dombyte/solis/internal/report"
@@ -60,11 +59,7 @@ func compareLine(r report.Report) string {
 	what := map[report.CompareMode]string{
 		report.CompareLastYear: "same period last year", report.ComparePrevious: "previous period",
 	}[c.Mode]
-	line := "Compared with " + rangeLabel(c.Range) + " (" + what + ")"
-	if c.Matched {
-		line += fmt.Sprintf(" · %d matched %s", c.MatchedDays, plural(c.MatchedDays, "day", "days"))
-	}
-	return line
+	return "Compared with " + rangeLabel(c.Range) + " (" + what + ")" + matchedLabel(*c)
 }
 
 // keyFigures draws the tiles in rows of four and returns their bottom.

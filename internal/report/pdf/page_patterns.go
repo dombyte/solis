@@ -36,6 +36,10 @@ func patternsPage(d *doc, r report.Report, _ Meta) {
 	y = area.y + area.h + gapS
 	caption(d, y, "Whole period: "+share(r.Summary.SelfSufficiency)+
 		" (from the summed energy, not the average of the bars).")
+	if g := gapNote(r); g != "" && r.Granularity != report.ByDay {
+		y += captionH
+		caption(d, y, g)
+	}
 	y += captionH + sectionGap
 	colW := (contentW - colGap) / half
 	notableDays(d, r.Patterns, box{marginX, y, colW, 0})
@@ -138,6 +142,10 @@ func comparisonTable(d *doc, r report.Report, y float64) {
 		return
 	}
 	sectionTitle(d, y, comparisonTitle(*c))
+	if noCommonDays(c) {
+		caption(d, y+headingH+gapS, noCompareText(r))
+		return
+	}
 	y += headingH + gapM
 	cols := []float64{0, 0.42, 0.62, 0.82, 1} // column edges as share of the width
 	header := comparisonHeader(r)
@@ -163,11 +171,7 @@ func comparisonTable(d *doc, r report.Report, y float64) {
 
 // comparisonTitle heads the comparison table; a matched comparison names its days.
 func comparisonTitle(c report.Comparison) string {
-	s := "Compared with " + periodLabel(c.Range)
-	if c.Matched {
-		s += fmt.Sprintf(" · %d matched %s", c.MatchedDays, plural(c.MatchedDays, "day", "days"))
-	}
-	return s
+	return "Compared with " + periodLabel(c.Range) + matchedLabel(c)
 }
 
 // comparisonHeader labels the columns: the period names only when the columns hold the

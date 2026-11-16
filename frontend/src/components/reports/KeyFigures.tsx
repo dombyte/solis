@@ -18,7 +18,9 @@ export function KeyFigures({ report }: { report: ReportResponse }) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
       {report.figures.map(f => {
-        const delta = cmp ? figureDelta(f) : null;
+        // Without a single day both periods have data for there is nothing to compare;
+        // the notes below say so instead of "no data" on every tile.
+        const delta = cmp && !(cmp.matched && cmp.matched_days === 0) ? figureDelta(f) : null;
         const unit = figureUnit(f.kind);
         return (
           <div key={f.id} className="rounded-xl border border-border bg-card p-3 sm:p-4 flex flex-col gap-1 min-w-0">

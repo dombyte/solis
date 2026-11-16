@@ -89,10 +89,19 @@ func chartTicks(r report.Report) []string {
 			show = b.From.Day() == 1 || b.From.Day()%tickEvery == 0
 		}
 		if show {
-			out[i] = bucketTick(b, r.Granularity, oneMonth)
+			out[i] = bucketTick(b, r.Granularity, oneMonth) + axisMark(b, r.Granularity)
 		}
 	}
 	return out
+}
+
+// axisMark marks a month or year with days without data (explained by gapNote below the
+// chart); day charts show such days as gaps.
+func axisMark(b report.Bucket, g report.Granularity) string {
+	if g != report.ByDay && incomplete(b) {
+		return incompleteMark
+	}
+	return ""
 }
 
 // barChart is a grouped bar chart over the buckets, y from 0 to top.
