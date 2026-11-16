@@ -89,6 +89,7 @@ export interface FlowViewModel {
     status: string;
     operatingStatus: string;
     alert: boolean;
+    present: boolean;      // The inverter status is known (live data)
   };
   allPresent: boolean;    // All nodes have data
   stale: boolean;        // Any data is stale
@@ -360,20 +361,27 @@ export function buildFlowViewModel(
     nodes,
     edges,
     inverter: {
-      status: solisStatus ?? 'Unknown',
-      operatingStatus: operatingStatus ?? 'Unknown',
+      status: solisStatus ?? 'No data',
+      operatingStatus: operatingStatus ?? '–',
       alert,
+      present: solisStatus !== undefined,
     },
     allPresent,
     stale,
   };
 }
 
+/** Color of the inverter status: gray without data, red on an alert, green otherwise. */
+export function inverterStatusColor(present: boolean, alert: boolean): string {
+  if (!present) return 'var(--color-muted-foreground)';
+  return alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
+}
+
 /**
  * Get the sub-status text for backup
  */
 export function getBackupSubStatus(backupPower: number | null): string {
-  if (backupPower === null) return 'standby · ready';
+  if (backupPower === null) return ''; // no data: no claim about the backup output
   return backupPower > 0 ? 'supplying loads' : 'standby · ready';
 }
 

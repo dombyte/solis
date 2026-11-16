@@ -1,5 +1,6 @@
 import React from 'react';
 import { Zap } from 'lucide-react';
+import { inverterStatusColor } from './model';
 
 /**
  * Inverter hub of the desktop flow diagram: box + icon badge, title, a status pill for
@@ -14,6 +15,10 @@ interface InverterStatusProps {
   status: string;
   operatingStatus: string;
   alert: boolean;
+  /** The status is known; without it the pill is neutral gray, never "ok" green. */
+  present: boolean;
+  /** Dim the node (its data is missing and the diagram as a whole is not dimmed). */
+  dim: boolean;
 }
 
 const BOX_RX = 20;
@@ -37,12 +42,18 @@ export function InverterStatus({
   status,
   operatingStatus,
   alert,
+  present,
+  dim,
 }: InverterStatusProps): React.ReactElement {
-  const statusColor = alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
-  const iconColor = alert ? statusColor : 'var(--color-primary)';
+  const statusColor = inverterStatusColor(present, alert);
+  const iconColor = present && !alert ? 'var(--color-primary)' : statusColor;
 
   return (
-    <g role="img" aria-label={`Inverter: ${status}, ${operatingStatus}`}>
+    <g
+      role="img"
+      aria-label={`Inverter: ${status}, ${operatingStatus}`}
+      style={{ opacity: dim ? 0.35 : 1, transition: 'opacity 0.5s ease' }}
+    >
       <rect
         x={x}
         y={y}
@@ -50,8 +61,8 @@ export function InverterStatus({
         height={height}
         rx={BOX_RX}
         fill="var(--color-flow-inv-bg)"
-        stroke={alert ? statusColor : 'var(--color-border)'}
-        strokeWidth={alert ? 2.5 : 2}
+        stroke={present && alert ? statusColor : 'var(--color-border)'}
+        strokeWidth={present && alert ? 2.5 : 2}
       />
       <foreignObject x={x} y={y} width={width} height={height}>
         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center">
