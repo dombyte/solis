@@ -65,13 +65,27 @@ func TestApplyNet(t *testing.T) {
 	}
 }
 
+func TestLevelValues(t *testing.T) {
+	r := registry(t)
+	sums := Values{"grid_export_daily": 12, "grid_import_daily": 2, "pv_energy_daily": 40}
+	got := LevelValues(r.Edges(period.Monthly), r.NetPairs(period.Monthly), sums,
+		Values{"grid_export_monthly": 1})
+	assert.InDelta(t, 40.0, got["pv_energy_monthly"], 1e-9)
+	assert.InDelta(t, 13.0, got["grid_export_monthly"], 1e-9, "offset added")
+	assert.InDelta(t, 11.0, got["grid_energy_monthly"], 1e-9, "net from offset values")
+	assert.Len(t, got, 9)
+
+	noOffsets := LevelValues(r.Edges(period.Monthly), r.NetPairs(period.Monthly), sums, nil)
+	assert.InDelta(t, 10.0, noOffsets["grid_energy_monthly"], 1e-9)
+}
+
 func TestTotalsAndFold(t *testing.T) {
 	r := registry(t)
 	edges := r.Edges(period.Total)
 	baseline := Values{"pv_energy_total": 5000}
 	since := Values{"pv_energy_daily": 230, "grid_import_daily": 5}
 
-	got := Totals(edges, baseline, since)
+	got := LevelValues(edges, nil, since, baseline)
 	assert.InDelta(t, 5230.0, got["pv_energy_total"], 1e-9)
 	assert.InDelta(t, 5.0, got["grid_import_total"], 1e-9)
 	assert.Zero(t, got["backup_energy_total"])
@@ -82,7 +96,7 @@ func TestTotalsAndFold(t *testing.T) {
 	assert.InDelta(t, 5000.0, baseline["pv_energy_total"], 1e-9, "input untouched")
 
 	// Composition: a year folded into the baseline gives the same total as summing it.
-	after := Totals(edges, folded, Values{})
+	after := LevelValues(edges, nil, Values{}, folded)
 	assert.InDelta(t, got["pv_energy_total"], after["pv_energy_total"], 1e-9)
 }
 

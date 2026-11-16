@@ -50,14 +50,12 @@ func ApplyNet(pairs []solis.NetPair, values Values) Values {
 	return out
 }
 
-// Totals composes total = baseline(target) + sum of daily rows since the last closed
-// year (since is keyed by daily source).
-func Totals(edges []solis.Edge, baseline, since Values) Values {
-	out := make(Values, len(edges))
-	for _, e := range edges {
-		out[e.Target] = baseline[e.Target] + since[e.Source]
-	}
-	return out
+// LevelValues computes one period of a level from its daily source sums: the edge
+// targets (plus offsets[target], e.g. the cutover offsets; nil = none) and the net values
+// from them. The live aggregator and the backfill share it, so both write the same rows.
+func LevelValues(edges []solis.Edge, pairs []solis.NetPair, sums, offsets Values) Values {
+	vals := AddOffsets(ApplyEdges(edges, sums), offsets)
+	return Merge(vals, ApplyNet(pairs, vals))
 }
 
 // Fold adds a closed year's per-total-key sums to the baseline and returns the new one.
