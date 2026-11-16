@@ -52,13 +52,12 @@ function resolveRegisterMetadata(
   metadata: RegisterMetadata,
   regValue: RegisterValue | undefined
 ): RegisterMetadata & { displayValue: number | string | null | undefined } {
-  // Skip if no templates and no value field
-  if (!regValue && !metadata.value && 
-      !isTemplate(metadata.name) && 
+  // No value yet, no value field and no templates: nothing to resolve.
+  if (!regValue && !metadata.value &&
+      !isTemplate(metadata.name) &&
       !isTemplate(metadata.description ?? '') &&
       !isTemplate(metadata.unit ?? '')) {
-    const displayValue = regValue ? (regValue as RegisterValue).value : undefined;
-    return { ...metadata, displayValue };
+    return { ...metadata, displayValue: undefined };
   }
   
   const val = regValue || { value: null, timestamp: undefined, statusDecoded: undefined } as RegisterValue;

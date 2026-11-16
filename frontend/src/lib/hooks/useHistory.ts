@@ -66,30 +66,29 @@ export function useHistory(): UseHistoryResult {
       const datasets: ChartDataset[] = [];
       const failed: string[] = [];
 
-      // Fetch data for each source
-      for (const source of sources) {
-        if (signal.aborted) return;
+      // Fetch every source at once (one round-trip of latency instead of one per series);
+      // results are processed in source order so the datasets keep their order.
+      const params: Record<string, string> = {};
+      if (startDate) params.start = startDate;
+      if (endDate) params.end = endDate;
+      const results = await Promise.allSettled(sources.map(async (source) => {
+        const body = await api.get(source, params, { signal });
+        if (!Array.isArray(body)) throw new Error('unexpected history response');
+        return body as HistoryDataPoint[];
+      }));
+      if (signal.aborted) return;
 
+      for (const [i, source] of sources.entries()) {
         const dataObj = apiDataObjects.find(o => o.source === source);
-        let historyData: HistoryDataPoint[] = [];
-
-        try {
-          // The source already contains the full path including period
-          const params: Record<string, string> = {};
-          if (startDate) params.start = startDate;
-          if (endDate) params.end = endDate;
-
-          const body = await api.get(source, params, { signal });
-          if (!Array.isArray(body)) throw new Error('unexpected history response');
-          historyData = body as HistoryDataPoint[];
-        } catch (err) {
-          if (signal.aborted) return;
-          console.error(`Failed to fetch history for ${source}:`, err);
+        const result = results[i];
+        if (result.status === 'rejected') {
+          console.error(`Failed to fetch history for ${source}:`, result.reason);
           failed.push(dataObj?.name ?? source);
           continue;
         }
+        const historyData = result.value;
 
-        if (dataObj && historyData?.length) {
+        if (dataObj && historyData.length) {
           datasetDataMap.set(dataObj.key, new Map());
           
           for (const d of historyData) {
