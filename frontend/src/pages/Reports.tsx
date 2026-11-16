@@ -49,7 +49,10 @@ export function Reports(): React.ReactElement {
     }
   };
 
-  const days = rangeDays(range);
+  // The report covers finished days only: a range ending today stops at yesterday, and
+  // every label says so instead of showing the selected range.
+  const covered = finishedRange(range, today);
+  const days = rangeDays(covered);
 
   return (
     <Page
@@ -69,12 +72,11 @@ export function Reports(): React.ReactElement {
             <ArrowDown aria-hidden="true" className="md:hidden size-4 self-center text-muted-foreground" />
             <div className="flex-1 min-w-0">
               {/* The server compares the finished days, so the options show those dates. */}
-              <CompareSelect mode={compare} range={finishedRange(range, today)} onChange={setCompare} />
+              <CompareSelect mode={compare} range={covered} onChange={setCompare} />
             </div>
           </div>
           <span className="text-sm text-muted-foreground">
-            {days} {days === 1 ? 'day' : 'days'} · charts grouped by{' '}
-            {autoGranularity(finishedRange(range, today))}
+            {days} {days === 1 ? 'day' : 'days'} · charts grouped by {autoGranularity(covered)}
           </span>
           {problem && <p className="text-sm text-destructive" role="alert">{problem}</p>}
         </section>
@@ -112,29 +114,31 @@ export function Reports(): React.ReactElement {
         </section>
       </div>
 
-      <section aria-labelledby="preview-title" aria-busy={isLoading} className="flex flex-col gap-3.5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="preview-title" className="text-lg font-semibold">Preview · {periodName(range)}</h2>
-          {report?.comparison && (
-            <span className="text-sm text-muted-foreground">
-              Compared with {periodName({ from: report.comparison.from, to: report.comparison.to })}
-            </span>
+      {!problem && (
+        <section aria-labelledby="preview-title" aria-busy={isLoading} className="flex flex-col gap-3.5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="preview-title" className="text-lg font-semibold">Preview · {periodName(covered)}</h2>
+            {report?.comparison && (
+              <span className="text-sm text-muted-foreground">
+                Compared with {periodName({ from: report.comparison.from, to: report.comparison.to })}
+              </span>
+            )}
+          </div>
+          {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+          {!report && isLoading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-10 justify-center">
+              <Loader2 className="size-4 animate-spin" /> Loading report…
+            </div>
           )}
-        </div>
-        {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
-        {!report && isLoading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground py-10 justify-center">
-            <Loader2 className="size-4 animate-spin" /> Loading report…
-          </div>
-        )}
-        {report && (
-          <div className={cn('flex flex-col gap-4 transition-opacity', isLoading && 'opacity-60')}>
-            <KeyFigures report={report} />
-            <ReportChart report={report} />
-            <ReportNotes report={report} />
-          </div>
-        )}
-      </section>
+          {report && (
+            <div className={cn('flex flex-col gap-4 transition-opacity', isLoading && 'opacity-60')}>
+              <KeyFigures report={report} />
+              <ReportChart report={report} />
+              <ReportNotes report={report} />
+            </div>
+          )}
+        </section>
+      )}
     </Page>
   );
 }

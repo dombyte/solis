@@ -12,7 +12,7 @@ import { historyDataGroups } from '../lib/config/groups';
 import { Menu, RefreshCw } from 'lucide-react';
 import type { Period } from '../types';
 import type { DateRange } from 'react-day-picker';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { SURFACE } from '../components/ui/surface';
 import { cn } from '../lib/utils';
 
@@ -28,26 +28,13 @@ export function History(): React.ReactElement {
   
   const { data, isLoading, error, loadHistory, clearHistory } = useHistory();
 
-  // Format date string for Date objects (handles yyyy, yyyy-MM, yyyy-MM-dd)
-  const formatForDate = useCallback((dateStr: string, targetPeriod: Period = period): string => {
-    if (targetPeriod === 'yearly' && dateStr.length === 4) return `${dateStr}-01-01`;
-    if (targetPeriod === 'monthly' && dateStr.length === 7) return `${dateStr}-01`;
-    if (dateStr.length === 4) return `${dateStr}-01-01`;
-    if (dateStr.length === 7) return `${dateStr}-01`;
-    return dateStr;
-  }, [period]);
-
-  // Derive dateRange from startDate, endDate, and period - no state needed
-  const dateRange: DateRange | undefined = React.useMemo(() => {
-    if (startDate && endDate) {
-      return {
-        from: new Date(formatForDate(startDate, period)),
-        to: new Date(formatForDate(endDate, period))
-      };
-    }
-    return undefined;
-  }, [startDate, endDate, period, formatForDate]);
-
+  // The picker's range from the stored keys (yyyy, yyyy-MM or yyyy-MM-dd). parseISO reads
+  // all three as local dates; new Date() would read them as UTC and show the previous
+  // day west of UTC.
+  const dateRange: DateRange | undefined = React.useMemo(
+    () => (startDate && endDate ? { from: parseISO(startDate), to: parseISO(endDate) } : undefined),
+    [startDate, endDate],
+  );
 
   // Handle period change
   const handlePeriodChange = useCallback((newPeriod: Period) => {

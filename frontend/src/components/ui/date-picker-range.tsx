@@ -93,6 +93,7 @@ export function DatePickerWithRange({
             <Calendar
               mode="range"
               defaultMonth={date?.from}
+              maxDate={new Date()}
               selected={tempRange}
               onSelect={handleSelect}
               numberOfMonths={numberOfMonths}
