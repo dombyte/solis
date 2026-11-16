@@ -246,16 +246,6 @@ func (r *Registry) All() []Register {
 	return append([]Register(nil), r.regs...)
 }
 
-// Keys returns every register key sorted.
-func (r *Registry) Keys() []string {
-	keys := make([]string, 0, len(r.regs))
-	for _, reg := range r.regs {
-		keys = append(keys, reg.Key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 // Polled returns the addressed registers sorted by address.
 func (r *Registry) Polled() []Register {
 	var out []Register
@@ -265,17 +255,6 @@ func (r *Registry) Polled() []Register {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
-	return out
-}
-
-// ByStore returns the registers with the given store (net included).
-func (r *Registry) ByStore(s Store) []Register {
-	var out []Register
-	for _, reg := range r.regs {
-		if reg.Store == s {
-			out = append(out, reg)
-		}
-	}
 	return out
 }
 

@@ -12,11 +12,8 @@ type Slot[T any] struct {
 // Store publishes v as the current value.
 func (s *Slot[T]) Store(v T) { s.p.Store(&v) }
 
-// Clear removes the current value.
-func (s *Slot[T]) Clear() { s.p.Store(nil) }
-
 // ClearIf removes the current value only while match reports it as the caller's own,
-// so a late Clear of a replaced instance never withdraws its successor.
+// so a late clear by a replaced instance never withdraws its successor.
 func (s *Slot[T]) ClearIf(match func(T) bool) {
 	for {
 		p := s.p.Load()

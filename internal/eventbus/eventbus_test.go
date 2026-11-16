@@ -47,7 +47,7 @@ func TestSubscribePublishUnsubscribe(t *testing.T) {
 
 func TestPublishNeverBlocksOnStuckConsumer(t *testing.T) {
 	b := New()
-	_, cancel, err := b.Subscribe("stuck", 1, Coalesce)
+	ch, cancel, err := b.Subscribe("stuck", 1, Coalesce)
 	require.NoError(t, err)
 	defer cancel()
 
@@ -63,7 +63,8 @@ func TestPublishNeverBlocksOnStuckConsumer(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("Publish blocked on a full subscriber")
 	}
-	assert.Equal(t, int64(999), b.Dropped())
+	recv(t, ch) // the one buffered event; the other 999 were coalesced away
+	assert.True(t, empty(ch))
 }
 
 func TestCoalesceKeepsPeriodClosed(t *testing.T) {
@@ -80,7 +81,7 @@ func TestCoalesceKeepsPeriodClosed(t *testing.T) {
 	e := recv(t, ch)
 	assert.Equal(t, PeriodClosed, e.Kind)
 	assert.Equal(t, "2026-08-05", e.Day)
-	assert.Equal(t, int64(1), b.Dropped())
+	assert.True(t, empty(ch), "the second ValuesUpdated was dropped")
 }
 
 func TestLosslessDeliversEverythingInOrder(t *testing.T) {
@@ -96,7 +97,7 @@ func TestLosslessDeliversEverythingInOrder(t *testing.T) {
 	for i := range n {
 		assert.Equal(t, string(rune('a'+i%26)), recv(t, ch).Keys[0])
 	}
-	assert.Zero(t, b.Dropped())
+	assert.True(t, empty(ch))
 }
 
 func TestConcurrentPublishers(t *testing.T) {

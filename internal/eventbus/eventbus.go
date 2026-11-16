@@ -6,7 +6,6 @@ package eventbus
 import (
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -80,10 +79,9 @@ type Subscriber interface {
 
 // Bus implements Publisher and Subscriber.
 type Bus struct {
-	mu      sync.RWMutex
-	subs    map[*subscription]struct{}
-	closed  bool
-	dropped atomic.Int64
+	mu     sync.RWMutex
+	subs   map[*subscription]struct{}
+	closed bool
 }
 
 // New creates an empty bus.
@@ -137,26 +135,25 @@ func (b *Bus) Publish(e Event) {
 		return
 	}
 	for s := range b.subs {
-		if !s.deliver(e) {
-			b.dropped.Add(1)
-		}
+		s.deliver(e)
 	}
 }
 
-// deliver tries a direct send, falling back to the overflow list; false = dropped.
-func (s *subscription) deliver(e Event) bool {
+// deliver tries a direct send, falling back to the overflow list (or, for a coalesced
+// ValuesUpdated, dropping the event).
+func (s *subscription) deliver(e Event) {
 	s.mu.Lock()
 	queued := len(s.overflow) > 0
 	s.mu.Unlock()
 	if !queued {
 		select {
 		case s.ch <- e:
-			return true
+			return
 		default:
 		}
 	}
 	if s.policy == Coalesce && e.Kind == ValuesUpdated {
-		return false
+		return
 	}
 	s.mu.Lock()
 	s.overflow = append(s.overflow, e)
@@ -165,7 +162,6 @@ func (s *subscription) deliver(e Event) bool {
 	case s.kick <- struct{}{}:
 	default:
 	}
-	return true
 }
 
 // pump moves overflow events into the channel, blocking only its own goroutine.
@@ -202,9 +198,6 @@ func (s *subscription) drain() bool {
 		s.mu.Unlock()
 	}
 }
-
-// Dropped returns the number of coalesced (dropped) deliveries.
-func (b *Bus) Dropped() int64 { return b.dropped.Load() }
 
 // Closed reports whether Close was called (health probe).
 func (b *Bus) Closed() bool {

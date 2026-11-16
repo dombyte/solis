@@ -21,7 +21,7 @@ func TestSlot(t *testing.T) {
 	v, _ = s.Load()
 	assert.Equal(t, "b", v)
 
-	s.Clear()
+	s.ClearIf(func(v string) bool { return v == "b" })
 	_, ok = s.Load()
 	assert.False(t, ok)
 }

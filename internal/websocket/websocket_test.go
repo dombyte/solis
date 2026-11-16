@@ -247,7 +247,7 @@ func TestHubStopClosesClientsAndRestartingHub503(t *testing.T) {
 	c := e.dial(nil)
 	send(t, c, ClientMessage{Type: TypeSubscribe, Keys: []string{"grid_power"}})
 	read(t, c)
-	e.slot.Clear()
+	e.slot.ClearIf(func(*Hub) bool { return true })
 	require.NoError(t, e.hub.Stop())
 	require.NoError(t, e.hub.Stop())
 	require.NoError(t, c.SetReadDeadline(time.Now().Add(2*time.Second)))

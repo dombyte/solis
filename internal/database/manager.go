@@ -197,7 +197,7 @@ func (m *Manager) RunPeriodicBackups(ctx context.Context) {
 	if !m.sleep(ctx, m.untilBackupDue()) {
 		return
 	}
-	m.every(ctx, m.backup.BackupInterval, true, func() {
+	m.every(ctx, m.backup.BackupInterval, func() {
 		if path, err := CreateBackup(ctx, m.cfg.Path, m.backup, m.clock.Now(), m.log); err != nil {
 			m.log.Error().Err(err).Msg("online backup failed")
 		} else {
@@ -243,18 +243,16 @@ func (m *Manager) RunPeriodicCleanup(ctx context.Context, c Cleaner) {
 		m.log.Info().Msg("periodic retention cleanup disabled")
 		return
 	}
-	m.every(ctx, m.cfg.CleanupInterval, true, func() {
+	m.every(ctx, m.cfg.CleanupInterval, func() {
 		if err := c.CleanupAll(ctx); err != nil {
 			m.log.Error().Err(err).Msg("retention cleanup failed")
 		}
 	})
 }
 
-// every runs fn on each tick (and once immediately when now is true) until ctx is done.
-func (m *Manager) every(ctx context.Context, d time.Duration, now bool, fn func()) {
-	if now {
-		fn()
-	}
+// every runs fn once immediately and then on each tick until ctx is done.
+func (m *Manager) every(ctx context.Context, d time.Duration, fn func()) {
+	fn()
 	t := m.clock.NewTicker(d)
 	defer t.Stop()
 	for {
