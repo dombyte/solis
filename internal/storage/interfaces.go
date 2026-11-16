@@ -45,6 +45,8 @@ type AggregatorStore interface {
 type ReadStore interface {
 	GetDailyHistory(ctx context.Context, key string, start, end time.Time) (
 		[]*history.DailyDataPoint, error)
+	GetDailyValues(ctx context.Context, keys []string, start, end time.Time) (
+		map[string]map[string]float64, error)
 	GetMonthlyHistory(ctx context.Context, key string, start, end time.Time) (
 		[]*history.MonthlyDataPoint, error)
 	GetYearlyHistory(ctx context.Context, key string, start, end time.Time) (

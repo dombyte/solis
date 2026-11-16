@@ -128,6 +128,86 @@ func (_c *MockReadStore_GetDailyHistory_Call) RunAndReturn(run func(ctx context.
 	return _c
 }
 
+// GetDailyValues provides a mock function for the type MockReadStore
+func (_mock *MockReadStore) GetDailyValues(ctx context.Context, keys []string, start time.Time, end time.Time) (map[string]map[string]float64, error) {
+	ret := _mock.Called(ctx, keys, start, end)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDailyValues")
+	}
+
+	var r0 map[string]map[string]float64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, time.Time, time.Time) (map[string]map[string]float64, error)); ok {
+		return returnFunc(ctx, keys, start, end)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []string, time.Time, time.Time) map[string]map[string]float64); ok {
+		r0 = returnFunc(ctx, keys, start, end)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]map[string]float64)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []string, time.Time, time.Time) error); ok {
+		r1 = returnFunc(ctx, keys, start, end)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockReadStore_GetDailyValues_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDailyValues'
+type MockReadStore_GetDailyValues_Call struct {
+	*mock.Call
+}
+
+// GetDailyValues is a helper method to define mock.On call
+//   - ctx context.Context
+//   - keys []string
+//   - start time.Time
+//   - end time.Time
+func (_e *MockReadStore_Expecter) GetDailyValues(ctx any, keys any, start any, end any) *MockReadStore_GetDailyValues_Call {
+	return &MockReadStore_GetDailyValues_Call{Call: _e.mock.On("GetDailyValues", ctx, keys, start, end)}
+}
+
+func (_c *MockReadStore_GetDailyValues_Call) Run(run func(ctx context.Context, keys []string, start time.Time, end time.Time)) *MockReadStore_GetDailyValues_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []string
+		if args[1] != nil {
+			arg1 = args[1].([]string)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		var arg3 time.Time
+		if args[3] != nil {
+			arg3 = args[3].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockReadStore_GetDailyValues_Call) Return(stringToStringToFloat64 map[string]map[string]float64, err error) *MockReadStore_GetDailyValues_Call {
+	_c.Call.Return(stringToStringToFloat64, err)
+	return _c
+}
+
+func (_c *MockReadStore_GetDailyValues_Call) RunAndReturn(run func(ctx context.Context, keys []string, start time.Time, end time.Time) (map[string]map[string]float64, error)) *MockReadStore_GetDailyValues_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetErrorHistory provides a mock function for the type MockReadStore
 func (_mock *MockReadStore) GetErrorHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*history.ErrorDataPoint, error) {
 	ret := _mock.Called(ctx, key, start, end)

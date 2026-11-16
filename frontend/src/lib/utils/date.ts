@@ -1,45 +1,21 @@
-import { format, startOfDay, startOfMonth, startOfYear } from 'date-fns';
+import { format, startOfMonth, startOfYear, subYears } from 'date-fns';
 import type { Period } from '../../types';
 
+/** Years the yearly history shows by default, the current one included. */
+const DEFAULT_YEARS = 5;
+
 /**
- * Get date range with proper formatting for each period
+ * The default history range of a period, as the keys the API takes: the current month by
+ * day, the current year by month, the last five years (this one included) by year.
  */
 export function getDateRangeForPeriod(period: Period): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date();
-  
+  const today = new Date();
   switch (period) {
-    case 'daily':
-      // Current month: start from first day of current month
-      start.setDate(1);
-      return {
-        start: format(startOfDay(start), 'yyyy-MM-dd'),
-        end: format(startOfDay(end), 'yyyy-MM-dd'),
-      };
     case 'monthly':
-      // Current year: start from January 1st of current year
-      start.setMonth(0);
-      start.setDate(1);
-      return {
-        start: format(startOfMonth(start), 'yyyy-MM'),
-        end: format(startOfMonth(end), 'yyyy-MM'),
-      };
+      return { start: format(startOfYear(today), 'yyyy-MM'), end: format(today, 'yyyy-MM') };
     case 'yearly':
-      // Last 5 years: start from January 1st, 5 years ago
-      start.setFullYear(end.getFullYear() - 5);
-      start.setMonth(0);
-      start.setDate(1);
-      return {
-        start: format(startOfYear(start), 'yyyy'),
-        end: format(startOfYear(end), 'yyyy'),
-      };
+      return { start: format(subYears(today, DEFAULT_YEARS - 1), 'yyyy'), end: format(today, 'yyyy') };
     default:
-      start.setDate(1);
-      return {
-        start: format(startOfDay(start), 'yyyy-MM-dd'),
-        end: format(startOfDay(end), 'yyyy-MM-dd'),
-      };
+      return { start: format(startOfMonth(today), 'yyyy-MM-dd'), end: format(today, 'yyyy-MM-dd') };
   }
 }
-
-

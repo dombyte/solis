@@ -1,4 +1,5 @@
 import type { ReportFigure } from '../api/report';
+import { formatNumber as formatShared } from './format';
 
 const FIGURE_LABELS: Record<string, string> = {
   pv: 'PV yield',
@@ -13,9 +14,9 @@ const FIGURE_LABELS: Record<string, string> = {
 
 export const figureLabel = (id: string): string => FIGURE_LABELS[id] ?? id;
 
-/** One decimal in the browser's locale ("4,512.3" / "4.512,3"). */
+/** One decimal, the same separators as the PDF ("4,512.3"). */
 export function formatNumber(v: number): string {
-  return v.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return formatShared(v, 1);
 }
 
 /** A figure's value without unit; "–" without data. */

@@ -155,6 +155,8 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
         status={inverter.status}
         operatingStatus={inverter.operatingStatus}
         alert={inverter.alert}
+        present={inverter.present}
+        dim={!inverter.present && !stale}
       />
     </svg>
     <div className="sr-only" role="note">

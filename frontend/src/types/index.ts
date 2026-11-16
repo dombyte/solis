@@ -26,7 +26,6 @@ export interface GroupConfig {
   description?: string;
   dataIds: string[];       // Internal IDs from data.ts
   category?: string;
-  layout?: 'grid' | 'list' | 'compact';
   columns?: number;
   visible?: boolean;
   order?: number;
@@ -121,6 +120,8 @@ export interface ChartDataset {
 
 export interface ChartData {
   labels: string[];
+  /** Compact labels for narrow screens ("18 Nov", "Nov"), same order as labels. */
+  shortLabels: string[];
   datasets: ChartDataset[];
 }
 

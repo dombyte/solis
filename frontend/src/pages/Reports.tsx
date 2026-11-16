@@ -6,7 +6,7 @@ import { CompareSelect } from '../components/reports/CompareSelect';
 import { KeyFigures } from '../components/reports/KeyFigures';
 import { PeriodPicker } from '../components/reports/PeriodPicker';
 import { ReportChart } from '../components/reports/ReportChart';
-import { useMobile } from '../hooks/useMobile';
+import { Page } from '../components/layout/Page';
 import { useReport } from '../lib/hooks/useReport';
 import { useToday } from '../lib/hooks/useToday';
 import { downloadReport, type CompareMode, type Granularity, type ReportQuery } from '../lib/api/report';
@@ -15,11 +15,11 @@ import {
 } from '../lib/utils/reportRange';
 import { formatNumber } from '../lib/utils/reportFormat';
 import { cn } from '../lib/utils';
+import { SURFACE } from '../components/ui/surface';
 
 const GRANULARITY_LABEL: Record<Granularity, string> = { day: 'Per day', month: 'Per month', year: 'Per year' };
 
 export function Reports(): React.ReactElement {
-  const isMobile = useMobile();
   const today = useToday();
   const [range, setRange] = useState<DayRange>(() => presetRange('last_month', today));
   const [compare, setCompare] = useState<CompareMode>('last_year');
@@ -49,19 +49,19 @@ export function Reports(): React.ReactElement {
     }
   };
 
-  const days = rangeDays(range);
+  // The report covers finished days only: a range ending today stops at yesterday, and
+  // every label says so instead of showing the selected range.
+  const covered = finishedRange(range, today);
+  const days = rangeDays(covered);
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 lg:p-8 w-full max-w-6xl flex flex-col gap-5 sm:gap-6">
-      <header className="flex flex-col gap-1.5">
-        {!isMobile && <h1 className="text-2xl font-bold">Reports</h1>}
-        <p className="text-sm text-muted-foreground">
-          Energy report for a period: PDF with charts and key figures, CSV with the raw numbers.
-        </p>
-      </header>
+    <Page
+      title="Reports"
+      description="Energy report for a period: PDF with charts and key figures, CSV with the raw numbers."
+    >
 
       <div className="flex flex-col lg:flex-row gap-4 sm:gap-5">
-        <section aria-labelledby="period-title" className="flex-[2] min-w-0 rounded-xl border border-border bg-card p-4 sm:p-5 flex flex-col gap-3">
+        <section aria-labelledby="period-title" className={cn(SURFACE, "flex-[2] min-w-0 p-4 sm:p-5 flex flex-col gap-3")}>
           <h2 id="period-title" className="text-base font-semibold">Period and comparison</h2>
           {/* Like comparing two branches: the report period on the left, what it is compared with on the right. */}
           <div className="flex flex-col md:flex-row md:items-center gap-2">
@@ -72,17 +72,16 @@ export function Reports(): React.ReactElement {
             <ArrowDown aria-hidden="true" className="md:hidden size-4 self-center text-muted-foreground" />
             <div className="flex-1 min-w-0">
               {/* The server compares the finished days, so the options show those dates. */}
-              <CompareSelect mode={compare} range={finishedRange(range, today)} onChange={setCompare} />
+              <CompareSelect mode={compare} range={covered} onChange={setCompare} />
             </div>
           </div>
           <span className="text-sm text-muted-foreground">
-            {days} {days === 1 ? 'day' : 'days'} · charts grouped by{' '}
-            {autoGranularity(finishedRange(range, today))}
+            {days} {days === 1 ? 'day' : 'days'} · charts grouped by {autoGranularity(covered)}
           </span>
           {problem && <p className="text-sm text-destructive" role="alert">{problem}</p>}
         </section>
 
-        <section aria-labelledby="download-title" className="flex-1 rounded-xl border border-border bg-card p-4 sm:p-5 flex flex-col gap-4">
+        <section aria-labelledby="download-title" className={cn(SURFACE, "flex-1 p-4 sm:p-5 flex flex-col gap-4")}>
           <h2 id="download-title" className="text-base font-semibold">Download</h2>
           <div className="flex flex-col gap-1.5">
             <Button type="button" size="lg" className="h-12 text-base gap-2" disabled={!query || download.busy !== null} onClick={() => runDownload('pdf')}>
@@ -115,30 +114,32 @@ export function Reports(): React.ReactElement {
         </section>
       </div>
 
-      <section aria-labelledby="preview-title" aria-busy={isLoading} className="flex flex-col gap-3.5">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="preview-title" className="text-lg font-semibold">Preview · {periodName(range)}</h2>
-          {report?.comparison && (
-            <span className="text-sm text-muted-foreground">
-              Compared with {periodName({ from: report.comparison.from, to: report.comparison.to })}
-            </span>
+      {!problem && (
+        <section aria-labelledby="preview-title" aria-busy={isLoading} className="flex flex-col gap-3.5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="preview-title" className="text-lg font-semibold">Preview · {periodName(covered)}</h2>
+            {report?.comparison && (
+              <span className="text-sm text-muted-foreground">
+                Compared with {periodName({ from: report.comparison.from, to: report.comparison.to })}
+              </span>
+            )}
+          </div>
+          {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+          {!report && isLoading && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-10 justify-center">
+              <Loader2 className="size-4 animate-spin" /> Loading report…
+            </div>
           )}
-        </div>
-        {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
-        {!report && isLoading && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground py-10 justify-center">
-            <Loader2 className="size-4 animate-spin" /> Loading report…
-          </div>
-        )}
-        {report && (
-          <div className={cn('flex flex-col gap-4 transition-opacity', isLoading && 'opacity-60')}>
-            <KeyFigures report={report} />
-            <ReportChart report={report} />
-            <ReportNotes report={report} />
-          </div>
-        )}
-      </section>
-    </div>
+          {report && (
+            <div className={cn('flex flex-col gap-4 transition-opacity', isLoading && 'opacity-60')}>
+              <KeyFigures report={report} />
+              <ReportChart report={report} />
+              <ReportNotes report={report} />
+            </div>
+          )}
+        </section>
+      )}
+    </Page>
   );
 }
 
@@ -183,7 +184,7 @@ const NOTE_ICONS = {
 function Note({ icon, children }: { icon: keyof typeof NOTE_ICONS; children: React.ReactNode }) {
   const { Icon, className } = NOTE_ICONS[icon];
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-card px-3.5 py-3">
+    <div className={cn(SURFACE, "flex items-start gap-2.5 px-3.5 py-3")}>
       <Icon aria-hidden="true" className={cn('size-4 mt-0.5 shrink-0', className)} />
       <span>{children}</span>
     </div>

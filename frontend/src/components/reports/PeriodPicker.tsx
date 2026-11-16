@@ -7,7 +7,7 @@ import { Calendar } from '../ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useMobile } from '../../hooks/useMobile';
 import {
-  PRESET_LABEL, REPORT_PRESETS, formatRange, presetOf, presetRange, type DayRange,
+  PRESET_LABEL, REPORT_PRESETS, finishedRange, formatRange, presetOf, presetRange, type DayRange,
 } from '../../lib/utils/reportRange';
 import { cn } from '../../lib/utils';
 import { MENU_CLASS, OPTION_CLASS, TRIGGER_CLASS } from './styles';
@@ -24,6 +24,8 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState<DateRange | undefined>();
   const preset = presetOf(range, today);
+  // Labels show the days a report covers: a range ending today stops at yesterday.
+  const label = (r: DayRange) => formatRange(finishedRange(r, today));
 
   const toggle = (next: boolean) => {
     if (next) setCustom({ from: parseISO(range.from), to: parseISO(range.to) });
@@ -40,12 +42,12 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
   return (
     <Popover open={open} onOpenChange={toggle}>
       <PopoverTrigger asChild>
-        <button type="button" className={TRIGGER_CLASS} aria-label={`Report period: ${PRESET_LABEL[preset]}, ${formatRange(range)}`}>
+        <button type="button" className={TRIGGER_CLASS} aria-label={`Report period: ${PRESET_LABEL[preset]}, ${label(range)}`}>
           <CalendarIcon aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" />
           <span className="flex flex-col min-w-0 flex-1">
             <span className="text-xs text-muted-foreground">Period</span>
             <span className="font-semibold truncate">{PRESET_LABEL[preset]}</span>
-            <span className="text-muted-foreground truncate">{formatRange(range)}</span>
+            <span className="text-muted-foreground truncate">{label(range)}</span>
           </span>
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </button>
@@ -61,7 +63,7 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
                   <Check aria-hidden="true" className={cn('size-4 shrink-0', !active && 'invisible')} />
                   <span className="flex flex-col">
                     <span className={cn(active && 'font-semibold')}>{p.label}</span>
-                    <span className="text-xs text-muted-foreground">{formatRange(r)}</span>
+                    <span className="text-xs text-muted-foreground">{label(r)}</span>
                   </span>
                 </button>
               );
@@ -74,12 +76,13 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
               selected={custom}
               onSelect={setCustom}
               defaultMonth={parseISO(range.from)}
+              maxDate={today}
               numberOfMonths={isMobile ? 1 : 2}
               viewMode="daily"
             />
             <Button type="button" disabled={!customRange} onClick={() => customRange && choose(customRange)}>
               <Check />
-              {customRange ? `Use ${formatRange(customRange)}` : 'Pick a start and an end day'}
+              {customRange ? `Use ${label(customRange)}` : 'Pick a start and an end day'}
             </Button>
           </div>
         </div>

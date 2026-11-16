@@ -22,10 +22,8 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
     return <SkeletonCard className={`w-full ${className}`} />;
   }
 
-  const gridClass = group.layout === 'grid' ? 'grid-cols-4-custom' : 'grid-cols-1';
-
   return (
-    <Card className={`w-full min-w-0 ${className}`}>
+    <Card className={`w-full min-w-0 flex flex-col ${className}`}>
       <CardHeader>
         <div className="flex items-center gap-2">
           <CardTitle className="text-base sm:text-lg">{group.title}</CardTitle>
@@ -36,8 +34,10 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
           )}
         </div>
       </CardHeader>
-      <CardContent>
-        <div className={`grid gap-4 ${gridClass}`}>
+      {/* A card stretched by its row (Today next to the flow diagram) spreads its rows
+          over the height instead of leaving the lower half empty. */}
+      <CardContent className="flex-1">
+        <div className="grid grid-cols-1 gap-4 h-full content-evenly">
           {validDataIds.map((dataId: string) => (
             <ValueDisplay
               key={dataId}

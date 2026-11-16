@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { SURFACE } from "./surface"
 import { cn } from "@/lib/utils"
 
 const Card = React.forwardRef<
@@ -9,7 +10,8 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-2xl border bg-card/80 text-card-foreground shadow-lg backdrop-blur-lg transition-all-smooth",
+      SURFACE,
+      "transition-all-smooth",
       className
     )}
     {...props}

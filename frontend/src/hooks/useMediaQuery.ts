@@ -1,24 +1,26 @@
 import { useState, useEffect } from 'react';
 
+function matches(query: string): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(query).matches;
+}
+
 /**
- * Custom hook to detect media query matches
- * Returns true when the media query matches
+ * Returns whether the media query matches and follows its changes. The first render
+ * already uses the current answer, so layouts do not flash the wrong variant on load.
  */
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
+  const [state, setState] = useState(() => matches(query));
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const mediaQuery = window.matchMedia(query);
-    const handleChange = () => {
-      setMatches(mediaQuery.matches);
-    };
+    const handleChange = () => setState(mediaQuery.matches);
 
     handleChange();
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [query]);
 
-  return matches;
+  return state;
 }

@@ -71,20 +71,11 @@ func finishedRange(q ReportQuery) (r report.Range, todayExcluded bool, err error
 	return r.Finished(today)
 }
 
-// reportDays reads the complete days of r: one bounded query per energy series.
+// reportDays reads the complete days of r: one bounded query for all energy series.
 func (s *ReadService) reportDays(ctx context.Context, r report.Range) ([]report.Day, error) {
-	keys := report.DailyKeys()
-	values := make(map[string]map[string]float64, len(keys))
-	for _, key := range keys {
-		rows, err := s.d.Store.GetDailyHistory(ctx, key, r.From, r.To)
-		if err != nil {
-			return nil, fmt.Errorf("service: report rows of %s: %w", key, err)
-		}
-		byDay := make(map[string]float64, len(rows))
-		for _, p := range rows {
-			byDay[p.Date] = p.Value
-		}
-		values[key] = byDay
+	values, err := s.d.Store.GetDailyValues(ctx, report.DailyKeys(), r.From, r.To)
+	if err != nil {
+		return nil, fmt.Errorf("service: report rows: %w", err)
 	}
 	return report.Assemble(values)
 }

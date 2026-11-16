@@ -216,6 +216,35 @@ func TestPoll_DisconnectedIsRecovering(t *testing.T) {
 	assert.Equal(t, health.Healthy, e.p.State())
 }
 
+// While Modbus makes its first connection the poller retries after startupRetry instead
+// of a full interval; once a poll has succeeded, an outage keeps the normal cadence.
+func TestPoll_RetriesSoonUntilFirstConnection(t *testing.T) {
+	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
+	e.dev.connected.Store(false)
+	e.start()
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
+
+	e.dev.connected.Store(true)
+	require.True(t, e.clk.BlockUntil(1))
+	e.clk.Advance(startupRetry)
+	e.waitPolls(1)
+	assert.Equal(t, health.Healthy, e.p.State())
+
+	e.dev.connected.Store(false)
+	require.True(t, e.clk.BlockUntil(1))
+	e.clk.Advance(pollEvery)
+	require.Eventually(t, func() bool { return e.p.State() == health.Recovering }, time.Second,
+		time.Millisecond)
+	e.dev.connected.Store(true)
+	require.True(t, e.clk.BlockUntil(1))
+	e.clk.Advance(startupRetry)
+	assert.Never(t, func() bool { return e.polls.Load() > 1 }, 30*time.Millisecond,
+		time.Millisecond, "after a success an outage keeps the full interval")
+	e.clk.Advance(pollEvery - startupRetry)
+	e.waitPolls(2)
+}
+
 func TestPoll_BlockRetryThenSuccess(t *testing.T) {
 	e := newEnv(t, time.Date(2026, 8, 5, 12, 0, 0, 0, time.Local))
 	e.dev.set(33035, 10)

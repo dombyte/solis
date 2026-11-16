@@ -1,8 +1,7 @@
 import type { SolisStatusDecoded, RegisterMetadata, RegisterValue } from '../../types';
 
 // Check if a status should show an alert (non-standard status).
-// Shared by StatusDisplay (Status page) and the flow diagram's inverter node
-// so both surfaces agree on what counts as an alert.
+// Used by the flow diagram's inverter node.
 export function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterValue | undefined): boolean {
   if (!register || !value) return false;
 
@@ -68,4 +67,17 @@ export function isAlertStatus(register: RegisterMetadata | undefined, value: Reg
 
   // Default: don't alert
   return false;
+}
+
+/**
+ * Display text of a status register: the status name, the active fault bits, "No faults"
+ * for a bitmask with no bit set, else the plain value ("-" without one).
+ */
+export function statusText(decoded: unknown, value?: unknown): string {
+  if (Array.isArray(decoded)) return decoded.length > 0 ? decoded.join(', ') : 'No faults';
+  if (decoded !== null && typeof decoded === 'object') {
+    return (decoded as { name?: string }).name || JSON.stringify(decoded);
+  }
+  if (decoded !== null && decoded !== undefined) return String(decoded);
+  return value === null || value === undefined ? '-' : String(value);
 }

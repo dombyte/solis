@@ -173,11 +173,13 @@ export const useRegisterStore = create<RegisterStoreState>((set, get) => ({
     const updates = new Map(get().registerValues);
     let changed = false;
 
-    // Keys the server no longer has a value for: drop them so the UI shows "no data"
-    // instead of a stale value.
+    // Keys the server no longer has a value for: empty them (like a disconnect does) so
+    // the UI shows "no data" instead of a stale value.
     removed?.forEach((key) => {
       const reg = metadataByKey.get(key);
-      if (reg && updates.delete(reg.id)) changed = true;
+      if (!reg || updates.get(reg.id)?.value === null) return;
+      updates.set(reg.id, { key, id: reg.id, value: null, unit: reg.unit });
+      changed = true;
     });
 
     Object.entries(values).forEach(([key, dto]) => {

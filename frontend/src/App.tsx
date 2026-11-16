@@ -6,7 +6,7 @@ import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { LoadingScreen } from './components/layout/LoadingScreen';
-import { useMobile } from './hooks/useMobile';
+import { useCompactLayout } from './hooks/useMobile';
 
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
@@ -16,7 +16,7 @@ const Status = lazy(() => import('./pages/Status').then(m => ({ default: m.Statu
 const Info = lazy(() => import('./pages/Info').then(m => ({ default: m.Info })));
 
 export function App() {
-  const isMobile = useMobile();
+  const isMobile = useCompactLayout();
 
   return (
         <BrowserRouter>

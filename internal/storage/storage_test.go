@@ -631,6 +631,28 @@ func TestHistoryFormats(t *testing.T) {
 	assert.Equal(t, clk.Now().UTC().Format("2006-01-02T15:04:05.000Z"), e[0].Timestamp)
 }
 
+func TestGetDailyValues_GroupsKeysOfARange(t *testing.T) {
+	s, _, _ := newStore(t, day("2026-09-20"))
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Daily: []DailyRow{
+		{Key: "pv_energy_daily", Day: "2026-09-19", Value: 4},
+		{Key: "pv_energy_daily", Day: "2026-09-20", Value: 5},
+		{Key: "grid_import_daily", Day: "2026-09-20", Value: 1.5},
+		{Key: "grid_export_daily", Day: "2026-09-18", Value: 9}, // before the range
+	}}))
+	keys := []string{"pv_energy_daily", "grid_import_daily", "grid_export_daily"}
+	v, err := s.GetDailyValues(ctx, keys, day("2026-09-19"), day("2026-09-20"))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]map[string]float64{
+		"pv_energy_daily":   {"2026-09-19": 4, "2026-09-20": 5},
+		"grid_import_daily": {"2026-09-20": 1.5},
+		"grid_export_daily": {},
+	}, v)
+
+	empty, err := s.GetDailyValues(ctx, nil, day("2026-09-19"), day("2026-09-20"))
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
 func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 	s, clk, _ := newStore(t, day("2026-09-20"))
 	base := clk.Now()
@@ -666,4 +688,7 @@ func TestReadStore_ExpiredContextIsDeadlineExceeded(t *testing.T) {
 	_, err := s.GetDailyHistory(expired, "pv_energy_daily", day("2026-08-01"), day("2026-08-05"))
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	_, err = s.GetDailyValues(expired, []string{"pv_energy_daily"}, day("2026-08-01"),
+		day("2026-08-05"))
+	assert.ErrorIs(t, err, context.DeadlineExceeded, "the report read too")
 }

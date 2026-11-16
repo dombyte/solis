@@ -35,6 +35,8 @@ interface CalendarProps {
   numberOfMonths?: number
   className?: string
   viewMode?: ViewMode
+  /** Last selectable day; later days, months and years are disabled. */
+  maxDate?: Date
 }
 
 export function Calendar({
@@ -45,7 +47,10 @@ export function Calendar({
   numberOfMonths = 1,
   className,
   viewMode = 'daily',
+  maxDate,
 }: CalendarProps) {
+  // A period is selectable when it starts on or before maxDate.
+  const selectable = (periodStart: Date) => !maxDate || periodStart <= maxDate
   const [currentMonth, setCurrentMonth] = useState(defaultMonth)
 
   const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1))
@@ -91,8 +96,8 @@ export function Calendar({
       if (!range || !range.from) {
         onSelect({ from: newDate, to: undefined } as DateRange)
       } else if (range.from && !range.to) {
-        const newToDate = new Date(range.from)
-        newToDate.setMonth(monthIndex)
+        // The clicked month of the displayed year (not of range.from's year).
+        const newToDate = new Date(newDate.getFullYear(), monthIndex, range.from.getDate())
         if (newToDate < range.from) {
           onSelect({ from: newToDate, to: range.from } as DateRange)
         } else {
@@ -205,8 +210,9 @@ export function Calendar({
                 key={year}
                 type="button"
                 onClick={() => handleYearClick(year)}
+                disabled={!selectable(new Date(year, 0, 1))}
                 className={`
-                  aspect-square w-full rounded text-sm transition-colors font-medium
+                  aspect-square w-full rounded text-sm transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed
                   ${isInSelectedRange 
                     ? "bg-primary text-primary-foreground" 
                     : isCurrentYear
@@ -265,8 +271,9 @@ export function Calendar({
                 key={monthIndex}
                 type="button"
                 onClick={() => handleMonthClick(monthIndex)}
+                disabled={!selectable(date)}
                 className={`
-                  aspect-video w-full rounded text-sm transition-colors font-medium
+                  aspect-video w-full rounded text-sm transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed
                   ${isInSelectedRange 
                     ? "bg-primary text-primary-foreground" 
                     : isCurrentMonth
@@ -333,10 +340,13 @@ export function Calendar({
                   {week.map((day) => {
                     const isCurrentMonth = isSameMonth(day, month)
                     const isToday = isSameDay(day, startOfDay(new Date()))
-                    const range = selected as DateRange | undefined
+                    const enabled = isCurrentMonth && selectable(day)
+                    // Days of the neighbouring months are placeholders: they never show
+                    // the selection (the month they belong to shows it).
+                    const range = isCurrentMonth ? selected as DateRange | undefined : undefined
                     const isRangeStart = range?.from && isSameDay(day, range.from)
                     const isRangeEnd = range?.to && isSameDay(day, range.to)
-                    const inRange = isInRange(day)
+                    const inRange = isCurrentMonth && isInRange(day)
                     const isInSelectedRange = inRange || isRangeStart || isRangeEnd
 
                     return (
@@ -344,12 +354,12 @@ export function Calendar({
                         key={day.toString()}
                         type="button"
                         onClick={() => handleDayClick(day)}
-                        disabled={!isCurrentMonth}
+                        disabled={!enabled}
                         className={`
                           aspect-square w-full rounded text-sm transition-colors font-medium
-                          ${isCurrentMonth 
+                          ${enabled
                             ? "cursor-pointer" 
-                            : "text-muted-foreground cursor-not-allowed"
+                            : `text-muted-foreground cursor-not-allowed ${isCurrentMonth ? "opacity-40" : ""}`
                           }
                           ${isRangeStart 
                             ? "bg-primary text-primary-foreground rounded-l-md" 
@@ -359,7 +369,7 @@ export function Calendar({
                             ? "bg-primary/70 dark:bg-primary/80 text-primary-foreground" 
                             : isToday 
                             ? "bg-primary/20 dark:bg-primary/30 ring-2 ring-primary font-bold" 
-                            : "bg-transparent hover:bg-muted/80 dark:hover:bg-muted/80"
+                            : enabled ? "bg-transparent hover:bg-muted/80 dark:hover:bg-muted/80" : "bg-transparent"
                           }
                         `}
                         aria-pressed={isInSelectedRange}

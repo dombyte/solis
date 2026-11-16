@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatValue } from '../../lib/utils/format';
+import { formatMeasurement } from '../../lib/utils/format';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { Skeleton } from '../ui/skeleton';
 import { InfoPopover } from '../ui/info-popover';
@@ -45,95 +45,23 @@ export function ValueDisplay({
     );
   }
 
-  let displayValue: string = '-';
+  // The resolved value (templates applied) wins over the raw store value.
+  const raw = resolvedRegister?.displayValue !== undefined ? resolvedRegister.displayValue : value?.value;
+  const registerUnit = register.unit || '';
+  let displayValue = '-';
   let displayUnit = '';
-  const statusDecoded = value?.statusDecoded;
-
-  // Use resolved display value if available from template resolution
-  if (resolvedRegister?.displayValue !== undefined) {
-    const resolvedValue = resolvedRegister.displayValue;
-    const resolvedUnit = resolvedRegister.unit || '';
-    const resolvedPrecision = resolvedRegister.precision;
-    
-    // For power values that should be displayed in kW
-    if (resolvedUnit === 'W' && typeof resolvedValue === 'number') {
-      const numValue = Number(resolvedValue);
-      if (Math.abs(numValue) >= 1000) {
-        displayValue = (numValue / 1000).toFixed(resolvedPrecision ?? 2);
-        displayUnit = showUnit ? 'kW' : '';
-      } else {
-        displayValue = formatValue(resolvedValue, resolvedUnit, resolvedPrecision);
-        displayUnit = showUnit ? resolvedUnit : '';
-      }
-    }
-    // For power values already in kW
-    else if (resolvedUnit === 'kW' && typeof resolvedValue === 'number') {
-      displayValue = formatValue(resolvedValue, resolvedUnit, resolvedPrecision);
-      displayUnit = showUnit ? resolvedUnit : '';
-    }
-    // For energy values that should be displayed in kWh
-    else if (resolvedUnit === 'Wh' && typeof resolvedValue === 'number') {
-      const numValue = Number(resolvedValue);
-      if (Math.abs(numValue) >= 1000) {
-        displayValue = (numValue / 1000).toFixed(resolvedPrecision ?? 2);
-        displayUnit = showUnit ? 'kWh' : '';
-      } else {
-        displayValue = formatValue(resolvedValue, resolvedUnit, resolvedPrecision);
-        displayUnit = showUnit ? resolvedUnit : '';
-      }
-    }
-    // For energy values already in kWh
-    else if (resolvedUnit === 'kWh' && typeof resolvedValue === 'number') {
-      displayValue = formatValue(resolvedValue, resolvedUnit, resolvedPrecision);
-      displayUnit = showUnit ? resolvedUnit : '';
+  if (raw !== null && raw !== undefined) {
+    if (value?.statusDecoded !== undefined && value?.statusDecoded !== null) {
+      displayValue = String(raw); // a decoded status, already text
+    } else if (typeof raw === 'number') {
+      const m = formatMeasurement(raw, registerUnit, register.precision);
+      displayValue = m.value;
+      displayUnit = showUnit ? m.unit : '';
     } else {
-      displayValue = formatValue(resolvedValue, resolvedUnit, resolvedPrecision);
-      displayUnit = showUnit ? resolvedUnit : '';
+      displayValue = raw;
+      displayUnit = showUnit ? registerUnit : '';
     }
   }
-  else if (value?.value !== null && value?.value !== undefined) {
-    // For status values, use the pre-decoded display value
-    if (statusDecoded !== undefined && statusDecoded !== null) {
-      displayValue = String(value.value);
-      displayUnit = '';
-    }
-    // For power values that should be displayed in kW
-    else if (register.unit === 'W' && typeof value.value === 'number') {
-      const numValue = Number(value.value);
-      if (Math.abs(numValue) >= 1000) {
-        displayValue = (numValue / 1000).toFixed(register.precision ?? 2);
-        displayUnit = showUnit ? 'kW' : '';
-      } else {
-        displayValue = formatValue(value.value, register.unit || '', register.precision);
-        displayUnit = showUnit ? register.unit : '';
-      }
-    }
-    // For power values already in kW
-    else if (register.unit === 'kW' && typeof value.value === 'number') {
-      displayValue = formatValue(value.value, register.unit || '', register.precision);
-      displayUnit = showUnit ? register.unit : '';
-    }
-    // For energy values that should be displayed in kWh
-    else if (register.unit === 'Wh' && typeof value.value === 'number') {
-      const numValue = Number(value.value);
-      if (Math.abs(numValue) >= 1000) {
-        displayValue = (numValue / 1000).toFixed(register.precision ?? 2);
-        displayUnit = showUnit ? 'kWh' : '';
-      } else {
-        displayValue = formatValue(value.value, register.unit || '', register.precision);
-        displayUnit = showUnit ? register.unit : '';
-      }
-    }
-    // For energy values already in kWh
-    else if (register.unit === 'kWh' && typeof value.value === 'number') {
-      displayValue = formatValue(value.value, register.unit || '', register.precision);
-      displayUnit = showUnit ? register.unit : '';
-    } else {
-      displayValue = formatValue(value.value, register.unit || '', register.precision);
-      displayUnit = showUnit ? (register.unit || '') : '';
-    }
-  }
-
 
   // Label and value share one line when the row is wide enough for the longest label,
   // "Energy Consumption", with a 5-digit kWh value: 16rem with the small phone text,

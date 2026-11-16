@@ -1,5 +1,6 @@
 import type { RegisterMetadata, RegisterValue } from '../../../types';
 import { isAlertStatus } from '../../../lib/utils/status';
+import { formatPower } from '../../../lib/utils/format';
 
 // Flow register keys that are used for the power flow diagram
 const FLOW_KEYS = [
@@ -88,23 +89,18 @@ export interface FlowViewModel {
     status: string;
     operatingStatus: string;
     alert: boolean;
+    present: boolean;      // The inverter status is known (live data)
   };
   allPresent: boolean;    // All nodes have data
   stale: boolean;        // Any data is stale
 }
 
 /**
- * Format power value:
- * 2 decimals, W < 1000 ≤ kW; grid/battery show magnitude, sign conveyed by animation
+ * Power for a tile: grid and battery show the magnitude, the sign is conveyed by the edge
+ * animation.
  */
 function formatPowerW(value: number | null): string {
-  if (value === null || value === 0) return '0.00 W';
-  const abs = Math.abs(value);
-  const formatted = abs >= 1000 
-    ? (abs / 1000).toFixed(2) + ' kW'
-    : abs.toFixed(2) + ' W';
-  // Sign is conveyed by animation direction, not the text
-  return formatted;
+  return formatPower(Math.abs(value ?? 0));
 }
 
 /**
@@ -232,8 +228,7 @@ export function buildFlowViewModel(
     grid_power: getValue('grid_power'),
   };
 
-  // Status values + alert detection - reuses the same isAlertStatus logic as
-  // the Status page (StatusDisplay.tsx) so the two surfaces never disagree.
+  // Status values + alert detection (shared isAlertStatus rule).
   const solis = getRegisterAndValue('solis_status');
   const operating = getRegisterAndValue('operating_status');
   const solisStatus = getStatusName(solis.value);
@@ -366,20 +361,27 @@ export function buildFlowViewModel(
     nodes,
     edges,
     inverter: {
-      status: solisStatus ?? 'Unknown',
-      operatingStatus: operatingStatus ?? 'Unknown',
+      status: solisStatus ?? 'No data',
+      operatingStatus: operatingStatus ?? '–',
       alert,
+      present: solisStatus !== undefined,
     },
     allPresent,
     stale,
   };
 }
 
+/** Color of the inverter status: gray without data, red on an alert, green otherwise. */
+export function inverterStatusColor(present: boolean, alert: boolean): string {
+  if (!present) return 'var(--color-muted-foreground)';
+  return alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
+}
+
 /**
  * Get the sub-status text for backup
  */
 export function getBackupSubStatus(backupPower: number | null): string {
-  if (backupPower === null) return 'standby · ready';
+  if (backupPower === null) return ''; // no data: no claim about the backup output
   return backupPower > 0 ? 'supplying loads' : 'standby · ready';
 }
 
@@ -405,8 +407,7 @@ export function getBatterySubStatus(batteryPower: number | null): string {
 
 /**
  * Plain-text summary of the whole diagram for screen readers (read on demand, not a
- * live region: announcing every WebSocket tick would flood assistive tech). Only
- * status changes are live (StatusDisplay).
+ * live region: announcing every WebSocket tick would flood assistive tech).
  */
 export function buildFlowSummary(viewModel: FlowViewModel): string {
   const { nodes, inverter } = viewModel;

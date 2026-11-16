@@ -54,14 +54,17 @@ func (c *countingStore) CloseState(ctx context.Context) (storage.CloseState, err
 	return c.Store.CloseState(ctx)
 }
 
-// countingCache counts completed merges (the last step of a run).
+// countingCache counts completed merges (the last step of a run) and the values of the
+// latest one.
 type countingCache struct {
 	*cache.Cache
 	merges atomic.Int32
+	last   atomic.Int32
 }
 
 func (c *countingCache) Merge(domain string, v map[string]*solis.Value, at time.Time) {
 	defer c.merges.Add(1)
+	c.last.Store(int32(len(v)))
 	c.Cache.Merge(domain, v, at)
 }
 
