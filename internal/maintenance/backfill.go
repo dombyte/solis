@@ -278,12 +278,11 @@ func (r *recomputer) period(j job) error {
 	}
 	l, p := j.level, j.key
 	edges := r.reg.Edges(l)
-	sums, err := r.sums(aggregation.SourceKeys(edges), j.from, j.to)
+	sums, err := r.tx.SumDaily(aggregation.SourceKeys(edges), j.from, j.to)
 	if err != nil {
 		return err
 	}
-	vals := aggregation.ApplyEdges(edges, sums)
-	vals = aggregation.Merge(vals, aggregation.ApplyNet(r.reg.NetPairs(l), vals))
+	vals := aggregation.LevelValues(edges, r.reg.NetPairs(l), sums, nil)
 	for _, key := range sortedKeys(vals) {
 		old, had, err := r.tx.PeriodValue(l, key, p)
 		if err != nil {
@@ -306,19 +305,6 @@ func (r *recomputer) incomplete(j job) bool {
 	return !r.force && (r.first == "" || j.from < r.first)
 }
 
-// sums runs one bounded daily sum per source key.
-func (r *recomputer) sums(keys []string, from, to string) (aggregation.Values, error) {
-	sums := aggregation.Values{}
-	for _, k := range keys {
-		v, err := r.tx.SumDaily(k, from, to)
-		if err != nil {
-			return nil, err
-		}
-		sums[k] = v
-	}
-	return sums, nil
-}
-
 // refreshBaseline recomputes the total baseline the way the live aggregator builds it:
 // the daily rows of every folded year since the cutover year (totals are app-lifetime,
 // review DB-H2). Pre-cutover years are never added, and while no year since the cutover
@@ -330,7 +316,7 @@ func (r *recomputer) refreshBaseline() error {
 		return nil
 	}
 	edges := r.reg.Edges(period.Total)
-	sums, err := r.sums(aggregation.SourceKeys(edges), from, year+"-12-31")
+	sums, err := r.tx.SumDaily(aggregation.SourceKeys(edges), from, year+"-12-31")
 	if err != nil {
 		return err
 	}

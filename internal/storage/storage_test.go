@@ -416,9 +416,11 @@ func TestBackfill(t *testing.T) {
 	}}))
 
 	err = s.Backfill(ctx, func(tx BackfillTx) error {
-		sum, err := tx.SumDaily("pv_energy_daily", "2026-09-01", "2026-09-30")
+		sums, err := tx.SumDaily([]string{"pv_energy_daily", "grid_import_daily"},
+			"2026-09-01", "2026-09-30")
 		require.NoError(t, err)
-		assert.InDelta(t, 5.0, sum, 0)
+		assert.InDelta(t, 5.0, sums["pv_energy_daily"], 0)
+		assert.Contains(t, sums, "grid_import_daily", "a key without rows sums to 0")
 		_, ok, err := tx.PeriodValue(period.Monthly, "pv_energy_monthly", "2026-08")
 		require.NoError(t, err)
 		assert.False(t, ok)
