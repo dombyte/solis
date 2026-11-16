@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"github.com/dombyte/solis/internal/aggregation"
 	"github.com/dombyte/solis/internal/eventbus"
 	"github.com/dombyte/solis/internal/health"
 	"github.com/dombyte/solis/internal/period"
@@ -75,6 +76,8 @@ type Aggregator struct {
 	// written holds the rows of the last committed run (loop-owned): unchanged rows are
 	// not written again.
 	written map[rowID]float64
+	// merged holds the computed values last merged into the cache (loop-owned).
+	merged aggregation.Values
 }
 
 // New validates dependencies and returns a stopped aggregator.

@@ -52,8 +52,26 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	if err := a.persist(ctx, rs.write); err != nil {
 		return err
 	}
-	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(rs.current, now), now)
+	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(a.unmerged(rs.current), now), now)
 	return nil
+}
+
+// unmerged returns the current-period values that differ from the last ones merged into
+// the cache and records them. Most runs recompute identical values; merging them again
+// would publish an event and wake every consumer for nothing.
+func (a *Aggregator) unmerged(vals aggregation.Values) aggregation.Values {
+	if a.merged == nil {
+		a.merged = make(aggregation.Values, len(vals))
+	}
+	out := make(aggregation.Values, len(vals))
+	for k, v := range vals {
+		if old, ok := a.merged[k]; ok && old == v {
+			continue
+		}
+		a.merged[k] = v
+		out[k] = v
+	}
+	return out
 }
 
 // persist writes the rows whose value changed since the last committed run, plus the
