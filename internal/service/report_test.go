@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dombyte/solis/internal/history"
 	"github.com/dombyte/solis/internal/report"
 )
 
@@ -21,16 +20,18 @@ func date(s string) time.Time {
 	return t
 }
 
-// expectDays answers every series of [from, to] with one row per listed day (value 1).
+// expectDays answers every series of [from, to] with one row per listed day (value 1), in
+// one read.
 func expectDays(f fixture, from, to string, days ...string) {
-	rows := make([]*history.DailyDataPoint, len(days))
-	for i, d := range days {
-		rows[i] = &history.DailyDataPoint{Date: d, Value: 1}
-	}
+	values := make(map[string]map[string]float64)
 	for _, k := range report.DailyKeys() {
-		f.store.EXPECT().GetDailyHistory(mock.Anything, k, date(from), date(to)).
-			Return(rows, nil).Once()
+		values[k] = make(map[string]float64, len(days))
+		for _, d := range days {
+			values[k][d] = 1
+		}
 	}
+	f.store.EXPECT().GetDailyValues(mock.Anything, report.DailyKeys(), date(from), date(to)).
+		Return(values, nil).Once()
 }
 
 func TestReport_WithComparison(t *testing.T) {
@@ -85,7 +86,7 @@ func TestReport_InvalidParameters(t *testing.T) {
 func TestReport_StoreErrors(t *testing.T) {
 	boom := errors.New("boom")
 	f := newFixture(t)
-	f.store.EXPECT().GetDailyHistory(mock.Anything, "pv_energy_daily", mock.Anything,
+	f.store.EXPECT().GetDailyValues(mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Return(nil, boom).Once()
 	_, err := f.svc.Report(ctx, ReportQuery{
 		From: "2026-10-01", To: "2026-10-29", Compare: "none", Today: "2026-10-30",
@@ -94,7 +95,7 @@ func TestReport_StoreErrors(t *testing.T) {
 
 	f = newFixture(t)
 	expectDays(f, "2026-10-01", "2026-10-29")
-	f.store.EXPECT().GetDailyHistory(mock.Anything, "pv_energy_daily", mock.Anything,
+	f.store.EXPECT().GetDailyValues(mock.Anything, mock.Anything, mock.Anything,
 		mock.Anything).Return(nil, boom).Once()
 	_, err = f.svc.Report(ctx, ReportQuery{
 		From: "2026-10-01", To: "2026-10-29", Today: "2026-10-30",

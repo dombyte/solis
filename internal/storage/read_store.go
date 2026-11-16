@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/dombyte/solis/internal/database/migrations"
@@ -112,6 +113,43 @@ func (s *Storage) GetDailyHistory(ctx context.Context, key string, start, end ti
 			var dp history.DailyDataPoint
 			return &dp, r.Scan(&dp.Date, &dp.Value, &dp.RawValue)
 		})
+}
+
+// GetDailyValues returns the daily rows of keys between the start and end days in one
+// query, as key -> day (YYYY-MM-DD) -> value. Every requested key is present; a key
+// without rows maps to an empty map.
+func (s *Storage) GetDailyValues(ctx context.Context, keys []string, start, end time.Time) (
+	map[string]map[string]float64, error,
+) {
+	out := make(map[string]map[string]float64, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	args := []any{start.Format(period.DayLayout), end.Format(period.DayLayout)}
+	for _, k := range keys {
+		out[k] = make(map[string]float64)
+		args = append(args, k)
+	}
+	// #nosec G202 -- only "?" placeholders are concatenated; the keys are bound arguments
+	rows, err := s.db.QueryContext(ctx, `SELECT register_key, substr(date, 1, 10), value
+		FROM daily_values WHERE date >= ? AND date <= ? AND register_key IN (?`+
+		strings.Repeat(", ?", len(keys)-1)+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("storage: query daily values: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key, day string
+		var v float64
+		if err := rows.Scan(&key, &day, &v); err != nil {
+			return nil, fmt.Errorf("storage: scan daily values: %w", err)
+		}
+		out[key][day] = v
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("storage: iterate daily values: %w", err)
+	}
+	return out, nil
 }
 
 // GetMonthlyHistory returns the monthly rows of key between the start and end months.

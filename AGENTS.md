@@ -271,8 +271,9 @@ banner. `dev` on either side never reports an update.
 ### Report
 
 `GET /api/report?from&to[&compare=last_year|previous|none][&granularity][&format=json|csv|pdf]`;
-`service.Report` reads the eight daily energy keys of the range and the comparison period
-(one bounded query each), `report.Build` computes, renderers only format.
+`service.Report` reads the eight daily energy keys of the range and of the comparison
+period (one bounded, grouped query per period), `report.Build` computes, renderers only
+format.
 
 - Source is daily rows only, never monthly/yearly (cutover offsets). A day counts only with
   a row for every series; missing days are reported, never 0 kWh.
