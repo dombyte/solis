@@ -372,6 +372,8 @@ func TestHealthFailsClosedOnceARestartFails(t *testing.T) {
 	snap = h.sup.Snapshot()
 	assert.Equal(t, StatusFailed, snap.Status)
 	assert.Contains(t, snap.Reason, "not yet proven healthy")
+	// The component entry carries the same reason, not only the top-level summary.
+	assert.Contains(t, snap.Components["p"].Reason, "not yet proven healthy")
 
 	for range 7 { // keeps beating for the 30s healthy grace
 		h.latest("p").Beat(h.clk.Now())
