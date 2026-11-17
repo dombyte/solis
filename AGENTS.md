@@ -419,6 +419,12 @@ solis.Register{
 - Reports (`src/pages/Reports.tsx`): [Period ▾] → [Compare with ▾] (both show their
   dates), preview from `/api/report` JSON, PDF/CSV downloads fetched as blobs (server
   errors shown in the page, never saved as a file). Exports live only here.
+- History (`src/pages/History.tsx`): period, series and range per period are remembered
+  per browser in `localStorage` (`solis.history.v1`, `useHistoryPrefs`), validated on
+  load (unknown ids/presets fall back to the defaults), defaults never stored; the reset
+  button restores them. Ranges are presets resolved against today
+  (`lib/utils/historyRange.ts`) or a fixed calendar range. Never server-side: without
+  auth it would be one setting for the whole LAN.
 - `useMobile()` = coarse pointer. The power-flow diagram uses the mobile variant only for
   coarse pointer **and** width < 768 px (tablets get desktop). The app shell (sidebar vs.
   header + bottom nav) follows `useCompactLayout()` = coarse pointer **or** width < 768 px;
