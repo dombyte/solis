@@ -1,103 +1,65 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { HistoryChart } from '../components/history/HistoryChart';
 import { PeriodSelector } from '../components/history/PeriodSelector';
+import { RangePresets } from '../components/history/RangePresets';
 import { RegisterSelector } from '../components/history/RegisterSelector';
 import { DatePickerWithRange } from '../components/ui/date-picker-range';
 import { Button } from '../components/ui/button';
 import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '../components/ui/sheet';
 import { useHistory } from '../lib/hooks/useHistory';
+import { useHistoryPrefs } from '../lib/hooks/useHistoryPrefs';
 import { Page } from '../components/layout/Page';
-import { getDateRangeForPeriod } from '../lib/utils/date';
-import { historyDataGroups } from '../lib/config/groups';
-import { Menu, RefreshCw } from 'lucide-react';
-import type { Period } from '../types';
+import { rangeFromDates, resolveRange } from '../lib/utils/historyRange';
+import { Menu, RefreshCw, RotateCcw } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
-import { format, parseISO } from 'date-fns';
+import { parseISO } from 'date-fns';
 import { SURFACE } from '../components/ui/surface';
 import { cn } from '../lib/utils';
 
 export function History(): React.ReactElement {
-
-  // Initialize with proper date range for daily period
-  const initialRange = getDateRangeForPeriod('daily');
-  const [period, setPeriod] = useState<Period>('daily');
-  const [selectedIds, setSelectedIds] = useState<string[]>(['pv_energy_today']);
-  const [startDate, setStartDate] = useState(initialRange.start);
-  const [endDate, setEndDate] = useState(initialRange.end);
+  // Period, series and range are remembered in this browser (useHistoryPrefs).
+  const { prefs, isDefault, setPeriod, toggleSeries, setRange, reset } = useHistoryPrefs();
+  const { period } = prefs;
+  const selectedIds = prefs.series[period];
+  const rangeChoice = prefs.range[period];
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  
+
   const { data, isLoading, error, loadHistory, clearHistory } = useHistory();
+
+  // Presets resolve against today on every load, so "last 30 days" moves with the calendar.
+  const { start: startDate, end: endDate } = useMemo(
+    () => resolveRange(rangeChoice, period, new Date()),
+    [rangeChoice, period],
+  );
+  const activePreset = 'preset' in rangeChoice ? rangeChoice.preset : undefined;
 
   // The picker's range from the stored keys (yyyy, yyyy-MM or yyyy-MM-dd). parseISO reads
   // all three as local dates; new Date() would read them as UTC and show the previous
   // day west of UTC.
-  const dateRange: DateRange | undefined = React.useMemo(
-    () => (startDate && endDate ? { from: parseISO(startDate), to: parseISO(endDate) } : undefined),
+  const dateRange: DateRange = useMemo(
+    () => ({ from: parseISO(startDate), to: parseISO(endDate) }),
     [startDate, endDate],
   );
 
-  // Handle period change
-  const handlePeriodChange = useCallback((newPeriod: Period) => {
-    // Get valid IDs for the new period
-    const validIdsForPeriod = historyDataGroups[newPeriod] || [];
-    const firstValidId = validIdsForPeriod.length > 0 ? validIdsForPeriod[0] : '';
-    
-    // Get date range for the new period
-    const range = getDateRangeForPeriod(newPeriod);
-    
-    const ids = firstValidId ? [firstValidId] : [];
-    
-    // Update all state at once
-    setPeriod(newPeriod);
-    setSelectedIds(ids);
-    setStartDate(range.start);
-    setEndDate(range.end);
-  }, []);
-
   // Load history on mount and whenever period, dates or the selection change (one effect:
-  // a separate mount effect fetched everything twice, review FE-L1).
+  // a separate mount effect fetched everything twice, review FE-L1). The selection is kept
+  // per period and validated on load, so it always belongs to the current period.
   useEffect(() => {
     if (selectedIds.length === 0) {
       clearHistory(); // nothing selected: no stale chart (review FE-L2)
       return;
     }
-    if (!startDate || !endDate) return;
-    // Check if all selected IDs are valid for the current period
-    const validIdsForPeriod = historyDataGroups[period] || [];
-    if (selectedIds.every(id => validIdsForPeriod.includes(id))) {
-      loadHistory(selectedIds, startDate, endDate);
-    }
-  }, [startDate, endDate, selectedIds, period, loadHistory, clearHistory]);
-
-  const handleToggle = (id: string) => {
-    setSelectedIds(prev => 
-      prev.includes(id) 
-        ? prev.filter(x => x !== id) 
-        : [...prev, id]
-    );
-  };
+    loadHistory(selectedIds, startDate, endDate);
+  }, [startDate, endDate, selectedIds, loadHistory, clearHistory]);
 
   const handleRefresh = useCallback(() => {
-    if (startDate && endDate && selectedIds.length > 0) {
-      loadHistory(selectedIds, startDate, endDate);
-    }
+    if (selectedIds.length > 0) loadHistory(selectedIds, startDate, endDate);
   }, [startDate, endDate, selectedIds, loadHistory]);
 
+  // A calendar pick is a fixed range: no preset is highlighted until one is chosen again.
   const handleDateRangeChange = useCallback((range: DateRange | undefined) => {
-    if (range?.from && range?.to) {
-      if (period === 'yearly') {
-        setStartDate(`${range.from.getFullYear()}`);
-        setEndDate(`${range.to.getFullYear()}`);
-      } else if (period === 'monthly') {
-        setStartDate(`${range.from.getFullYear()}-${String(range.from.getMonth() + 1).padStart(2, '0')}`);
-        setEndDate(`${range.to.getFullYear()}-${String(range.to.getMonth() + 1).padStart(2, '0')}`);
-      } else {
-        // Local calendar day: toISOString() would shift to the previous day east of UTC.
-        setStartDate(format(range.from, 'yyyy-MM-dd'));
-        setEndDate(format(range.to, 'yyyy-MM-dd'));
-      }
-    }
-  }, [period]);
+    if (range?.from && range?.to) setRange({ custom: rangeFromDates(range.from, range.to, period) });
+  }, [period, setRange]);
 
   const refreshButton = (
     <Button
@@ -112,15 +74,34 @@ export function History(): React.ReactElement {
     </Button>
   );
 
+  const resetButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={reset}
+      disabled={isDefault}
+      className="h-9 w-9"
+      aria-label="Reset filters to defaults"
+      title="Reset filters to defaults"
+    >
+      <RotateCcw className="h-4 w-4" />
+    </Button>
+  );
+
   // The same three filters in the desktop sidebar and the mobile sheet.
   const filters = (headingClass: string) => (
     <>
       <div className="space-y-1">
         <h3 className={headingClass}>Time Period</h3>
-        <PeriodSelector period={period} onPeriodChange={handlePeriodChange} />
+        <PeriodSelector period={period} onPeriodChange={setPeriod} />
       </div>
       <div className="space-y-1">
         <h3 className={headingClass}>Date Range</h3>
+        <RangePresets
+          period={period}
+          active={activePreset}
+          onSelect={preset => setRange({ preset })}
+        />
         <DatePickerWithRange
           date={dateRange}
           setDate={handleDateRangeChange}
@@ -132,7 +113,7 @@ export function History(): React.ReactElement {
       </div>
       <div className="space-y-1">
         <h3 className={headingClass}>Data Series</h3>
-        <RegisterSelector selectedIds={selectedIds} onToggle={handleToggle} period={period} />
+        <RegisterSelector selectedIds={selectedIds} onToggle={toggleSeries} period={period} />
       </div>
     </>
   );
@@ -165,6 +146,7 @@ export function History(): React.ReactElement {
               </div>
             </SheetContent>
           </Sheet>
+          {resetButton}
           {refreshButton}
         </div>
       }
