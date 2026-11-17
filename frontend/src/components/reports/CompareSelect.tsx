@@ -4,7 +4,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import type { CompareMode } from '../../lib/api/report';
 import { compareRange, formatRange, type DayRange } from '../../lib/utils/reportRange';
 import { cn } from '../../lib/utils';
-import { MENU_CLASS, OPTION_CLASS, TRIGGER_CLASS } from './styles';
+import { useMobile } from '../../hooks/useMobile';
+import { MENU_CLASS, OPTION_CLASS, TOUCH_MENU_CLASS, TRIGGER_CLASS } from './styles';
 
 const OPTIONS: { id: CompareMode; label: string }[] = [
   { id: 'last_year', label: 'Same period last year' },
@@ -20,6 +21,7 @@ interface CompareSelectProps {
 
 /** What the report period is compared with; every option shows its actual dates. */
 export function CompareSelect({ mode, range, onChange }: CompareSelectProps) {
+  const isMobile = useMobile();
   const [open, setOpen] = useState(false);
   const current = OPTIONS.find(o => o.id === mode) ?? OPTIONS[0];
   const currentRange = compareRange(mode, range);
@@ -43,7 +45,7 @@ export function CompareSelect({ mode, range, onChange }: CompareSelectProps) {
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className={cn(MENU_CLASS, 'w-72 p-2')}>
+      <PopoverContent align="start" collisionPadding={12} className={cn(MENU_CLASS, 'p-2', isMobile ? TOUCH_MENU_CLASS : 'w-72')}>
         <div role="group" aria-label="Compare with" className="flex flex-col gap-0.5">
           {OPTIONS.map(o => {
             const r = compareRange(o.id, range);

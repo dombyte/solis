@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
-import { CalendarIcon, Check, ChevronDown } from 'lucide-react';
+import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Calendar } from '../ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
@@ -10,7 +10,7 @@ import {
   PRESET_LABEL, REPORT_PRESETS, finishedRange, formatRange, presetOf, presetRange, type DayRange,
 } from '../../lib/utils/reportRange';
 import { cn } from '../../lib/utils';
-import { MENU_CLASS, OPTION_CLASS, TRIGGER_CLASS } from './styles';
+import { MENU_CLASS, OPTION_CLASS, TOUCH_MENU_CLASS, TRIGGER_CLASS } from './styles';
 
 interface PeriodPickerProps {
   range: DayRange;
@@ -23,12 +23,18 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
   const isMobile = useMobile();
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState<DateRange | undefined>();
+  // Phones show presets and calendar one at a time (both stacked ran under the bottom
+  // nav); desktop shows them side by side and ignores this.
+  const [step, setStep] = useState<'presets' | 'custom'>('presets');
   const preset = presetOf(range, today);
   // Labels show the days a report covers: a range ending today stops at yesterday.
   const label = (r: DayRange) => formatRange(finishedRange(r, today));
 
   const toggle = (next: boolean) => {
-    if (next) setCustom({ from: parseISO(range.from), to: parseISO(range.to) });
+    if (next) {
+      setCustom({ from: parseISO(range.from), to: parseISO(range.to) });
+      setStep(preset === 'custom' ? 'custom' : 'presets');
+    }
     setOpen(next);
   };
   const choose = (r: DayRange) => {
@@ -52,39 +58,60 @@ export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
           <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className={cn(MENU_CLASS, 'w-auto p-0')}>
+      <PopoverContent align="start" collisionPadding={12} className={cn(MENU_CLASS, 'p-0', isMobile ? TOUCH_MENU_CLASS : 'w-auto')}>
         <div className="flex flex-col md:flex-row">
-          <div role="group" aria-label="Period presets" className="p-2 md:w-64 flex flex-col gap-0.5 md:border-r border-border">
-            {REPORT_PRESETS.map(p => {
-              const r = presetRange(p.id, today);
-              const active = preset === p.id;
-              return (
-                <button key={p.id} type="button" aria-pressed={active} onClick={() => choose(r)} className={OPTION_CLASS}>
-                  <Check aria-hidden="true" className={cn('size-4 shrink-0', !active && 'invisible')} />
-                  <span className="flex flex-col">
-                    <span className={cn(active && 'font-semibold')}>{p.label}</span>
-                    <span className="text-xs text-muted-foreground">{label(r)}</span>
+          {(!isMobile || step === 'presets') && (
+            <div role="group" aria-label="Period presets" className="p-2 md:w-64 flex flex-col gap-0.5 md:border-r border-border">
+              {REPORT_PRESETS.map(p => {
+                const r = presetRange(p.id, today);
+                const active = preset === p.id;
+                return (
+                  <button key={p.id} type="button" aria-pressed={active} onClick={() => choose(r)} className={OPTION_CLASS}>
+                    <Check aria-hidden="true" className={cn('size-4 shrink-0', !active && 'invisible')} />
+                    <span className="flex flex-col">
+                      <span className={cn(active && 'font-semibold')}>{p.label}</span>
+                      <span className="text-xs text-muted-foreground">{label(r)}</span>
+                    </span>
+                  </button>
+                );
+              })}
+              {isMobile && (
+                <button type="button" onClick={() => setStep('custom')} className={OPTION_CLASS}>
+                  <Check aria-hidden="true" className={cn('size-4 shrink-0', preset !== 'custom' && 'invisible')} />
+                  <span className="flex flex-col flex-1">
+                    <span className={cn(preset === 'custom' && 'font-semibold')}>Custom range…</span>
+                    {preset === 'custom' && <span className="text-xs text-muted-foreground">{label(range)}</span>}
                   </span>
+                  <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
                 </button>
-              );
-            })}
-          </div>
-          <div className="p-3 border-t md:border-t-0 border-border flex flex-col gap-3">
-            <p className="text-sm font-semibold">Custom range</p>
-            <Calendar
-              mode="range"
-              selected={custom}
-              onSelect={setCustom}
-              defaultMonth={parseISO(range.from)}
-              maxDate={today}
-              numberOfMonths={isMobile ? 1 : 2}
-              viewMode="daily"
-            />
-            <Button type="button" disabled={!customRange} onClick={() => customRange && choose(customRange)}>
-              <Check />
-              {customRange ? `Use ${label(customRange)}` : 'Pick a start and an end day'}
-            </Button>
-          </div>
+              )}
+            </div>
+          )}
+          {(!isMobile || step === 'custom') && (
+            <div className="p-3 md:border-l-0 border-border flex flex-col gap-3">
+              {isMobile ? (
+                <button type="button" onClick={() => setStep('presets')} className="-ml-1 flex items-center gap-1 self-start rounded-md px-1 py-1 text-sm font-semibold hover:bg-control-hover">
+                  <ChevronLeft aria-hidden="true" className="size-4" />
+                  Custom range
+                </button>
+              ) : (
+                <p className="text-sm font-semibold">Custom range</p>
+              )}
+              <Calendar
+                mode="range"
+                selected={custom}
+                onSelect={setCustom}
+                defaultMonth={parseISO(range.from)}
+                maxDate={today}
+                numberOfMonths={isMobile ? 1 : 2}
+                viewMode="daily"
+              />
+              <Button type="button" disabled={!customRange} onClick={() => customRange && choose(customRange)}>
+                <Check />
+                {customRange ? `Use ${label(customRange)}` : 'Pick a start and an end day'}
+              </Button>
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

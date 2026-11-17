@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useSubscription } from '../lib/hooks/useSubscription';
 import { Page } from '../components/layout/Page';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '../components/ui/dialog';
 import { Clock, X } from 'lucide-react';
@@ -14,7 +14,7 @@ import { getSourceById, apiDataObjects } from '../lib/config/data';
 import { statusText } from '../lib/utils/status';
 import type { RegisterValue, SolisStatusDecoded, FaultStatusDecoded } from '../types';
 
-const GRID_CLASS = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6';
+const GRID_CLASS = 'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4';
 
 export function Status(): React.ReactElement {
   const isLoading = useRegisterStore(state => state.isLoading);
@@ -164,7 +164,7 @@ export function Status(): React.ReactElement {
             return (
               <Card
                 key={reg.id}
-                className="w-full cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-shadow"
+                className="w-full cursor-pointer p-4 sm:px-5 flex flex-col gap-1.5 hover:border-primary/50 transition-colors"
                 onClick={() => handleStatusClick(reg.id)}
                 role="button"
                 tabIndex={0}
@@ -175,27 +175,19 @@ export function Status(): React.ReactElement {
                   }
                 }}
               >
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base sm:text-lg">{reg.name}</CardTitle>
-                  </div>
-                  {reg.description && (
-                    <p className="text-xs sm:text-sm text-muted-foreground">{reg.description}</p>
+                <div className="flex items-baseline justify-between gap-3">
+                  <h3 className="text-sm font-medium text-muted-foreground">{reg.name}</h3>
+                  {value?.timestamp && (
+                    <span className="shrink-0 inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums">
+                      <Clock className="h-3 w-3" aria-hidden="true" />
+                      {format(new Date(value.timestamp), 'HH:mm:ss')}
+                    </span>
                   )}
-                </CardHeader>
-                <CardContent className="pt-2 sm:pt-2 md:pt-2">
-                  <div className="flex items-center gap-2">
-                    {value?.timestamp && (
-                      <span className="text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3 inline mr-1" />
-                        {format(new Date(value.timestamp), 'HH:mm:ss')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm sm:text-base mt-1">
-                    {displayValue}
-                  </p>
-                </CardContent>
+                </div>
+                <p className="text-base font-semibold break-words">{displayValue}</p>
+                {reg.description && (
+                  <p className="text-xs text-muted-foreground">{reg.description}</p>
+                )}
               </Card>
             );
           })}

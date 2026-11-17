@@ -356,7 +356,7 @@ export function Calendar({
                         onClick={() => handleDayClick(day)}
                         disabled={!enabled}
                         className={`
-                          aspect-square w-full rounded text-sm transition-colors font-medium
+                          aspect-square max-h-11 w-full rounded text-sm transition-colors font-medium
                           ${enabled
                             ? "cursor-pointer" 
                             : `text-muted-foreground cursor-not-allowed ${isCurrentMonth ? "opacity-40" : ""}`

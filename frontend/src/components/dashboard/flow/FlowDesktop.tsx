@@ -82,7 +82,10 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
     <div className="w-full">
     <svg
       viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
-      className="w-full h-auto"
+      // At most ~600px and never taller than the window: past that it only looked
+      // oversized on large monitors (the viewBox keeps the aspect ratio and centers
+      // the drawing in the spare width).
+      className="w-full h-auto max-h-[min(600px,calc(100dvh-8rem))]"
       style={{
         opacity: stale ? 0.35 : 1,
         transition: 'opacity 0.5s ease'

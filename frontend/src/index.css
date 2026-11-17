@@ -127,6 +127,11 @@
     /* Input - white */
     --input: #ffffff;
 
+    /* Control - fill of unselected buttons, toggles and dropdown triggers: a step off
+       the card so they read as clickable in both themes, and a step further on hover. */
+    --control: var(--background);
+    --control-hover: var(--secondary);
+
     /* Ring - focus ring in primary green */
     --ring: color-mix(in oklch, var(--primary), transparent 50%);
 
@@ -260,6 +265,11 @@
     
     /* Input - Semi-transparent glass input */
     --input: color-mix(in oklch, var(--background), transparent 40%);
+
+    /* Control - lighter than the card (background, muted and secondary are all darker
+       than the card here, so a fill from them vanished on cards) */
+    --control: color-mix(in oklch, var(--card), var(--foreground) 8%);
+    --control-hover: color-mix(in oklch, var(--card), var(--foreground) 14%);
     
     /* Ring - Glowing ring with transparency */
     --ring: color-mix(in oklch, var(--primary), transparent 30%);
@@ -306,6 +316,8 @@
     --color-warning-foreground: var(--warning-foreground);
     --color-border: var(--border);
     --color-input: var(--input);
+    --color-control: var(--control);
+    --color-control-hover: var(--control-hover);
     --color-ring: var(--ring);
     
     /* Chart colors - 9 distinct colors */

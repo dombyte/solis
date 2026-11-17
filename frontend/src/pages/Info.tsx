@@ -17,8 +17,6 @@ interface License {
   repository?: string;
 }
 
-const CARD_TITLE = 'text-base sm:text-lg';
-
 const CHECK_TONE = {
   'update-available': 'text-warning',
   'up-to-date': 'text-success',
@@ -97,9 +95,9 @@ export function Info() {
 
   return (
     <Page title="Info">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
-          <CardHeader><CardTitle className={CARD_TITLE}>About</CardTitle></CardHeader>
+          <CardHeader><CardTitle>About</CardTitle></CardHeader>
           <CardContent>
             <p className="text-muted-foreground text-sm sm:text-base">
               Solis Monitor is a web application for monitoring Solis solar inverters.
@@ -110,7 +108,7 @@ export function Info() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className={CARD_TITLE}>Connection</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Connection</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-start gap-2 text-sm">
               <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-success' : 'bg-destructive'} mt-1.5`} />
@@ -127,7 +125,7 @@ export function Info() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className={CARD_TITLE}>Links</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Links</CardTitle></CardHeader>
           <CardContent>
             <div className="flex flex-col sm:flex-row gap-4 text-sm sm:text-base">
               <a href="/docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:underline">
@@ -143,7 +141,7 @@ export function Info() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle className={CARD_TITLE}>Version</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Version</CardTitle></CardHeader>
           <CardContent>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <code className="bg-muted px-2 py-1 rounded w-fit">{version}</code>
@@ -174,7 +172,7 @@ export function Info() {
 
       <Card>
         <CardHeader>
-          <CardTitle className={CARD_TITLE}>Licenses</CardTitle>
+          <CardTitle>Licenses</CardTitle>
           <CardDescription>Third-party dependencies used in this application.</CardDescription>
         </CardHeader>
         <CardContent>
