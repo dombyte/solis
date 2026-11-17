@@ -24,7 +24,7 @@ export function PeriodSelector({
       {periods.map((p) => (
         <Button
           key={p.value}
-          variant={period === p.value ? 'default' : 'ghost'}
+          variant={period === p.value ? 'default' : 'outline'}
           size="sm"
           onClick={() => onPeriodChange(p.value)}
           className="flex-1 min-h-[40px] touch-target"

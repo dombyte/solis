@@ -67,24 +67,24 @@ export function History(): React.ReactElement {
       size="icon"
       onClick={handleRefresh}
       disabled={isLoading || selectedIds.length === 0}
-      className="h-9 w-9"
+      className="h-9 w-9 ml-auto"
       aria-label="Refresh data"
     >
       <RefreshCw className="h-4 w-4" />
     </Button>
   );
 
-  const resetButton = (
+  // Part of the filters (not a header icon next to refresh, where it read as a second
+  // reload button): bottom of the desktop sidebar, next to "Done" in the phone sheet.
+  const resetButton = (className: string) => (
     <Button
-      variant="ghost"
-      size="icon"
+      variant="outline"
       onClick={reset}
       disabled={isDefault}
-      className="h-9 w-9"
-      aria-label="Reset filters to defaults"
-      title="Reset filters to defaults"
+      className={cn('gap-2', className)}
     >
-      <RotateCcw className="h-4 w-4" />
+      <RotateCcw className="h-4 w-4" aria-hidden="true" />
+      Reset filters
     </Button>
   );
 
@@ -122,7 +122,9 @@ export function History(): React.ReactElement {
     <Page
       title="History"
       actions={
-        <div className="flex items-center gap-2">
+        // flex-1: the Filters button sits on the left (phones/tablets, where the title is
+        // in the mobile header), refresh stays on the right.
+        <div className="flex flex-1 items-center justify-between gap-2">
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
             <SheetTrigger asChild>
               <Button variant="outline" size="sm" className="gap-2 lg:hidden">
@@ -130,23 +132,27 @@ export function History(): React.ReactElement {
                 <span>Filters</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-full max-w-xs h-full">
+            {/* Column layout: the list scrolls between header and footer. The body used to
+                be h-full below the header, which pushed the Reset/Done footer off screen.
+                Full width on phones ("Done" closes it, the backdrop strip only cost space);
+                a side panel from `sm` up. */}
+            <SheetContent side="left" className="p-0 gap-0 w-full max-w-none sm:max-w-md border-r-0 sm:border-r h-dvh flex flex-col">
               <SheetHeader className="p-4 pb-2 border-b border-border">
                 <SheetTitle>History Filters</SheetTitle>
               </SheetHeader>
-              <div className="flex flex-col h-full bg-background">
+              <div className="flex flex-col flex-1 min-h-0 bg-background">
                 <div className="flex-1 p-4 space-y-4 overflow-y-auto">
                   {filters('text-sm font-medium text-muted-foreground mb-2')}
                 </div>
-                <div className="p-4 pt-2 border-t border-border bg-background">
-                  <Button onClick={() => setMobileSidebarOpen(false)} className="w-full">
+                <div className="p-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border bg-background flex gap-2">
+                  {resetButton('flex-1')}
+                  <Button onClick={() => setMobileSidebarOpen(false)} className="flex-1">
                     Done
                   </Button>
                 </div>
               </div>
             </SheetContent>
           </Sheet>
-          {resetButton}
           {refreshButton}
         </div>
       }
@@ -155,6 +161,7 @@ export function History(): React.ReactElement {
         {/* Desktop sidebar; phones and tablets use the Filters sheet */}
         <div className="hidden lg:flex lg:flex-col gap-3 sm:gap-4 w-full max-w-[16rem] min-w-0 flex-shrink-0">
           {filters('text-sm font-medium text-muted-foreground mb-1')}
+          {resetButton('w-full')}
         </div>
 
         <div className="flex-1 min-w-0">

@@ -98,7 +98,7 @@ export function Reports(): React.ReactElement {
                 id="csv-granularity"
                 value={csvGranularity}
                 onChange={e => setCsvGranularity(e.target.value as Granularity)}
-                className="flex-1 min-w-32 h-11 rounded-lg border border-border bg-background px-3 text-sm"
+                className="flex-1 min-w-32 h-11 rounded-lg border border-border bg-control hover:bg-control-hover px-3 text-sm"
               >
                 {(['day', 'month', 'year'] as Granularity[]).map(g => (
                   <option key={g} value={g}>{GRANULARITY_LABEL[g]}</option>

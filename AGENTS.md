@@ -431,6 +431,15 @@ solis.Register{
   pages and titles come from `components/layout/nav.ts`.
 - Every page renders inside `components/layout/Page.tsx` (one padding, max width and title
   style); card-like sections use `Card` or the shared `SURFACE` class, never their own.
+  Unselected buttons, toggles and dropdown triggers use the `control` / `control-hover`
+  tokens (dark: lighter than the card; `muted`/`secondary`/`input` are darker there and
+  vanish on cards).
+- Dashboard: flow diagram (at most ~600px tall) next to one energy table (row per series
+  from `ENERGY_ROWS`, column per period), a 14-day PV vs consumption trend below (daily
+  history via REST, today from the live counters; days without data stay empty; desktop
+  layout only). Phones (same rule as the flow diagram) swipe one `EnergyCard` per period
+  instead of the table.
+  Pages have no maximum width: content starts at the sidebar.
 - Numbers only via `lib/utils/format.ts` (fixed `en-US` locale like the PDF: "4,512.3";
   power below 1 kW in whole watts), dates via date-fns in the PDF style ("1 – 18 Nov 2026",
   "HH:mm:ss"); never the browser locale (`toLocaleString`, `toFixed` in components).

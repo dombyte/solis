@@ -88,8 +88,17 @@ export function DatePickerWithRange({
             {date?.from && date.to ? rangeLabel(date.from, date.to, period) : <span>Pick a date</span>}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="center">
-          <div className="p-3 w-full max-w-[600px] min-w-[280px]">
+        {/* Touch devices show one month as wide as the date field (lined up with it, at
+            most the screen minus the 12px collision padding) instead of content width with
+            wide margins; the day grid stretches with it. Two months size to their content. */}
+        <PopoverContent
+          className={isMobile ? "w-[min(var(--radix-popover-trigger-width),calc(100vw-1.5rem))] p-0" : "w-auto p-0"}
+          // Start-aligned: centered under the narrow sidebar field it spilled over the
+          // app's navigation sidebar.
+          align="start"
+          collisionPadding={12}
+        >
+          <div className={isMobile ? "p-3 w-full" : "p-3 w-full max-w-[600px] min-w-[280px]"}>
             <Calendar
               mode="range"
               defaultMonth={date?.from}

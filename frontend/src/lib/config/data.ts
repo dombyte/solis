@@ -31,6 +31,22 @@ const ENERGY_LEVELS = [
   { level: 'total', id: 'total', phrase: 'since monitoring started' },
 ];
 
+/** One energy series across the dashboard columns (Today, This Month, This Year, Total). */
+export interface EnergyRow {
+  name: string;
+  /** Level-free explanation of the series. */
+  description: string;
+  /** Internal ids per level, in the order of the energy dashboard groups. */
+  ids: string[];
+}
+
+/** The energy series as rows of the dashboard's energy table and cards. */
+export const ENERGY_ROWS: EnergyRow[] = ENERGY_KINDS.map(k => ({
+  name: k.name,
+  description: `${k.description}${k.note ?? ''}`,
+  ids: ENERGY_LEVELS.map(l => `${k.id}_${l.id}`),
+}));
+
 /** Builds the kind x level energy objects (e.g. `grid_import_monthly`). */
 function energyObjects(): ApiDataObject[] {
   return ENERGY_LEVELS.flatMap(l =>

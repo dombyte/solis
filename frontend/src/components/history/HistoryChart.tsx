@@ -26,6 +26,11 @@ interface HistoryChartProps {
   datasetCount?: number;
 }
 
+// The chart takes the window height left over by the page header, filters and stats row,
+// within sane bounds: a fixed 400px left most of a large screen empty. The y-axis column
+// shares the class, and its ticks are re-read on every chart resize.
+const CHART_HEIGHT = 'h-[clamp(300px,calc(100dvh-20rem),800px)]';
+
 export function HistoryChart({ data, className = '', datasetCount = 0 }: HistoryChartProps): React.ReactElement {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstanceRef = useRef<Chart | null>(null);
@@ -349,13 +354,12 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
 
   return (
     <div className={`relative w-full ${className}`}>
-      <div className="flex w-full" style={{ minHeight: '200px', maxHeight: '500px' }}>
+      <div className="flex w-full">
         {/* Pinned y-axis - lives outside the scroll container so it never scrolls. Plain
             text positioned from the chart's own scale: it is never clipped, and the
             invisible copy of the labels sizes the column to the widest one. */}
         <div
-          className="relative flex-shrink-0 pr-1 text-[11px] leading-none text-muted-foreground tabular-nums text-right"
-          style={{ height: '400px' }}
+          className={`relative flex-shrink-0 pr-1 text-[11px] leading-none text-muted-foreground tabular-nums text-right ${CHART_HEIGHT}`}
           aria-hidden="true"
         >
           <div className="invisible h-0 overflow-hidden">
@@ -379,7 +383,7 @@ export function HistoryChart({ data, className = '', datasetCount = 0 }: History
           {/* The canvas is taken out of the flow: Chart.js sizes it from this box, and an
               in-flow canvas would hold the box at its first width when the page narrows
               (e.g. a scrollbar appears), leaving a needless horizontal scroll. */}
-          <div className="relative w-full" style={{ minWidth: `${minWidth}px`, height: '400px' }}>
+          <div className={`relative w-full ${CHART_HEIGHT}`} style={{ minWidth: `${minWidth}px` }}>
             <canvas
               className="absolute inset-0"
               ref={chartRef}
