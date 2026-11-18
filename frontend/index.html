@@ -6,7 +6,7 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#010322" />
     <title>Solis Monitor</title>
     <script>
       // Apply the stored theme before the first paint (no light flash before React
@@ -22,6 +22,10 @@
           }
         } catch (e) {}
         document.documentElement.classList.add(t);
+        // Browser chrome before React loads (ThemeProvider keeps it in sync later);
+        // the values are --background of index.css.
+        document.querySelector('meta[name="theme-color"]')
+          .setAttribute('content', t === 'dark' ? '#010322' : '#f4f6fa');
       })();
       // Installed PWA only: block pinch zoom on iOS, which ignores touch-action for
       // pinch (the CSS rule in index.css covers Android). A browser tab keeps it.

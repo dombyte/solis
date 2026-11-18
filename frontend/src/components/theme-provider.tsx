@@ -96,6 +96,18 @@ function disableTransitionsTemporarily() {
   }
 }
 
+// The browser chrome (address bar, installed PWA title bar) takes the page background of
+// the active theme instead of a fixed black.
+function syncThemeColor() {
+  const color = getComputedStyle(document.documentElement)
+    .getPropertyValue("--background")
+    .trim()
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (color && meta) {
+    meta.setAttribute("content", color)
+  }
+}
+
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false
@@ -155,6 +167,7 @@ export function ThemeProvider({
 
     root.classList.remove("light", "dark")
     root.classList.add(resolvedTheme)
+    syncThemeColor()
 
     if (restoreTransitions) {
       restoreTransitions()
