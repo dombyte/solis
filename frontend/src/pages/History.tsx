@@ -5,7 +5,7 @@ import { RangePresets } from '../components/history/RangePresets';
 import { RegisterSelector } from '../components/history/RegisterSelector';
 import { DatePickerWithRange } from '../components/ui/date-picker-range';
 import { Button } from '../components/ui/button';
-import { Sheet, SheetTrigger, SheetContent, SheetHeader, SheetTitle } from '../components/ui/sheet';
+import { Sheet, SheetTrigger, SheetContent, SheetTitle } from '../components/ui/sheet';
 import { useHistory } from '../lib/hooks/useHistory';
 import { useHistoryPrefs } from '../lib/hooks/useHistoryPrefs';
 import { Page } from '../components/layout/Page';
@@ -133,24 +133,31 @@ export function History(): React.ReactElement {
                 <span>Filters</span>
               </Button>
             </SheetTrigger>
-            {/* One scroll container with sticky glass header and footer: the list scrolls
-                under both bars (like the page under the mobile nav), and the Reset/Done
-                footer always stays on screen. Full width on phones ("Done" closes it, the
-                backdrop strip only cost space); a side panel from `sm` up. */}
-            <SheetContent side="left" className="p-0 gap-0 w-full max-w-none sm:max-w-md border-r-0 sm:border-r h-dvh">
-              <div className="h-full overflow-y-auto flex flex-col">
-                <SheetHeader className="sticky top-0 z-10 glass-header p-4">
-                  <SheetTitle>History Filters</SheetTitle>
-                </SheetHeader>
-                <div className="flex-1 p-4 space-y-4">
+            {/* No header bar: the filters start at the top (clear of the notch / status
+                bar) and "Done" closes the sheet, so the title is for screen readers only
+                and the corner close button is off. Scrolled content fades out under the
+                notch (scroll-edge-top), like the pages do in Safari. The glass footer lies
+                over the scroll area (the list scrolls under it; the padding keeps the last
+                filter clear), and overscroll-contain keeps the page behind from
+                scrolling. Full width on phones; a side panel from `sm` up. */}
+            <SheetContent
+              side="left"
+              showClose={false}
+              aria-describedby={undefined}
+              className="p-0 gap-0 w-full max-w-none sm:max-w-md border-r-0 sm:border-r h-dvh overflow-hidden"
+            >
+              <SheetTitle className="sr-only">History filters</SheetTitle>
+              <div className="h-full overflow-y-auto overscroll-contain pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.25rem))] pb-[calc(3rem+max(1rem,env(safe-area-inset-bottom)))]">
+                <div className="p-4 space-y-4">
                   {filters('text-sm font-medium text-muted-foreground mb-2')}
                 </div>
-                <div className="sticky bottom-0 z-10 glassy-nav-mobile p-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-2">
-                  {resetButton('flex-1')}
-                  <Button onClick={() => setMobileSidebarOpen(false)} className="flex-1">
-                    Done
-                  </Button>
-                </div>
+              </div>
+              <div className="scroll-edge-top" aria-hidden="true" />
+              <div className="absolute inset-x-0 bottom-0 z-10 glassy-nav-mobile p-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-2">
+                {resetButton('flex-1')}
+                <Button onClick={() => setMobileSidebarOpen(false)} className="flex-1">
+                  Done
+                </Button>
               </div>
             </SheetContent>
           </Sheet>

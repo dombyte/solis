@@ -492,7 +492,6 @@
   /* Saturation keeps colours behind the glass vivid instead of washed out (iOS-style);
      without backdrop-filter support it falls back to an opaque card. */
   .glassy-nav-mobile,
-  .glass-header,
   .glass-panel {
     background-color: var(--card);
   }
@@ -504,12 +503,18 @@
       0 -12px 32px -10px var(--glass-shadow);
   }
 
-  /* Top bar that content scrolls under (history filter sheet): the nav bar mirrored */
-  .glass-header {
-    border-bottom: 1px solid var(--glass-border);
-    box-shadow:
-      inset 0 1px 0 var(--glass-highlight),
-      0 12px 32px -10px var(--glass-shadow);
+  /* Top edge of a scroll container that is not the page (history filter sheet): content
+     blurs and fades out under the notch / status bar, like Safari does for the page
+     itself (it only does that for document scrolling). Opaque at the very top, so the
+     status bar stays readable; without backdrop-filter it is a plain fade. */
+  .scroll-edge-top {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    z-index: 10;
+    height: calc(env(safe-area-inset-top) + 1.75rem);
+    pointer-events: none;
+    background: linear-gradient(to bottom, var(--background) env(safe-area-inset-top), transparent);
   }
 
   /* Floating panel (popover, banner). --glass-panel can be overridden per use for a tint. */
@@ -528,12 +533,18 @@
 
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     /* sheen: light falling on the top of the pane, fading out towards the bottom */
-    .glassy-nav-mobile,
-    .glass-header {
+    .glassy-nav-mobile {
       background: linear-gradient(to bottom, var(--glass-sheen), transparent 70%),
         var(--glass);
       -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(200%) brightness(1.05);
       backdrop-filter: blur(var(--glass-blur)) saturate(200%) brightness(1.05);
+    }
+
+    .scroll-edge-top {
+      -webkit-backdrop-filter: blur(6px);
+      backdrop-filter: blur(6px);
+      -webkit-mask-image: linear-gradient(to bottom, #000 calc(env(safe-area-inset-top) + 0.5rem), transparent);
+      mask-image: linear-gradient(to bottom, #000 calc(env(safe-area-inset-top) + 0.5rem), transparent);
     }
 
     .glass-panel {
