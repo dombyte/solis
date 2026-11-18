@@ -1,6 +1,6 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useRef } from 'react';
 import { MobileNav } from './components/layout/MobileNav';
 import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
@@ -8,6 +8,7 @@ import { UpdateBanner } from './components/layout/UpdateBanner';
 import { PageSkeleton } from './components/layout/PageSkeleton';
 import { DocumentTitle } from './components/layout/DocumentTitle';
 import { FaultNotifier } from './components/layout/FaultNotifier';
+import { ScrollReset } from './components/layout/ScrollReset';
 import { useCompactLayout } from './hooks/useMobile';
 
 
@@ -19,18 +20,22 @@ const Info = lazy(() => import('./pages/Info').then(m => ({ default: m.Info })))
 
 export function App() {
   const isMobile = useCompactLayout();
+  // Desktop scroll containers (mobile scrolls the window), reset on page changes.
+  const columnRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   return (
         <BrowserRouter>
           <DocumentTitle />
           <FaultNotifier />
+          <ScrollReset containers={[columnRef, mainRef]} />
           {/* Desktop: the shell is exactly viewport-tall and only <main> scrolls (its overflow-x
               makes it a scroll container), so the sidebar never moves. Mobile: the page scrolls. */}
           <div className={`bg-background flex ${isMobile ? 'min-h-screen flex-col mobile-nav-spacer' : 'h-screen flex-row overflow-hidden'} w-full max-w-[100vw] overflow-x-hidden`}>
             {!isMobile && <DesktopNav />}
-            <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
+            <div ref={columnRef} className="flex flex-col flex-1 w-full relative overflow-x-hidden">
               {isMobile && <MobileHeader />}
-              <main className="flex-1 w-full overflow-x-hidden pt-1">
+              <main ref={mainRef} className="flex-1 w-full overflow-x-hidden pt-1">
                 <Suspense fallback={<PageSkeleton />}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
