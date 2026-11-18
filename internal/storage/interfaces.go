@@ -54,6 +54,8 @@ type ReadStore interface {
 	GetTotalHistory(ctx context.Context, key string) (*history.TotalDataPoint, error)
 	GetErrorHistory(ctx context.Context, key string, start, end time.Time) (
 		[]*history.ErrorDataPoint, error)
+	GetLastErrorBefore(ctx context.Context, key string, t time.Time) (
+		*history.ErrorDataPoint, error)
 }
 
 // DailyRow is one daily max-write.

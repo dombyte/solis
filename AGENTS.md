@@ -102,7 +102,8 @@ Package rules:
   (`ErrPeriodClosed`) and write domains; period sums run in SQL with explicit bounds.
   The `UNIQUE(register_key, <period>)` constraints are the lookup indexes; the V1
   duplicates of them are dropped at start (idempotent DDL, no schema version bump). A
-  status history read returns the newest 1000 changes.
+  status history read returns the newest 1000 changes; with `start`/`end` (local days,
+  like the other histories) only that range plus `before`, the change active at its start.
 - **http**: handlers in `httphandler` (no business logic; they call `service`), middleware
   in `middleware` (never mixed), all routes in `router/router.go`, lifecycle in `server`.
 

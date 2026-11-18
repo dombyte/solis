@@ -288,6 +288,80 @@ func (_c *MockReadStore_GetErrorHistory_Call) RunAndReturn(run func(ctx context.
 	return _c
 }
 
+// GetLastErrorBefore provides a mock function for the type MockReadStore
+func (_mock *MockReadStore) GetLastErrorBefore(ctx context.Context, key string, t time.Time) (*history.ErrorDataPoint, error) {
+	ret := _mock.Called(ctx, key, t)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLastErrorBefore")
+	}
+
+	var r0 *history.ErrorDataPoint
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time) (*history.ErrorDataPoint, error)); ok {
+		return returnFunc(ctx, key, t)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time) *history.ErrorDataPoint); ok {
+		r0 = returnFunc(ctx, key, t)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*history.ErrorDataPoint)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, time.Time) error); ok {
+		r1 = returnFunc(ctx, key, t)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockReadStore_GetLastErrorBefore_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLastErrorBefore'
+type MockReadStore_GetLastErrorBefore_Call struct {
+	*mock.Call
+}
+
+// GetLastErrorBefore is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+//   - t time.Time
+func (_e *MockReadStore_Expecter) GetLastErrorBefore(ctx any, key any, t any) *MockReadStore_GetLastErrorBefore_Call {
+	return &MockReadStore_GetLastErrorBefore_Call{Call: _e.mock.On("GetLastErrorBefore", ctx, key, t)}
+}
+
+func (_c *MockReadStore_GetLastErrorBefore_Call) Run(run func(ctx context.Context, key string, t time.Time)) *MockReadStore_GetLastErrorBefore_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 time.Time
+		if args[2] != nil {
+			arg2 = args[2].(time.Time)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockReadStore_GetLastErrorBefore_Call) Return(errorDataPoint *history.ErrorDataPoint, err error) *MockReadStore_GetLastErrorBefore_Call {
+	_c.Call.Return(errorDataPoint, err)
+	return _c
+}
+
+func (_c *MockReadStore_GetLastErrorBefore_Call) RunAndReturn(run func(ctx context.Context, key string, t time.Time) (*history.ErrorDataPoint, error)) *MockReadStore_GetLastErrorBefore_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetMonthlyHistory provides a mock function for the type MockReadStore
 func (_mock *MockReadStore) GetMonthlyHistory(ctx context.Context, key string, start time.Time, end time.Time) ([]*history.MonthlyDataPoint, error) {
 	ret := _mock.Called(ctx, key, start, end)

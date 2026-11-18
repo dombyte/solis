@@ -222,45 +222,99 @@ type StatusHistory struct {
 	Key     string        `json:"key"`
 	Name    string        `json:"name"`
 	History []StatusEntry `json:"history"`
+	// Before is the change active at the start of a range (the newest one before it), so
+	// a client knows the state between the start and the first listed change. Only for a
+	// range, and only when such a change is stored.
+	Before *StatusEntry `json:"before,omitempty"`
 }
 
-// StatusHistory decodes the stored changes of a status key plus its current value.
-func (s *ReadService) StatusHistory(ctx context.Context, key string) (StatusHistory, error) {
+// StatusHistory decodes the stored changes of a status key in [start, end] (the newest
+// 1000) plus its current value when that falls in the range and is not stored yet.
+func (s *ReadService) StatusHistory(ctx context.Context, key string, start, end time.Time) (
+	StatusHistory, error,
+) {
 	if err := s.requireStore(key, solis.StoreStatus); err != nil {
 		return StatusHistory{}, err
 	}
-	s.d.Log.Debug().Str("key", key).Msg("getting status history")
+	s.d.Log.Debug().Str("key", key).Time("start", start).Time("end", end).
+		Msg("getting status history")
 	reg, _ := s.d.Registry.ByKey(key)
 	out := StatusHistory{Key: key, Name: reg.Name, History: []StatusEntry{}}
-	points, err := s.d.Store.GetErrorHistory(ctx, key, time.Time{}, maxTime())
+	points, err := s.d.Store.GetErrorHistory(ctx, key, start, end)
 	if err != nil {
 		// History is best effort; the current value is still useful.
 		s.d.Log.Warn().Err(err).Str("key", key).Msg("status history unavailable")
 	}
 	// Cleared states (no active bits) are kept: "fault cleared" is history too.
 	for _, p := range points {
-		out.History = append(out.History, StatusEntry{
-			Timestamp:     p.Timestamp,
-			StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue)),
-		})
+		out.History = append(out.History, s.decodeEntry(key, p))
 	}
-	if v := s.d.Cache.Get(key); v != nil && v.StatusDecoded != nil && !lastIs(points, v) {
-		out.History = append(out.History, StatusEntry{
-			Timestamp:     v.Timestamp.UTC().Format(period.TimestampLayout),
-			StatusDecoded: v.StatusDecoded,
-		})
+	var before *history.ErrorDataPoint
+	if !start.IsZero() {
+		before = s.statusBefore(ctx, key, start)
+	}
+	if cur := s.unstoredCurrent(key, newestStored(points, before), start, end); cur != nil {
+		out.History = append(out.History, *cur)
 	}
 	// Both sources use period.TimestampLayout, so string order is time order.
 	sort.SliceStable(out.History, func(i, j int) bool {
 		return out.History[i].Timestamp > out.History[j].Timestamp
 	})
+	if before != nil {
+		e := s.decodeEntry(key, before)
+		out.Before = &e
+	}
 	return out, nil
 }
 
-// lastIs reports whether the newest stored change already records the cached state
-// (the usual case: the poller stores every change), so it is not listed twice.
-func lastIs(points []*history.ErrorDataPoint, v *solis.Value) bool {
-	return len(points) > 0 && points[len(points)-1].RawValue == v.RawValue
+// statusBefore is the change active at start, or nil (none stored, or the read failed:
+// like the history itself, it is best effort).
+func (s *ReadService) statusBefore(ctx context.Context, key string,
+	start time.Time,
+) *history.ErrorDataPoint {
+	p, err := s.d.Store.GetLastErrorBefore(ctx, key, start)
+	if err != nil {
+		s.d.Log.Warn().Err(err).Str("key", key).Msg("status before range unavailable")
+		return nil
+	}
+	return p
+}
+
+// newestStored is the stored state active at the end of the range: its newest change
+// (points are oldest first), else the change active at its start, else nil.
+func newestStored(points []*history.ErrorDataPoint,
+	before *history.ErrorDataPoint,
+) *history.ErrorDataPoint {
+	if len(points) > 0 {
+		return points[len(points)-1]
+	}
+	return before
+}
+
+// decodeEntry decodes one stored status change.
+func (s *ReadService) decodeEntry(key string, p *history.ErrorDataPoint) StatusEntry {
+	return StatusEntry{
+		Timestamp:     p.Timestamp,
+		StatusDecoded: s.d.Decoder.DecodeStatus(key, uint16(p.RawValue)),
+	}
+}
+
+// unstoredCurrent is the cached state of key when it lies in [start, end] and differs
+// from the newest stored state, else nil. Comparing with the state before the range when
+// the range holds no change keeps an unchanged state from showing up as a new change at
+// the latest poll.
+func (s *ReadService) unstoredCurrent(key string, newest *history.ErrorDataPoint,
+	start, end time.Time,
+) *StatusEntry {
+	v := s.d.Cache.Get(key)
+	if v == nil || v.StatusDecoded == nil || (newest != nil && newest.RawValue == v.RawValue) ||
+		v.Timestamp.Before(start) || v.Timestamp.After(end) {
+		return nil
+	}
+	return &StatusEntry{
+		Timestamp:     v.Timestamp.UTC().Format(period.TimestampLayout),
+		StatusDecoded: v.StatusDecoded,
+	}
 }
 
 // maxTime is the upper bound of an unbounded history query.

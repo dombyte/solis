@@ -672,6 +672,30 @@ func TestGetErrorHistory_KeepsNewestOverCap(t *testing.T) {
 	assert.InDelta(t, float64(maxErrorRows+1), e[len(e)-1].RawValue, 0, "ascending order")
 }
 
+// The state active at a range start is the newest change strictly before it.
+func TestGetLastErrorBefore(t *testing.T) {
+	s, clk, _ := newStore(t, day("2026-09-20"))
+	base := clk.Now()
+	none, err := s.GetLastErrorBefore(ctx, "solis_status", base)
+	require.NoError(t, err)
+	assert.Nil(t, none)
+
+	require.NoError(t, s.WritePoll(ctx, PollWrite{Status: []StatusRow{
+		{Key: "solis_status", Raw: 1, At: base},
+		{Key: "solis_status", Raw: 2, At: base.Add(time.Hour)},
+		{Key: "grid_fault_1", Raw: 4, At: base.Add(90 * time.Minute)},
+	}}))
+	dp, err := s.GetLastErrorBefore(ctx, "solis_status", base.Add(2*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, dp)
+	assert.InDelta(t, 2.0, dp.RawValue, 0, "newest of this key")
+
+	dp, err = s.GetLastErrorBefore(ctx, "solis_status", base.Add(time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, dp)
+	assert.InDelta(t, 1.0, dp.RawValue, 0, "strictly before t")
+}
+
 func TestNew_Errors(t *testing.T) {
 	reg, _ := solis.NewRegistry()
 	_, err := New(ctx, testConfig(t.TempDir()), reg, clocktest.New(time.Now()), zerolog.Nop())

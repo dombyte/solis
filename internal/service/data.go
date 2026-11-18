@@ -29,15 +29,18 @@ type DataResult struct {
 	Rows     any                     // []*history.{Daily,Monthly,Yearly}DataPoint
 }
 
-// HistoryCapable reports whether start/end apply to a register store: only daily,
-// monthly and yearly registers have history rows (totals have a single lifetime value).
+// HistoryCapable reports whether start/end apply to a register store: daily, monthly and
+// yearly registers have history rows and status registers a change log (totals have a
+// single lifetime value, cache-only registers no history at all).
 func HistoryCapable(s solis.Store) bool {
-	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly
+	return s == solis.StoreDaily || s == solis.StoreMonthly || s == solis.StoreYearly ||
+		s == solis.StoreStatus
 }
 
 // Data answers /api/data by register store: no range = latest cached value; a range on
 // a daily/monthly/yearly key = history rows; a total key = lifetime value; a status key =
-// decoded change history. A range on any other key is ErrWrongKind.
+// decoded change history (all of it, or the local days of the range). A range on any
+// other key is ErrWrongKind.
 func (s *ReadService) Data(ctx context.Context, q DataQuery) (DataResult, error) {
 	reg, err := s.Register(q.Key)
 	if err != nil {
@@ -48,7 +51,7 @@ func (s *ReadService) Data(ctx context.Context, q DataQuery) (DataResult, error)
 		return DataResult{Register: reg}, &KeyError{
 			Key: q.Key, Err: ErrWrongKind,
 			Detail: "historical queries (start/end) are only supported for daily, " +
-				"monthly and yearly registers",
+				"monthly, yearly and status registers",
 		}
 	}
 	return s.dispatch(ctx, reg, q, hasRange)
@@ -64,10 +67,7 @@ func (s *ReadService) dispatch(ctx context.Context, reg solis.Register, q DataQu
 	case reg.Store == solis.StoreTotal:
 		res.Total, err = s.Total(ctx, q.Key)
 	case reg.Store == solis.StoreStatus:
-		var sh StatusHistory
-		if sh, err = s.StatusHistory(ctx, q.Key); err == nil {
-			res.Status = &sh
-		}
+		res.Status, err = s.statusRange(ctx, q, hasRange)
 	case hasRange:
 		res.Rows, err = s.periodHistory(ctx, reg, q)
 	default:
@@ -91,6 +91,37 @@ func (s *ReadService) periodHistory(ctx context.Context, reg solis.Register, q D
 	default:
 		return s.DailyHistory(ctx, reg.Key, tr.Start, tr.End)
 	}
+}
+
+// statusRange reads the status history of q.Key: everything without a range, otherwise
+// the changes from local midnight of the start day through the end day.
+func (s *ReadService) statusRange(ctx context.Context, q DataQuery, hasRange bool) (
+	*StatusHistory, error,
+) {
+	start, end := time.Time{}, maxTime()
+	if hasRange {
+		tr, err := ParseTimeRange(q.Start, q.End, q.Now)
+		if err != nil {
+			return nil, err
+		}
+		start, end = localDayBounds(tr, q.Now.Location())
+	}
+	sh, err := s.StatusHistory(ctx, q.Key, start, end)
+	if err != nil {
+		return nil, err
+	}
+	return &sh, nil
+}
+
+// localDayBounds turns a calendar-day range into instants: from local midnight of the
+// start day to the last millisecond (the stored precision) before local midnight after
+// the end day, so DST days keep their 23 or 25 hours.
+func localDayBounds(tr TimeRange, loc *time.Location) (start, end time.Time) {
+	midnight := func(d time.Time) time.Time {
+		y, m, day := d.Date()
+		return time.Date(y, m, day, 0, 0, 0, 0, loc)
+	}
+	return midnight(tr.Start), midnight(tr.End.AddDate(0, 0, 1)).Add(-time.Millisecond)
 }
 
 // TimeRange is a parsed history range.

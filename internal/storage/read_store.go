@@ -89,15 +89,35 @@ func (s *Storage) GetErrorHistory(ctx context.Context, key string, start, end ti
 		ORDER BY timestamp DESC LIMIT ?`,
 		args: []any{key, statusTimestamp(start), statusTimestamp(end), maxErrorRows},
 	},
-		func(r *sql.Rows) (*history.ErrorDataPoint, error) {
-			var dp history.ErrorDataPoint
-			var str sql.NullString
-			err := r.Scan(&dp.Timestamp, &dp.RawValue, &str)
-			dp.StringValue = str.String
-			return &dp, err
-		})
+		scanErrorPoint)
 	slices.Reverse(out)
 	return out, err
+}
+
+// GetLastErrorBefore returns the newest status/fault change of key before t (the state
+// active at t), or nil when there is none.
+func (s *Storage) GetLastErrorBefore(ctx context.Context, key string, t time.Time) (
+	*history.ErrorDataPoint, error,
+) {
+	out, err := scanRows(ctx, s.db, query{
+		what: "last error before",
+		sql: `SELECT CAST(timestamp AS TEXT), raw_value, string_value FROM error_data
+		WHERE register_key = ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 1`,
+		args: []any{key, statusTimestamp(t)},
+	}, scanErrorPoint)
+	if err != nil || len(out) == 0 {
+		return nil, err
+	}
+	return out[0], nil
+}
+
+// scanErrorPoint scans one error_data row (timestamp, raw value, string value).
+func scanErrorPoint(r *sql.Rows) (*history.ErrorDataPoint, error) {
+	var dp history.ErrorDataPoint
+	var str sql.NullString
+	err := r.Scan(&dp.Timestamp, &dp.RawValue, &str)
+	dp.StringValue = str.String
+	return &dp, err
 }
 
 // GetDailyHistory returns the daily rows of key between the start and end days.

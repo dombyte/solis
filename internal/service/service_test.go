@@ -141,7 +141,7 @@ func TestStatusHistory(t *testing.T) {
 		StatusDecoded: []string{"Grid overvoltage"},
 	}).Once()
 
-	h, err := f.svc.StatusHistory(ctx, "grid_fault_1")
+	h, err := f.svc.StatusHistory(ctx, "grid_fault_1", time.Time{}, maxTime())
 	require.NoError(t, err)
 	assert.Equal(t, "Grid Fault 1 (Bitmask)", h.Name)
 	require.Len(t, h.History, 3, "cleared state (raw 0) is kept")
@@ -160,7 +160,7 @@ func TestStatusHistory(t *testing.T) {
 		Timestamp: t0, RawValue: 1,
 		StatusDecoded: []string{"No grid"},
 	}).Once()
-	h, err = f.svc.StatusHistory(ctx, "grid_fault_1")
+	h, err = f.svc.StatusHistory(ctx, "grid_fault_1", time.Time{}, maxTime())
 	require.NoError(t, err)
 	assert.Len(t, h.History, 1)
 
@@ -168,12 +168,66 @@ func TestStatusHistory(t *testing.T) {
 	f.store.EXPECT().GetErrorHistory(ctx, "solis_status", mock.Anything, mock.Anything).
 		Return(nil, errors.New("disk")).Once()
 	f.cache.EXPECT().Get("solis_status").Return(nil).Once()
-	h, err = f.svc.StatusHistory(ctx, "solis_status")
+	h, err = f.svc.StatusHistory(ctx, "solis_status", time.Time{}, maxTime())
 	require.NoError(t, err)
 	assert.Empty(t, h.History)
 
-	_, err = f.svc.StatusHistory(ctx, "pv_energy_daily")
+	_, err = f.svc.StatusHistory(ctx, "pv_energy_daily", time.Time{}, maxTime())
 	assert.ErrorIs(t, err, ErrWrongKind)
+}
+
+// A cached state outside the requested range is not listed: a range that ends before
+// now must not gain an entry from the present.
+func TestStatusHistory_CacheOutsideRange(t *testing.T) {
+	f := newFixture(t)
+	start := t0.AddDate(0, 0, -2)
+	end := t0.AddDate(0, 0, -1)
+	f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", start, end).
+		Return(nil, nil).Once()
+	f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+		Timestamp: t0, RawValue: 2, StatusDecoded: []string{"Grid overvoltage"},
+	}).Once()
+	f.store.EXPECT().GetLastErrorBefore(ctx, "grid_fault_1", start).Return(nil, nil).Once()
+	h, err := f.svc.StatusHistory(ctx, "grid_fault_1", start, end)
+	require.NoError(t, err)
+	assert.Empty(t, h.History)
+	assert.Nil(t, h.Before, "nothing stored before the range")
+}
+
+// A range without a stored change compares the cached state with the change active at
+// its start: an unchanged state is not listed as a new change at the latest poll (the
+// Status log showed "1 change" today with the state the same since weeks), a changed
+// one not stored yet is.
+func TestStatusHistory_CacheComparedWithBefore(t *testing.T) {
+	t.Parallel()
+	start := t0.AddDate(0, 0, -1)
+	tests := []struct {
+		name   string
+		cached float64
+		want   int
+	}{
+		{name: "unchanged since before the range", cached: 1, want: 0},
+		{name: "changed, not stored yet", cached: 2, want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			f.store.EXPECT().GetErrorHistory(ctx, "grid_fault_1", start, maxTime()).
+				Return(nil, nil).Once()
+			f.store.EXPECT().GetLastErrorBefore(ctx, "grid_fault_1", start).
+				Return(&history.ErrorDataPoint{Timestamp: "2026-07-01T10:00:00.000Z", RawValue: 1}, nil).
+				Once()
+			f.cache.EXPECT().Get("grid_fault_1").Return(&solis.Value{
+				Timestamp: t0, RawValue: tt.cached, StatusDecoded: []string{"x"},
+			}).Once()
+			h, err := f.svc.StatusHistory(ctx, "grid_fault_1", start, maxTime())
+			require.NoError(t, err)
+			assert.Len(t, h.History, tt.want)
+			require.NotNil(t, h.Before)
+			assert.Equal(t, "2026-07-01T10:00:00.000Z", h.Before.Timestamp)
+		})
+	}
 }
 
 func TestHealth(t *testing.T) {

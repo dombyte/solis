@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestParseTimeRange_DefaultsAreLocalDays(t *testing.T) {
 func TestHistoryCapable(t *testing.T) {
 	for s, want := range map[solis.Store]bool{
 		solis.StoreDaily: true, solis.StoreMonthly: true, solis.StoreYearly: true,
-		solis.StoreTotal: false, solis.StoreStatus: false, solis.StoreNone: false,
+		solis.StoreStatus: true, solis.StoreTotal: false, solis.StoreNone: false,
 	} {
 		assert.Equal(t, want, HistoryCapable(s), s.String())
 	}
@@ -121,12 +122,64 @@ func TestData_Errors(t *testing.T) {
 	_, err := f.svc.Data(ctx, DataQuery{Key: "nope", Now: t0})
 	assert.ErrorIs(t, err, ErrUnknownKey)
 
-	for _, key := range []string{"grid_power", "pv_energy_total", "grid_fault_1"} {
+	for _, key := range []string{"grid_power", "pv_energy_total"} {
 		_, err = f.svc.Data(ctx, DataQuery{Key: key, Start: "2026-08-01", Now: t0})
 		assert.ErrorIs(t, err, ErrWrongKind, key)
-		assert.ErrorContains(t, err, "only supported for daily, monthly and yearly", key)
+		assert.ErrorContains(t, err, "only supported for daily, monthly, yearly and status", key)
 	}
 
-	_, err = f.svc.Data(ctx, DataQuery{Key: "pv_energy_daily", Start: "yesterday", Now: t0})
+	for _, key := range []string{"pv_energy_daily", "solis_status"} {
+		_, err = f.svc.Data(ctx, DataQuery{Key: key, Start: "yesterday", Now: t0})
+		assert.ErrorIs(t, err, ErrInvalidRange, key)
+	}
+}
+
+// A status range covers whole local days: from local midnight of the start day to the
+// last stored millisecond of the end day, including a 25-hour DST day (Europe/Berlin).
+func TestData_StatusRangeIsLocalDays(t *testing.T) {
+	berlin, err := time.LoadLocation("Europe/Berlin")
+	require.NoError(t, err)
+	now := time.Date(2026, 11, 2, 9, 0, 0, 0, berlin)
+	f := newFixture(t)
+
+	start := time.Date(2026, 10, 25, 0, 0, 0, 0, berlin) // DST ends this day
+	end := time.Date(2026, 10, 26, 0, 0, 0, 0, berlin).Add(-time.Millisecond)
+	f.store.EXPECT().GetErrorHistory(mock.Anything, "solis_status", start, end).
+		Return([]*history.ErrorDataPoint{{Timestamp: "2026-10-25T10:00:00.000Z", RawValue: 3}},
+			nil).Once()
+	f.cache.EXPECT().Get("solis_status").Return(&solis.Value{
+		Timestamp: now, RawValue: 3, StatusDecoded: "Generating",
+	}).Once()
+
+	f.store.EXPECT().GetLastErrorBefore(mock.Anything, "solis_status", start).
+		Return(&history.ErrorDataPoint{Timestamp: "2026-10-20T08:00:00.000Z", RawValue: 0}, nil).
+		Once()
+
+	res, err := f.svc.Data(ctx, DataQuery{
+		Key: "solis_status", Start: "2026-10-25", End: "2026-10-25", Now: now,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res.Status)
+	assert.Len(t, res.Status.History, 1, "the current value is after the range")
+	assert.Equal(t, 25*time.Hour, end.Sub(start)+time.Millisecond)
+	require.NotNil(t, res.Status.Before, "the state at the range start")
+	assert.Equal(t, "2026-10-20T08:00:00.000Z", res.Status.Before.Timestamp)
+	assert.NotNil(t, res.Status.Before.StatusDecoded)
+
+	// Only an end: start falls back to the default 30 days, like the other histories. A
+	// failed read of the state before is best effort, like the history.
+	defaultStart := time.Date(2026, 10, 3, 0, 0, 0, 0, berlin)
+	f.store.EXPECT().GetErrorHistory(mock.Anything, "solis_status", defaultStart,
+		mock.Anything).Return(nil, nil).Once()
+	f.store.EXPECT().GetLastErrorBefore(mock.Anything, "solis_status", defaultStart).
+		Return(nil, errors.New("disk")).Once()
+	f.cache.EXPECT().Get("solis_status").Return(nil).Once()
+	res, err = f.svc.Data(ctx, DataQuery{Key: "solis_status", End: "2026-11-02", Now: now})
+	require.NoError(t, err)
+	assert.Nil(t, res.Status.Before)
+
+	_, err = f.svc.Data(ctx, DataQuery{
+		Key: "solis_status", Start: "2026-11-03", End: "2026-11-01", Now: now,
+	})
 	assert.ErrorIs(t, err, ErrInvalidRange)
 }
