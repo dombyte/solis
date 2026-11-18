@@ -132,19 +132,19 @@ export function History(): React.ReactElement {
                 <span>Filters</span>
               </Button>
             </SheetTrigger>
-            {/* Column layout: the list scrolls between header and footer. The body used to
-                be h-full below the header, which pushed the Reset/Done footer off screen.
-                Full width on phones ("Done" closes it, the backdrop strip only cost space);
-                a side panel from `sm` up. */}
-            <SheetContent side="left" className="p-0 gap-0 w-full max-w-none sm:max-w-md border-r-0 sm:border-r h-dvh flex flex-col">
-              <SheetHeader className="p-4 pb-2 border-b border-border">
-                <SheetTitle>History Filters</SheetTitle>
-              </SheetHeader>
-              <div className="flex flex-col flex-1 min-h-0 bg-background">
-                <div className="flex-1 p-4 space-y-4 overflow-y-auto">
+            {/* One scroll container with sticky glass header and footer: the list scrolls
+                under both bars (like the page under the mobile nav), and the Reset/Done
+                footer always stays on screen. Full width on phones ("Done" closes it, the
+                backdrop strip only cost space); a side panel from `sm` up. */}
+            <SheetContent side="left" className="p-0 gap-0 w-full max-w-none sm:max-w-md border-r-0 sm:border-r h-dvh">
+              <div className="h-full overflow-y-auto flex flex-col">
+                <SheetHeader className="sticky top-0 z-10 glass-header p-4">
+                  <SheetTitle>History Filters</SheetTitle>
+                </SheetHeader>
+                <div className="flex-1 p-4 space-y-4">
                   {filters('text-sm font-medium text-muted-foreground mb-2')}
                 </div>
-                <div className="p-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-border bg-background flex gap-2">
+                <div className="sticky bottom-0 z-10 glassy-nav-mobile p-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] flex gap-2">
                   {resetButton('flex-1')}
                   <Button onClick={() => setMobileSidebarOpen(false)} className="flex-1">
                     Done

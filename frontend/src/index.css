@@ -145,6 +145,21 @@
     --sidebar-accent-foreground: var(--foreground);
     --sidebar-border: var(--border);
     --sidebar-ring: var(--ring);
+
+    /* Glass (mobile nav, popovers, floating banners) - tinted translucent surface; the
+       highlight is the lit top edge, the shadow lifts it off the content underneath.
+       Panels carry text over arbitrary content, so they are denser than the nav bar.
+       Light content (grey text on white) disappears under a strong blur and a dense
+       tint, so light mode uses thin, clear panes with a light blur: the content stays
+       recognisable as frosted shapes, and border and shadow set them apart. */
+    --glass: color-mix(in oklch, color-mix(in oklch, var(--card), var(--foreground) 4%), transparent 50%);
+    --glass-blur: 3px;
+    --glass-panel: color-mix(in oklch, var(--card), transparent 32%);
+    --glass-panel-blur: 12px;
+    --glass-sheen: color-mix(in oklch, white, transparent 50%);
+    --glass-border: color-mix(in oklch, var(--foreground), transparent 78%);
+    --glass-highlight: color-mix(in oklch, white, transparent 10%);
+    --glass-shadow: color-mix(in oklch, var(--foreground), transparent 65%);
 }
 
 .dark {
@@ -283,6 +298,16 @@
     --sidebar-accent-foreground: var(--foreground);
     --sidebar-border: color-mix(in oklch, var(--border), transparent 40%);
     --sidebar-ring: color-mix(in oklch, var(--ring), transparent 30%);
+
+    /* Glass - card tone (muted is a saturated navy here and looked like a slab) */
+    --glass: color-mix(in oklch, var(--card), transparent 50%);
+    --glass-blur: 10px;
+    --glass-panel: color-mix(in oklch, var(--card), transparent 30%);
+    --glass-panel-blur: 14px;
+    --glass-sheen: color-mix(in oklch, white, transparent 88%);
+    --glass-border: color-mix(in oklch, var(--foreground), transparent 80%);
+    --glass-highlight: color-mix(in oklch, white, transparent 78%);
+    --glass-shadow: color-mix(in oklch, black, transparent 35%);
 }
 
 /* ========================================================================
@@ -464,10 +489,61 @@
     @apply bg-sidebar backdrop-blur-xl border-b border-sidebar-border/60 shadow-md;
   }
   
-  .glassy-nav-mobile {
-    @apply bg-muted/70 backdrop-blur-2xl border-t border-border/50;
+  /* Saturation keeps colours behind the glass vivid instead of washed out (iOS-style);
+     without backdrop-filter support it falls back to an opaque card. */
+  .glassy-nav-mobile,
+  .glass-header,
+  .glass-panel {
+    background-color: var(--card);
   }
-  
+
+  .glassy-nav-mobile {
+    border-top: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      0 -12px 32px -10px var(--glass-shadow);
+  }
+
+  /* Top bar that content scrolls under (history filter sheet): the nav bar mirrored */
+  .glass-header {
+    border-bottom: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      0 12px 32px -10px var(--glass-shadow);
+  }
+
+  /* Floating panel (popover, banner). --glass-panel can be overridden per use for a tint. */
+  .glass-panel {
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      0 16px 40px -12px var(--glass-shadow);
+  }
+
+  /* Warning-tinted panel (offline banner) */
+  .glass-warning {
+    --glass-panel: color-mix(in oklch, color-mix(in oklch, var(--card), var(--warning) 25%), transparent 20%);
+    --glass-border: var(--warning);
+  }
+
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    /* sheen: light falling on the top of the pane, fading out towards the bottom */
+    .glassy-nav-mobile,
+    .glass-header {
+      background: linear-gradient(to bottom, var(--glass-sheen), transparent 70%),
+        var(--glass);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(200%) brightness(1.05);
+      backdrop-filter: blur(var(--glass-blur)) saturate(200%) brightness(1.05);
+    }
+
+    .glass-panel {
+      background: linear-gradient(to bottom, var(--glass-sheen), transparent 60%),
+        var(--glass-panel);
+      -webkit-backdrop-filter: blur(var(--glass-panel-blur)) saturate(180%);
+      backdrop-filter: blur(var(--glass-panel-blur)) saturate(180%);
+    }
+  }
+
   .glassy-input {
     @apply bg-input/80 backdrop-blur-sm border border-border/30;
   }

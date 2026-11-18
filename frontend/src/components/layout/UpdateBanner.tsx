@@ -11,7 +11,7 @@ export function UpdateBanner() {
   return (
     // Above the fixed mobile nav on mobile (App reserves its height below the content).
     <div className={`fixed ${isMobile ? 'above-mobile-nav' : 'bottom-4'} left-4 right-4 z-50 max-w-[calc(100vw-2rem)]`}>
-      <div className="flex items-center justify-between gap-4 p-4 bg-card border border-border rounded-lg shadow-lg w-full" role="status">
+      <div className="flex items-center justify-between gap-4 p-4 glass-panel rounded-xl w-full" role="status">
         <div className="flex items-center gap-3">
           <RefreshCw className="size-5 text-primary" aria-hidden="true" />
           <div>

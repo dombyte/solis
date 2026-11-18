@@ -7,8 +7,8 @@ export const TRIGGER_CLASS = cn(
   'data-[state=open]:border-primary',
 );
 
-// Solid: the theme's glass popover lets the bright download button shine through.
-export const MENU_CLASS = 'bg-card max-w-[calc(100vw-1.5rem)]';
+// Background comes from the glass popover (dense enough that buttons below only tint it).
+export const MENU_CLASS = 'max-w-[calc(100vw-1.5rem)]';
 
 /**
  * Touch devices: a menu as wide as its trigger (lined up with it), at most the screen, and
