@@ -1,46 +1,23 @@
-"use client"
-
 import { cn } from "../../lib/utils"
 
 interface LoadingScreenProps {
   message?: string
-  fullPage?: boolean
   className?: string
 }
 
-export function LoadingScreen({
-  message = "Loading...",
-  fullPage = true,
-  className,
-}: LoadingScreenProps) {
+/**
+ * Full-screen loader for the app start only (before the shell exists); pages show
+ * PageSkeleton while their code loads.
+ */
+export function LoadingScreen({ message = "Loading...", className }: LoadingScreenProps) {
   return (
     <div
-      className={cn(
-        fullPage ? "fixed inset-0 z-50 flex flex-col items-center justify-center" : "absolute inset-0 z-10 flex flex-col items-center justify-center",
-        className
-      )}
+      className={cn("fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background", className)}
       role="status"
       aria-label={message}
     >
-      {/* Backdrop for full page mode - behind content */}
-      {fullPage && (
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
-      )}
-      
-      {/* Content wrapper */}
-      <div className="flex flex-col items-center justify-center">
-        {/* Spinner */}
-        <div className="relative z-10">
-          <div className="animate-spin h-12 w-12 border-4 border-primary border-t-transparent rounded-full" />
-          <div className="absolute inset-0 animate-spin border-4 border-primary/50 border-t-transparent rounded-full" style={{ animationDelay: '0.15s' }} />
-          <div className="absolute inset-0 animate-spin border-4 border-primary/25 border-t-transparent rounded-full" style={{ animationDelay: '0.3s' }} />
-        </div>
-        
-        {/* Loading text */}
-        <p className="relative z-10 text-muted-foreground text-center text-sm sm:text-base animate-pulse mt-4">
-          {message}
-        </p>
-      </div>
+      <div className="size-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      <p className="text-sm text-muted-foreground">{message}</p>
     </div>
   )
 }

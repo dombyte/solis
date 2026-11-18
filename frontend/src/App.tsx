@@ -5,7 +5,7 @@ import { MobileNav } from './components/layout/MobileNav';
 import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
 import { UpdateBanner } from './components/layout/UpdateBanner';
-import { LoadingScreen } from './components/layout/LoadingScreen';
+import { PageSkeleton } from './components/layout/PageSkeleton';
 import { useCompactLayout } from './hooks/useMobile';
 
 
@@ -27,7 +27,7 @@ export function App() {
             <div className="flex flex-col flex-1 w-full relative overflow-x-hidden">
               {isMobile && <MobileHeader />}
               <main className="flex-1 w-full overflow-x-hidden pt-1">
-                <Suspense fallback={<LoadingScreen message="Loading page..." fullPage={false} />}>
+                <Suspense fallback={<PageSkeleton />}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/dashboard" element={<Dashboard />} />

@@ -14,6 +14,7 @@ import { Menu, RefreshCw, RotateCcw } from 'lucide-react';
 import type { DateRange } from 'react-day-picker';
 import { parseISO } from 'date-fns';
 import { SURFACE } from '../components/ui/surface';
+import { Skeleton } from '../components/ui/skeleton';
 import { cn } from '../lib/utils';
 
 export function History(): React.ReactElement {
@@ -172,11 +173,9 @@ export function History(): React.ReactElement {
           )}
           <div className={cn(SURFACE, "p-3 sm:p-4 overflow-hidden")}>
             {isLoading && !data ? (
-              <div className="flex items-center justify-center h-64 sm:h-80 lg:h-96">
-                <div className="flex flex-col items-center gap-3 sm:gap-4">
-                  <div className="animate-spin h-6 w-6 sm:h-8 sm:w-8 border-4 border-primary border-t-transparent rounded-full" />
-                  <span className="text-muted-foreground">Loading history data...</span>
-                </div>
+              <div role="status" aria-label="Loading history data" className="flex flex-col gap-3">
+                <Skeleton className="h-5 w-40" />
+                <Skeleton className="h-64 sm:h-80 lg:h-96 w-full" />
               </div>
             ) : (
               <HistoryChart data={data} datasetCount={selectedIds.length} />

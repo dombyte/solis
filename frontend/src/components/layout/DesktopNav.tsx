@@ -1,28 +1,41 @@
 import { Link, useLocation } from 'react-router-dom';
-import { useState } from 'react';
-import { useRegisterStore } from '../../lib/stores/useRegisterStore';
+import { useCallback, useEffect, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { NAV_ITEMS, isNavActive } from './nav';
 import { Button } from '../ui/button';
 import { ThemeToggle } from './ThemeToggle';
 
+// Per-browser convenience; storage can throw (private mode), then it is just not kept.
+const COLLAPSED_KEY = 'solis.sidebar.collapsed';
+
+function loadCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveCollapsed(collapsed: boolean): void {
+  try {
+    if (collapsed) window.localStorage.setItem(COLLAPSED_KEY, '1');
+    else window.localStorage.removeItem(COLLAPSED_KEY);
+  } catch {
+    // not persisted; the in-memory state still applies
+  }
+}
+
+// The links never depend on data, so the sidebar renders in full at once (a narrow
+// "Loading..." stub that grew to full width shifted the whole page on every load).
 export function DesktopNav() {
   const location = useLocation();
-  const isLoading = useRegisterStore(state => state.isLoading);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(loadCollapsed);
+  useEffect(() => saveCollapsed(isCollapsed), [isCollapsed]);
+  const toggleCollapsed = useCallback(() => setIsCollapsed(c => !c), []);
+
 
   const isActive = (path: string) => isNavActive(location.pathname, path);
-
-  if (isLoading) {
-    return (
-      <aside className="h-full w-16 bg-muted/70 backdrop-blur-2xl border-r border-border/50 z-40 flex-col flex-shrink-0">
-        <div className="p-3 w-full">
-          <span className="text-xs text-muted-foreground">Loading...</span>
-        </div>
-      </aside>
-    );
-  }
 
   return (
     <>
@@ -80,7 +93,7 @@ export function DesktopNav() {
               variant="ghost"
               size="icon"
               className="w-full h-8"
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              onClick={toggleCollapsed}
               aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
               {isCollapsed
