@@ -425,7 +425,6 @@
   .mobile-scroll::-webkit-scrollbar {
     display: none;
   }
-  
 
   .mobile-scroll {
     -ms-overflow-style: none;
@@ -436,59 +435,17 @@
   .touch-target {
     @apply min-h-[44px] min-w-[44px];
   }
-  
-  /* Mobile register selector scroll container */
-  .mobile-register-selector {
-    @apply max-h-[400px] overflow-y-auto;
-  }
-  
-  /* Mobile sheet improvements */
-  .mobile-sheet-content {
-    @apply p-0 w-full max-w-xs;
-  }
-  
-  /* Mobile filter section styling */
-  .mobile-filter-section {
-    @apply space-y-1 pb-4 border-b border-border;
-  }
-  
-  .mobile-filter-section:last-child {
-    @apply border-b-0;
-  }
-  
+
   /* Prevent double tap zoom on inputs */
   input, button, select, textarea {
     @apply touch-manipulation;
   }
-  
-  /* Full width responsive containers */
-  .container-fluid {
-    @apply w-full mx-auto px-2 sm:px-4 md:px-6 lg:px-8;
-  }
-  
-  /* Responsive grid gap */
-  .grid-gap-responsive {
-    @apply gap-2 sm:gap-3 md:gap-4 lg:gap-6;
-  }
-  
-  /* Responsive card padding */
-  .card-padding-responsive {
-    @apply p-2 sm:p-3 md:p-4 lg:p-6;
-  }
-  
+
   /* Glassmorphism Effects */
   .glassy {
     @apply bg-card/80 backdrop-blur-xl border border-border/60;
   }
-  
-  .glassy-lg {
-    @apply bg-card/90 backdrop-blur-2xl border border-border/50;
-  }
-  
-  .glassy-nav {
-    @apply bg-sidebar backdrop-blur-xl border-b border-sidebar-border/60 shadow-md;
-  }
-  
+
   /* Saturation keeps colours behind the glass vivid instead of washed out (iOS-style);
      without backdrop-filter support it falls back to an opaque card. */
   .glassy-nav-mobile,
@@ -555,102 +512,9 @@
     }
   }
 
-  .glassy-input {
-    @apply bg-input/80 backdrop-blur-sm border border-border/30;
-  }
-  
-  .frosted {
-    @apply bg-white/10 backdrop-blur-xl;
-  }
-  
-  .frosted-dark {
-    @apply bg-black/10 backdrop-blur-xl;
-  }
-  
-  /* Gradient Backgrounds */
-  .gradient-bg {
-    @apply bg-gradient-to-br from-background via-background to-background;
-  }
-  
-  .gradient-primary {
-    @apply bg-gradient-to-r from-primary to-primary;
-  }
-  
-  .gradient-card {
-    @apply bg-gradient-to-br from-card via-card to-card;
-  }
-  
-  /* Glow Effects */
-  .glow-primary {
-    @apply shadow-primary/20 shadow-lg;
-  }
-  
-  .glow-purple {
-    @apply shadow-purple-500/20 shadow-lg;
-  }
-  
   /* Smooth Transitions */
   .transition-all-smooth {
     @apply transition-all duration-300 ease-in-out;
-  }
-  
-  .transition-colors-smooth {
-    @apply transition-colors duration-200 ease-in-out;
-  }
-  
-  /* Hover Effects */
-  .hover-glow {
-    @apply hover:shadow-primary/30 hover:shadow-xl;
-  }
-  
-  .hover-lift {
-    @apply hover:-translate-y-1 hover:shadow-lg;
-  }
-  
-  /* Border Radius Enhancements */
-  .rounded-2xl {
-    @apply rounded-2xl;
-  }
-  
-  .rounded-3xl {
-    @apply rounded-3xl;
-  }
-  
-  /* Modern Shadow Effects */
-  .shadow-soft {
-    @apply shadow-sm;
-  }
-  
-  .shadow-medium {
-    @apply shadow-md;
-  }
-  
-  /* Animation Effects */
-  .animate-pulse-slow {
-    @apply animate-pulse;
-    animation-duration: 3s;
-  }
-  
-  .animate-glow {
-    @apply animate-in fade-in;
-  }
-  
-  /* Custom Scrollbar */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-track {
-    @apply bg-transparent;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/30 rounded-full;
-  }
-  
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/50;
   }
 
   /* History chart scrollbar */
@@ -775,6 +639,4 @@
     transition-duration: 0.01ms !important;
   }
 }
-
-
 
