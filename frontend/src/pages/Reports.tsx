@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { parseISO, format } from 'date-fns';
+import { useSearchParams } from 'react-router-dom';
+import { isValid, parseISO, format } from 'date-fns';
 import { AlertTriangle, ArrowDown, ArrowRight, CheckCircle2, Clock, Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { CompareSelect } from '../components/reports/CompareSelect';
@@ -18,9 +19,19 @@ import { formatNumber } from '../lib/utils/reportFormat';
 import { cn } from '../lib/utils';
 import { SURFACE } from '../components/ui/surface';
 
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const isDay = (s: string): boolean => DAY_PATTERN.test(s) && isValid(parseISO(s));
+
 export function Reports(): React.ReactElement {
   const today = useToday();
-  const [range, setRange] = useState<DayRange>(() => presetRange('last_month', today));
+  // ?from&to (e.g. a day linked from the dashboard trend) opens that range when the
+  // server would accept it; anything else falls back to last month.
+  const [params] = useSearchParams();
+  const [range, setRange] = useState<DayRange>(() => {
+    const linked = { from: params.get('from') ?? '', to: params.get('to') ?? '' };
+    const valid = isDay(linked.from) && isDay(linked.to) && !rangeProblem(linked, today);
+    return valid ? linked : presetRange('last_month', today);
+  });
   const [compare, setCompare] = useState<CompareMode>('last_year');
   const [csvGranularity, setCsvGranularity] = useState<Granularity>(() => autoGranularity(range));
   const [download, setDownload] = useState<{ busy: 'pdf' | 'csv' | null; error: string | null }>({ busy: null, error: null });

@@ -438,10 +438,15 @@ solis.Register{
   tokens (dark: lighter than the card; `muted`/`secondary`/`input` are darker there and
   vanish on cards).
 - Dashboard: flow diagram (at most ~600px tall) next to one energy table (row per series
-  from `ENERGY_ROWS`, column per period), a 14-day PV vs consumption trend below (daily
-  history via REST, today from the live counters; days without data stay empty; desktop
-  layout only). Phones (same rule as the flow diagram) swipe one `EnergyCard` per period
-  instead of the table.
+  from `ENERGY_ROWS`, column per period), a PV vs consumption trend below (14 days on
+  desktop, 7 on tablets; daily history via REST, today from the live counters
+  (`useEnergyTrend`); days without data stay empty; export, import and self-sufficiency in
+  the tooltip, a click on a finished day opens its report via `/reports?from&to`). Phones
+  (same rule as the flow diagram) stack the diagram, the last 7 days as a list
+  (`EnergyTrendList`: one row per day, newest first, PV and consumption as horizontal bars
+  with values and self-sufficiency; a tap only expands the row (export, import, "Open day
+  report" button), so a stray tap never navigates) and the swipe cards (one `EnergyCard`
+  per period instead of the table).
 - Status levels (`lib/utils/status.ts`, `statusLevel`): `ok`, `notice` (a normal state
   that is not producing: waiting at night, standby, limited operation; amber) and `fault`
   (solis_status codes ≥ 0x1000, any fault bit, fault/warning bits of operating_status;

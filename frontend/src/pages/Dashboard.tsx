@@ -1,6 +1,7 @@
 import React from 'react';
 import { EnergyTable } from '../components/dashboard/EnergyTable';
 import { EnergyTrend } from '../components/dashboard/EnergyTrend';
+import { EnergyTrendList } from '../components/dashboard/EnergyTrendList';
 import { EnergyCarousel } from '../components/dashboard/EnergyCarousel';
 import { PowerFlow } from '../components/dashboard/flow';
 import { dashboardGroups } from '../lib/config/groups';
@@ -44,23 +45,29 @@ export function Dashboard(): React.ReactElement {
             fixed and the table takes the rest. The 14-day trend spans the full width
             below and takes the height the window has left.
             Default (stretch) row alignment keeps both cards equally tall; the diagram
-            centers itself and the table spreads its rows over the height. Phones swipe
-            through one card per period instead of the four-column table. */}
+            centers itself and the table spreads its rows over the height. Phones stack
+            the diagram, the 7-day list (one row per day instead of 14 bar pairs squeezed
+            into the width) and the swipe cards (one per period instead of the
+            four-column table). */}
         <div className="@container">
-          <div className="grid grid-cols-1 @[60rem]:grid-cols-2 @[110rem]:grid-cols-[48rem_minmax(0,1fr)] gap-4">
-            <div className="min-w-0">
-              <PowerFlow />
-            </div>
-            {isPhone ? (
+          {isPhone ? (
+            <div className="grid grid-cols-1 gap-4">
+              <div className="min-w-0">
+                <PowerFlow />
+              </div>
+              <EnergyTrendList />
               <EnergyCarousel groups={energyGroups} isLoading={isLoading} />
-            ) : isLoading ? (
-              <SkeletonCard className="w-full" />
-            ) : (
-              <EnergyTable groups={energyGroups} />
-            )}
-            {/* Desktop only: on phones and tablets the page is long enough already. */}
-            {!compact && <EnergyTrend className="@[60rem]:col-span-2" />}
-          </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 @[60rem]:grid-cols-2 @[110rem]:grid-cols-[48rem_minmax(0,1fr)] gap-4">
+              <div className="min-w-0">
+                <PowerFlow />
+              </div>
+              {isLoading ? <SkeletonCard className="w-full" /> : <EnergyTable groups={energyGroups} />}
+              {/* Two weeks on desktop, one on tablets. */}
+              <EnergyTrend days={compact ? 7 : 14} className="@[60rem]:col-span-2" />
+            </div>
+          )}
         </div>
     </Page>
   );
