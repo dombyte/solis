@@ -5,11 +5,12 @@ import { format } from "date-fns"
 import { CalendarIcon, Check } from "lucide-react"
 import { type DateRange } from "react-day-picker"
 
+import { cn } from "../../lib/utils"
 import { Button } from "./button"
 import { Calendar } from "./calendar"
 import { Field, FieldLabel } from "./field"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
-import { useMobile } from "../../hooks/useMobile"
+import { useCompactLayout } from "../../hooks/useMobile"
 import type { Period } from "../../types"
 import { formatRange } from "../../lib/utils/reportRange"
 
@@ -50,7 +51,8 @@ export function DatePickerWithRange({
   // Derived state for tempRange - initialized from date prop
   const [tempRange, setTempRange] = useState<DateRange | undefined>(date)
 
-  const isMobile = useMobile();
+  // Compact = touch or narrow: two months only fit a wide window with a mouse.
+  const isMobile = useCompactLayout();
   const numberOfMonths = isMobile ? 1 : 2
 
   // Sync tempRange when popover opens - only update if date has changed since last open
@@ -90,9 +92,14 @@ export function DatePickerWithRange({
         </PopoverTrigger>
         {/* Touch devices show one month as wide as the date field (lined up with it, at
             most the screen minus the 12px collision padding) instead of content width with
-            wide margins; the day grid stretches with it. Two months size to their content. */}
+            wide margins; the day grid stretches with it. Two months size to their content.
+            Capped at the space Radix measured on the chosen side, scrolling inside, so a short
+            screen never cuts off the month header or the Apply button. */}
         <PopoverContent
-          className={isMobile ? "w-[min(var(--radix-popover-trigger-width),calc(100vw-1.5rem))] p-0" : "w-auto p-0"}
+          className={cn(
+            "p-0 overflow-y-auto max-h-[var(--radix-popover-content-available-height)]",
+            isMobile ? "w-[min(var(--radix-popover-trigger-width),calc(100vw-1.5rem))]" : "w-auto",
+          )}
           // Start-aligned: centered under the narrow sidebar field it spilled over the
           // app's navigation sidebar.
           align="start"

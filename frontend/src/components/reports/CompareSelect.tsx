@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import type { CompareMode } from '../../lib/api/report';
 import { compareRange, formatRange, type DayRange } from '../../lib/utils/reportRange';
 import { cn } from '../../lib/utils';
-import { useMobile } from '../../hooks/useMobile';
+import { useCompactLayout } from '../../hooks/useMobile';
 import { MENU_CLASS, OPTION_CLASS, TOUCH_MENU_CLASS, TRIGGER_CLASS } from './styles';
 
 const OPTIONS: { id: CompareMode; label: string }[] = [
@@ -21,7 +21,8 @@ interface CompareSelectProps {
 
 /** What the report period is compared with; every option shows its actual dates. */
 export function CompareSelect({ mode, range, onChange }: CompareSelectProps) {
-  const isMobile = useMobile();
+  // Compact = touch or narrow (same rule as the app shell and the date picker).
+  const isMobile = useCompactLayout();
   const [open, setOpen] = useState(false);
   const current = OPTIONS.find(o => o.id === mode) ?? OPTIONS[0];
   const currentRange = compareRange(mode, range);

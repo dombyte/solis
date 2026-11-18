@@ -5,7 +5,7 @@ import { CalendarIcon, Check, ChevronDown, ChevronLeft, ChevronRight } from 'luc
 import { Button } from '../ui/button';
 import { Calendar } from '../ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { useMobile } from '../../hooks/useMobile';
+import { useCompactLayout } from '../../hooks/useMobile';
 import {
   PRESET_LABEL, REPORT_PRESETS, finishedRange, formatRange, presetOf, presetRange, type DayRange,
 } from '../../lib/utils/reportRange';
@@ -20,7 +20,8 @@ interface PeriodPickerProps {
 
 /** The report period: a preset (with its dates) or a custom range from the calendar. */
 export function PeriodPicker({ range, today, onChange }: PeriodPickerProps) {
-  const isMobile = useMobile();
+  // Compact = touch or narrow (same rule as the app shell and the date picker).
+  const isMobile = useCompactLayout();
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState<DateRange | undefined>();
   // Phones show presets and calendar one at a time (both stacked ran under the bottom
