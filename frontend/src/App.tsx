@@ -6,6 +6,7 @@ import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { PageSkeleton } from './components/layout/PageSkeleton';
+import { DocumentTitle } from './components/layout/DocumentTitle';
 import { useCompactLayout } from './hooks/useMobile';
 
 
@@ -20,6 +21,7 @@ export function App() {
 
   return (
         <BrowserRouter>
+          <DocumentTitle />
           {/* Desktop: the shell is exactly viewport-tall and only <main> scrolls (its overflow-x
               makes it a scroll container), so the sidebar never moves. Mobile: the page scrolls. */}
           <div className={`bg-background flex ${isMobile ? 'min-h-screen flex-col mobile-nav-spacer' : 'h-screen flex-row overflow-hidden'} w-full max-w-[100vw] overflow-x-hidden`}>
