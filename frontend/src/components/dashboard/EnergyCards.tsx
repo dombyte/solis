@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { InfoPopover } from '../ui/info-popover';
+import { InfoTerm } from '../ui/info-popover';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { SkeletonCard } from '../ui/skeleton';
 import { EnergyValue } from './EnergyValue';
@@ -29,22 +29,18 @@ export function EnergyCard({ group, className = '' }: EnergyCardProps): React.Re
     <Card className={`w-full min-w-0 flex flex-col ${className}`}>
       <CardHeader className="flex-row items-center gap-2">
         <CardTitle>{group.title}</CardTitle>
-        {group.description && (
-          <InfoPopover label={group.title}>
-            <p>{group.description}</p>
-          </InfoPopover>
-        )}
       </CardHeader>
       <CardContent className="flex-1">
         <dl className="text-sm tabular-nums">
           {registers.map(reg => (
             <div key={reg.id} className="flex items-center justify-between gap-3 border-t border-border/70 py-2">
               <dt className="flex min-w-0 items-center gap-1 text-muted-foreground">
-                <span className="truncate">{reg.name}</span>
-                {reg.description && (
-                  <InfoPopover label={reg.name} align="start">
-                    <p>{reg.description}</p>
-                  </InfoPopover>
+                {reg.description ? (
+                  <InfoTerm label={reg.name} info={<p>{reg.description}</p>} className="truncate">
+                    {reg.name}
+                  </InfoTerm>
+                ) : (
+                  <span className="truncate">{reg.name}</span>
                 )}
               </dt>
               <dd className="font-semibold">

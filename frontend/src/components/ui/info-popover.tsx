@@ -50,3 +50,44 @@ export function InfoPopover({
     </Popover>
   )
 }
+
+interface InfoTermProps {
+  /** The term shown (e.g. a row name); it is the trigger, so no extra icon is needed. */
+  children: React.ReactNode
+  /** Plain name of the term for the accessible label. */
+  label: string
+  /** The explanation shown in the popover. */
+  info: React.ReactNode
+  align?: "start" | "center" | "end"
+  className?: string
+}
+
+// A term whose explanation opens on click/tap of the term itself. A dotted underline
+// marks it instead of an info icon, so rows full of explained names stay calm.
+export function InfoTerm({ children, label, info, align = "start", className }: InfoTermProps): React.ReactElement {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "min-w-0 cursor-help rounded-sm text-left underline decoration-dotted decoration-muted-foreground/50 underline-offset-[3px] hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            className
+          )}
+          aria-label={`${label}, show explanation`}
+        >
+          {children}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align={align}
+        sideOffset={8}
+        collisionPadding={12}
+        hideWhenDetached
+        className="w-72 max-w-[calc(100vw-24px)] whitespace-normal break-words text-sm text-popover-foreground"
+      >
+        {info}
+      </PopoverContent>
+    </Popover>
+  )
+}

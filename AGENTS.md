@@ -437,6 +437,10 @@ solis.Register{
   Unselected buttons, toggles and dropdown triggers use the `control` / `control-hover`
   tokens (dark: lighter than the card; `muted`/`secondary`/`input` are darker there and
   vanish on cards).
+- Explanations open from the term itself (`InfoTerm`: dotted underline, click/tap), never
+  from an info icon per row. Where the name already acts (a checkbox label, a row that
+  opens the status log) the explanation is plain text there instead. A lone control MAY
+  keep one `InfoPopover` icon (fault notifications).
 - Dashboard: flow diagram (at most ~600px tall) next to one energy table (row per series
   from `ENERGY_ROWS`, column per period), a PV vs consumption trend below (14 days on
   desktop, 7 on tablets; daily history via REST, today from the live counters

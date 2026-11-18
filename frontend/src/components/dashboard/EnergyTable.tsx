@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { InfoPopover } from '../ui/info-popover';
+import { InfoTerm } from '../ui/info-popover';
 import { ENERGY_ROWS } from '../../lib/config/data';
 import { EnergyValue } from './EnergyValue';
 import type { GroupConfig } from '../../types';
@@ -41,12 +41,9 @@ export function EnergyTable({ groups, className = '' }: EnergyTableProps): React
             {ENERGY_ROWS.map(row => (
               <tr key={row.name} className="border-t border-border/70">
                 <th scope="row" className="py-1.5 pr-2 text-left font-normal text-muted-foreground">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="whitespace-nowrap">{row.name}</span>
-                    <InfoPopover label={row.name} align="start">
-                      <p>{row.description}</p>
-                    </InfoPopover>
-                  </span>
+                  <InfoTerm label={row.name} info={<p>{row.description}</p>} className="whitespace-nowrap">
+                    {row.name}
+                  </InfoTerm>
                 </th>
                 {row.ids.map(id => (
                   <td key={id} className="py-1.5 pl-3 text-right font-semibold">
