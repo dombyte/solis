@@ -1,27 +1,22 @@
 import { useState, useCallback, useRef } from 'react';
-import { parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { api } from '../api/client';
 import { getSourceById, apiDataObjects } from '../config/data';
 import type { Period, HistoryDataPoint, ChartData, ChartDataset } from '../../types';
 
-/**
- * Get timestamp label based on period
- */
-function getTimestampLabel(ts: string, period: Period): string {
+interface Labels {
+  long: string;
+  short: string;
+}
+
+/** Axis labels of a history row key in the app's date style (English, like the PDF). */
+function timestampLabels(ts: string, period: Period): Labels {
+  if (period === 'yearly') return { long: ts, short: ts };
   // parseISO reads "2026-09-01" / "2026-09" as local time; new Date() would read them as
   // UTC midnight and show the previous day/month west of UTC.
   const date = parseISO(ts);
-  
-  switch (period) {
-    case 'daily':
-      return date.toLocaleDateString();
-    case 'monthly':
-      return date.toLocaleString('default', { month: 'short', year: 'numeric' });
-    case 'yearly':
-      return ts; // For yearly, ts should be just the year
-    default:
-      return ts;
-  }
+  if (period === 'monthly') return { long: format(date, 'MMM yyyy'), short: format(date, 'MMM') };
+  return { long: format(date, 'd MMM yyyy'), short: format(date, 'd MMM') };
 }
 
 export interface UseHistoryResult {
@@ -61,35 +56,34 @@ export function useHistory(): UseHistoryResult {
 
       // Collect all timestamps and build datasets
       const allTimestamps: Set<string> = new Set();
-      const timestampToLabel: Map<string, string> = new Map();
+      const timestampToLabel: Map<string, Labels> = new Map();
       const datasetDataMap: Map<string, Map<string, number>> = new Map();
       const datasets: ChartDataset[] = [];
       const failed: string[] = [];
 
-      // Fetch data for each source
-      for (const source of sources) {
-        if (signal.aborted) return;
+      // Fetch every source at once (one round-trip of latency instead of one per series);
+      // results are processed in source order so the datasets keep their order.
+      const params: Record<string, string> = {};
+      if (startDate) params.start = startDate;
+      if (endDate) params.end = endDate;
+      const results = await Promise.allSettled(sources.map(async (source) => {
+        const body = await api.get(source, params, { signal });
+        if (!Array.isArray(body)) throw new Error('unexpected history response');
+        return body as HistoryDataPoint[];
+      }));
+      if (signal.aborted) return;
 
+      for (const [i, source] of sources.entries()) {
         const dataObj = apiDataObjects.find(o => o.source === source);
-        let historyData: HistoryDataPoint[] = [];
-
-        try {
-          // The source already contains the full path including period
-          const params: Record<string, string> = {};
-          if (startDate) params.start = startDate;
-          if (endDate) params.end = endDate;
-
-          const body = await api.get(source, params, { signal });
-          if (!Array.isArray(body)) throw new Error('unexpected history response');
-          historyData = body as HistoryDataPoint[];
-        } catch (err) {
-          if (signal.aborted) return;
-          console.error(`Failed to fetch history for ${source}:`, err);
+        const result = results[i];
+        if (result.status === 'rejected') {
+          console.error(`Failed to fetch history for ${source}:`, result.reason);
           failed.push(dataObj?.name ?? source);
           continue;
         }
+        const historyData = result.value;
 
-        if (dataObj && historyData?.length) {
+        if (dataObj && historyData.length) {
           datasetDataMap.set(dataObj.key, new Map());
           
           for (const d of historyData) {
@@ -99,9 +93,8 @@ export function useHistory(): UseHistoryResult {
             // The row's own key names its period (sources are /api/data/<key>, without a
             // period segment, so the path cannot tell).
             const period: Period = d.date ? 'daily' : d.month ? 'monthly' : 'yearly';
-            const label = getTimestampLabel(ts, period);
             allTimestamps.add(ts);
-            timestampToLabel.set(ts, label);
+            timestampToLabel.set(ts, timestampLabels(ts, period));
             datasetDataMap.get(dataObj.key)!.set(ts, d.value);
           }
           
@@ -133,7 +126,8 @@ export function useHistory(): UseHistoryResult {
       if (datasets.length > 0) {
         const sortedTimestamps = Array.from(allTimestamps).sort();
         setData({
-          labels: sortedTimestamps.map(ts => timestampToLabel.get(ts)!),
+          labels: sortedTimestamps.map(ts => timestampToLabel.get(ts)!.long),
+          shortLabels: sortedTimestamps.map(ts => timestampToLabel.get(ts)!.short),
           datasets: datasets.map(ds => ({
             ...ds,
             data: sortedTimestamps.map(ts => {

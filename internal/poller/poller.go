@@ -99,7 +99,9 @@ type Poller struct {
 
 	// Loop-owned state.
 	seeded        bool
-	failures      int // failed poll cycles in a row
+	polledOnce    bool // a poll has succeeded since start
+	awaitModbus   bool // the last cycle found Modbus not yet connected before any success
+	failures      int  // failed poll cycles in a row
 	lastStatus    map[string]float64
 	lastDaily     map[string]*solis.Value
 	pendingCloses map[string]string
@@ -183,9 +185,22 @@ func (p *Poller) loop(ctx context.Context) {
 		case <-timer.C():
 			start := p.d.Clock.Now()
 			p.pollCycle(ctx, start)
-			timer.Reset(max(0, p.d.Settings.Interval-p.d.Clock.Now().Sub(start)))
+			timer.Reset(max(0, p.nextDelay()-p.d.Clock.Now().Sub(start)))
 		}
 	}
+}
+
+// startupRetry is the delay before the next cycle while the Modbus client is still making
+// its first connection: the first poll starts right away, usually before the connection
+// is up, and waiting a full interval would report the poller as recovering for nothing.
+const startupRetry = time.Second
+
+// nextDelay is the time between this cycle's start and the next one.
+func (p *Poller) nextDelay() time.Duration {
+	if p.awaitModbus {
+		return min(startupRetry, p.d.Settings.Interval)
+	}
+	return p.d.Settings.Interval
 }
 
 // staleAfter is the number of failed poll cycles in a row after which the live values
@@ -198,8 +213,9 @@ const staleAfter = 3
 func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 	p.Beat()
 	defer p.Beat()
+	p.awaitModbus = false
 	if p.poll(ctx, start) {
-		p.failures = 0
+		p.failures, p.polledOnce = 0, true
 		return
 	}
 	if p.failures++; p.failures == staleAfter {
@@ -233,6 +249,7 @@ func (p *Poller) poll(ctx context.Context, start time.Time) bool {
 	reader, ok := p.d.Source.Load()
 	if !ok || !reader.IsConnected() {
 		p.closeUnread(ctx, start)
+		p.awaitModbus = !p.polledOnce
 		p.Set(health.Recovering, "modbus not connected")
 		return false
 	}

@@ -30,7 +30,7 @@ export function InfoPopover({
         <button
           type="button"
           className={cn(
-            "-m-1 inline-flex shrink-0 items-center justify-center rounded-sm p-1.5 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground",
+            "-m-1 inline-flex shrink-0 items-center justify-center rounded-sm p-1.5 text-muted-foreground transition-colors hover:bg-control-hover hover:text-foreground",
             className
           )}
           aria-label={`Info about ${label}`}

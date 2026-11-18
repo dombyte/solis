@@ -34,16 +34,19 @@ func TestRegistry_Contents(t *testing.T) {
 	r := newTestRegistry(t)
 
 	assert.Len(t, r.DailyKeys(), 8)
-	assert.Len(t, r.ByStore(StoreStatus), 9)
-	assert.Len(t, r.ByStore(StoreMonthly), 9)
-	assert.Len(t, r.ByStore(StoreYearly), 9)
-	assert.Len(t, r.ByStore(StoreTotal), 9)
-	assert.Len(t, r.ByStore(StoreNone), 8)
+	byStore := map[Store]int{}
+	for _, reg := range r.All() {
+		byStore[reg.Store]++
+	}
+	assert.Equal(t, 9, byStore[StoreStatus])
+	assert.Equal(t, 9, byStore[StoreMonthly])
+	assert.Equal(t, 9, byStore[StoreYearly])
+	assert.Equal(t, 9, byStore[StoreTotal])
+	assert.Equal(t, 8, byStore[StoreNone])
 	assert.Len(t, r.Edges(period.Monthly), 8)
 	assert.Len(t, r.Edges(period.Yearly), 8)
 	assert.Len(t, r.Edges(period.Total), 8)
 	assert.Len(t, r.NetPairs(period.Daily), 1)
-	assert.Len(t, r.Keys(), len(r.All()))
 
 	grid, ok := r.ByKey("grid_power")
 	require.True(t, ok)

@@ -2,6 +2,7 @@
 package router
 
 import (
+	"errors"
 	"io/fs"
 	"net/http"
 	"path"
@@ -13,7 +14,11 @@ import (
 
 	"github.com/dombyte/solis/internal/http/httphandler"
 	"github.com/dombyte/solis/internal/http/middleware"
+	"github.com/dombyte/solis/internal/util"
 )
+
+// ErrMissingDependency is returned by SetupRoutes when a required dependency is nil.
+var ErrMissingDependency = errors.New("router: missing dependency")
 
 // Deps are the router dependencies.
 type Deps struct {
@@ -44,8 +49,17 @@ func staticFiles() map[string]string {
 	}
 }
 
-// SetupRoutes builds the router.
-func SetupRoutes(d Deps) *chi.Mux {
+// SetupRoutes builds the router; the WebSocket handler and the handlers' service, error
+// mapper and clock are required (the SPA and the docs are mounted only when built).
+func SetupRoutes(d Deps) (*chi.Mux, error) {
+	if err := util.RequireAll(ErrMissingDependency,
+		util.Requirement{Name: "WebSocket", OK: d.WebSocket != nil},
+		util.Requirement{Name: "Handlers.Service", OK: d.Handlers.Service != nil},
+		util.Requirement{Name: "Handlers.Errors", OK: d.Handlers.Errors != nil},
+		util.Requirement{Name: "Handlers.Clock", OK: d.Handlers.Clock != nil},
+	); err != nil {
+		return nil, err
+	}
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID) // first, so the logger and recoverer see the id
 	r.Use(middleware.Recover(d.Log))
@@ -55,19 +69,18 @@ func SetupRoutes(d Deps) *chi.Mux {
 	// No CORS: the SPA and the dev server proxy are same-origin, so a permissive
 	// Access-Control-Allow-Origin would only let other websites read the data.
 
-	if d.WebSocket != nil {
-		r.Handle("/ws", d.WebSocket)
-		r.Handle("/ws/", d.WebSocket)
-	}
+	r.Handle("/ws", d.WebSocket)
+	r.Handle("/ws/", d.WebSocket)
 	r.Method(http.MethodGet, "/health", httphandler.GetHealthHandler(d.Handlers))
 	r.Route("/api", func(r chi.Router) {
 		r.Method(http.MethodGet, "/keys", httphandler.GetKeysHandler(d.Handlers))
 		r.Method(http.MethodGet, "/version", httphandler.GetVersionHandler(d.Handlers))
 		r.Method(http.MethodGet, "/data/{key}", httphandler.GetDataHandler(d.Handlers))
+		r.Method(http.MethodGet, "/report", httphandler.GetReportHandler(d.Handlers))
 	})
 	mountDocs(r, d.Docs)
 	mountFrontend(r, d.Frontend)
-	return r
+	return r, nil
 }
 
 // HasIndex reports whether fsys holds an index.html (a built SPA or Swagger UI).

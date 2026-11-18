@@ -14,8 +14,9 @@ import (
 // frozen watermarks ("unfreezing only inside the job's own transaction"); nothing is
 // persisted unless the job function returns nil.
 type BackfillTx interface {
-	// SumDaily sums daily values of key for from <= date <= to.
-	SumDaily(key, from, to string) (float64, error)
+	// SumDaily sums the daily values of every key for from <= date <= to ("" from =
+	// unbounded) in one grouped query; a key without rows sums to 0.
+	SumDaily(keys []string, from, to string) (map[string]float64, error)
 	// PeriodValue returns the stored value of a monthly/yearly row.
 	PeriodValue(l period.Level, key, p string) (float64, bool, error)
 	// PutPeriod writes a monthly/yearly row, ignoring freeze marks.
@@ -56,8 +57,8 @@ type backfillTx struct {
 	meta *metaState
 }
 
-func (b *backfillTx) SumDaily(key, from, to string) (float64, error) {
-	return sumDaily(b.ctx, b.tx, key, from, to)
+func (b *backfillTx) SumDaily(keys []string, from, to string) (map[string]float64, error) {
+	return sumDaily(b.ctx, b.tx, keys, from, to)
 }
 
 func (b *backfillTx) PeriodValue(l period.Level, key, p string) (float64, bool, error) {
@@ -68,15 +69,13 @@ func (b *backfillTx) PeriodValue(l period.Level, key, p string) (float64, bool, 
 func periodValue(ctx context.Context, q queryer, l period.Level, key, p string) (
 	float64, bool, error,
 ) {
-	var stmt string
-	switch l {
-	case period.Monthly:
-		stmt = `SELECT value FROM monthly_values WHERE register_key = ? AND month = ?`
-	case period.Yearly:
-		stmt = `SELECT value FROM yearly_values WHERE register_key = ? AND year = ?`
-	default:
+	t, ok := periodTableOf(l)
+	if !ok || l == period.Daily {
 		return 0, false, fmt.Errorf("storage: period level %s not supported", l)
 	}
+	// #nosec G201 -- table and column come from periodTableOf, never from input
+	stmt := fmt.Sprintf(`SELECT value FROM %s WHERE register_key = ? AND %s = ?`,
+		t.table, t.column)
 	var v float64
 	err := q.QueryRowContext(ctx, stmt, key, p).Scan(&v)
 	if errors.Is(err, sql.ErrNoRows) {

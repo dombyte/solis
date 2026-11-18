@@ -1,6 +1,6 @@
 module github.com/dombyte/solis
 
-go 1.27.3
+go 1.27.4
 
 // frontend dependencies ship stray Go packages (e.g. flatted); keep them out of ./...
 ignore (
@@ -13,6 +13,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/rs/zerolog v1.35.1
+	github.com/signintech/gopdf v0.38.3
 	github.com/simonvetter/modbus v1.6.4
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
@@ -45,6 +46,8 @@ require (
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
+	github.com/phpdave11/gofpdi v1.0.14-0.20211212211723-1f10f9844311 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/spf13/afero v1.15.0 // indirect

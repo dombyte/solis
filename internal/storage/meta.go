@@ -287,20 +287,25 @@ type offsetSpan struct {
 
 // periodOffsets records the offset of every computed key of one cutover period.
 func (s *Storage) periodOffsets(tx *txn, m *metaState, sp offsetSpan) error {
-	l, key, from, today := sp.level, sp.key, sp.from, sp.today
-	for _, e := range s.keys.Edges(l) {
-		stored, ok, err := periodValue(tx.ctx, tx, l, e.Target, key)
+	edges := s.keys.Edges(sp.level)
+	sources := make([]string, 0, len(edges))
+	for _, e := range edges {
+		sources = append(sources, e.Source)
+	}
+	sums, err := sumDaily(tx.ctx, tx, sources, sp.from, sp.today)
+	if err != nil {
+		return err
+	}
+	for _, e := range edges {
+		stored, ok, err := periodValue(tx.ctx, tx, sp.level, e.Target, sp.key)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			continue
 		}
-		sum, err := sumDaily(tx.ctx, tx, e.Source, from, today)
-		if err != nil {
-			return err
-		}
-		if err := putOffset(tx, m, OffsetKey(l, key, e.Target), stored-sum); err != nil {
+		off := stored - sums[e.Source]
+		if err := putOffset(tx, m, OffsetKey(sp.level, sp.key, e.Target), off); err != nil {
 			return err
 		}
 	}

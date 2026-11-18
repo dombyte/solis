@@ -53,7 +53,7 @@ export function RegisterSelector({
           return (
             <div 
               key={id} 
-              className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 transition-colors touch-target min-h-[48px]"
+              className="flex items-center gap-3 p-2 rounded-lg hover:bg-control-hover transition-colors touch-target min-h-[48px]"
             >
               <Checkbox
                 id={`register-${id}`}

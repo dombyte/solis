@@ -440,25 +440,27 @@ func (_c *MockBackfillTx_PutPeriod_Call) RunAndReturn(run func(l period.Level, k
 }
 
 // SumDaily provides a mock function for the type MockBackfillTx
-func (_mock *MockBackfillTx) SumDaily(key string, from string, to string) (float64, error) {
-	ret := _mock.Called(key, from, to)
+func (_mock *MockBackfillTx) SumDaily(keys []string, from string, to string) (map[string]float64, error) {
+	ret := _mock.Called(keys, from, to)
 
 	if len(ret) == 0 {
 		panic("no return value specified for SumDaily")
 	}
 
-	var r0 float64
+	var r0 map[string]float64
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string, string, string) (float64, error)); ok {
-		return returnFunc(key, from, to)
+	if returnFunc, ok := ret.Get(0).(func([]string, string, string) (map[string]float64, error)); ok {
+		return returnFunc(keys, from, to)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string, string, string) float64); ok {
-		r0 = returnFunc(key, from, to)
+	if returnFunc, ok := ret.Get(0).(func([]string, string, string) map[string]float64); ok {
+		r0 = returnFunc(keys, from, to)
 	} else {
-		r0 = ret.Get(0).(float64)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]float64)
+		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(string, string, string) error); ok {
-		r1 = returnFunc(key, from, to)
+	if returnFunc, ok := ret.Get(1).(func([]string, string, string) error); ok {
+		r1 = returnFunc(keys, from, to)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -471,18 +473,18 @@ type MockBackfillTx_SumDaily_Call struct {
 }
 
 // SumDaily is a helper method to define mock.On call
-//   - key string
+//   - keys []string
 //   - from string
 //   - to string
-func (_e *MockBackfillTx_Expecter) SumDaily(key any, from any, to any) *MockBackfillTx_SumDaily_Call {
-	return &MockBackfillTx_SumDaily_Call{Call: _e.mock.On("SumDaily", key, from, to)}
+func (_e *MockBackfillTx_Expecter) SumDaily(keys any, from any, to any) *MockBackfillTx_SumDaily_Call {
+	return &MockBackfillTx_SumDaily_Call{Call: _e.mock.On("SumDaily", keys, from, to)}
 }
 
-func (_c *MockBackfillTx_SumDaily_Call) Run(run func(key string, from string, to string)) *MockBackfillTx_SumDaily_Call {
+func (_c *MockBackfillTx_SumDaily_Call) Run(run func(keys []string, from string, to string)) *MockBackfillTx_SumDaily_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 []string
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].([]string)
 		}
 		var arg1 string
 		if args[1] != nil {
@@ -501,12 +503,12 @@ func (_c *MockBackfillTx_SumDaily_Call) Run(run func(key string, from string, to
 	return _c
 }
 
-func (_c *MockBackfillTx_SumDaily_Call) Return(f float64, err error) *MockBackfillTx_SumDaily_Call {
-	_c.Call.Return(f, err)
+func (_c *MockBackfillTx_SumDaily_Call) Return(stringToFloat64 map[string]float64, err error) *MockBackfillTx_SumDaily_Call {
+	_c.Call.Return(stringToFloat64, err)
 	return _c
 }
 
-func (_c *MockBackfillTx_SumDaily_Call) RunAndReturn(run func(key string, from string, to string) (float64, error)) *MockBackfillTx_SumDaily_Call {
+func (_c *MockBackfillTx_SumDaily_Call) RunAndReturn(run func(keys []string, from string, to string) (map[string]float64, error)) *MockBackfillTx_SumDaily_Call {
 	_c.Call.Return(run)
 	return _c
 }

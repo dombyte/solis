@@ -52,8 +52,26 @@ func (a *Aggregator) execute(ctx context.Context, now time.Time) error {
 	if err := a.persist(ctx, rs.write); err != nil {
 		return err
 	}
-	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(rs.current, now), now)
+	a.d.Cache.Merge(eventbus.DomainAggregator, a.values(a.unmerged(rs.current), now), now)
 	return nil
+}
+
+// unmerged returns the current-period values that differ from the last ones merged into
+// the cache and records them. Most runs recompute identical values; merging them again
+// would publish an event and wake every consumer for nothing.
+func (a *Aggregator) unmerged(vals aggregation.Values) aggregation.Values {
+	if a.merged == nil {
+		a.merged = make(aggregation.Values, len(vals))
+	}
+	out := make(aggregation.Values, len(vals))
+	for k, v := range vals {
+		if old, ok := a.merged[k]; ok && old == v {
+			continue
+		}
+		a.merged[k] = v
+		out[k] = v
+	}
+	return out
 }
 
 // persist writes the rows whose value changed since the last committed run, plus the
@@ -136,13 +154,6 @@ func joinedErrors(err error) []error {
 	return []error{err}
 }
 
-// sums runs one grouped SQL sum over the daily source keys.
-func (a *Aggregator) sums(ctx context.Context, sources []string, from, to string) (
-	aggregation.Values, error,
-) {
-	return a.d.Store.SumDaily(ctx, sources, from, to)
-}
-
 // netDays recomputes net daily rows (export - import of the stored daily rows).
 func (a *Aggregator) netDays(ctx context.Context, p period.Period, plan aggregation.Plan,
 	rs *runState,
@@ -153,7 +164,7 @@ func (a *Aggregator) netDays(ctx context.Context, p period.Period, plan aggregat
 		keys = append(keys, n.Export, n.Import)
 	}
 	for _, j := range plan.Days {
-		sums, err := a.sums(ctx, keys, j.From, j.To)
+		sums, err := a.d.Store.SumDaily(ctx, keys, j.From, j.To)
 		if err != nil {
 			return err
 		}
@@ -202,20 +213,18 @@ func (a *Aggregator) levelValues(ctx context.Context, l period.Level, j aggregat
 	offsets map[string]float64,
 ) (aggregation.Values, aggregation.Values, error) {
 	edges := a.d.Registry.Edges(l)
-	sums, err := a.sums(ctx, aggregation.SourceKeys(edges), j.From, j.To)
+	sums, err := a.d.Store.SumDaily(ctx, aggregation.SourceKeys(edges), j.From, j.To)
 	if err != nil {
 		return nil, nil, err
 	}
-	vals := aggregation.ApplyEdges(edges, sums)
 	periodOffsets := aggregation.Values{}
-	for k := range vals {
-		if off, ok := offsets[storage.OffsetKey(l, j.Key, k)]; ok {
-			periodOffsets[k] = off
+	for _, e := range edges {
+		if off, ok := offsets[storage.OffsetKey(l, j.Key, e.Target)]; ok {
+			periodOffsets[e.Target] = off
 		}
 	}
-	vals = aggregation.AddOffsets(vals, periodOffsets)
-	return aggregation.Merge(vals, aggregation.ApplyNet(a.d.Registry.NetPairs(l), vals)), sums,
-		nil
+	vals := aggregation.LevelValues(edges, a.d.Registry.NetPairs(l), sums, periodOffsets)
+	return vals, sums, nil
 }
 
 // totals composes baseline + daily rows since the last folded year (never closes).
@@ -231,12 +240,12 @@ func (a *Aggregator) totals(ctx context.Context, p period.Period, _ aggregation.
 		from = next + "-01-01"
 	}
 	edges := a.d.Registry.Edges(period.Total)
-	since, err := a.sums(ctx, aggregation.SourceKeys(edges), from, p.Day)
+	since, err := a.d.Store.SumDaily(ctx, aggregation.SourceKeys(edges), from, p.Day)
 	if err != nil {
 		return err
 	}
-	vals := aggregation.Totals(edges, rs.base, since)
-	vals = aggregation.Merge(vals, aggregation.ApplyNet(a.d.Registry.NetPairs(period.Total), vals))
+	// A total is the baseline plus the daily sums since: the baseline acts as the offset.
+	vals := aggregation.LevelValues(edges, a.d.Registry.NetPairs(period.Total), since, rs.base)
 	a.collect(rs, aggregation.Job{Level: period.Total}, "", vals)
 	return nil
 }

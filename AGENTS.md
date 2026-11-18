@@ -61,6 +61,8 @@ internal/
   poller/            poll loop, DayAttributor (day attribution + rollover), cold-start seeding
   aggregation/       PURE period math (no I/O, clock, logging), shared by aggregator + CLI
   aggregator/        event-driven runner (debounce/heartbeat/catch-up)
+  report/            PURE energy report model (sums, ratios, buckets, comparison);
+                     csv/, pdf/ renderers (pdf: signintech/gopdf, embedded Inter fonts)
   cache/             latest values; publishes change events; ReplaceDomain/Merge
   storage/           sole SQLite owner; PollerStore/AggregatorStore/ReadStore; closed periods
   history/           history read-model rows
@@ -133,8 +135,9 @@ event bus and health supervisor.
 | storage | solis, period, history, database/migrations, util |
 | history, config | util (config only imported by cmd and app) |
 | modbus | stdlib, simonvetter, util (Clock), injected zerolog.Logger — no config/health |
-| service | storage (ReadStore only), health, history, period, solis |
-| httphandler | service, health, period, solis, buildinfo, util |
+| service | storage (ReadStore only), health, history, period, solis, report |
+| httphandler | service, health, period, solis, buildinfo, util, report (+ its renderers) |
+| report | period, util (renderers: report, period, util) |
 | buildinfo | stdlib |
 | app | everything, incl. frontend/docs embed packages |
 
@@ -241,7 +244,7 @@ LastBeat() time.Time              // atomic, updated by the component's own loop
 ### HTTP
 
 - Routes (`router.SetupRoutes(Deps)`): `/health`, `/api/keys`, `/api/data/{key}`,
-  `/api/version`, `/ws`, `/docs/`, SPA. No CORS middleware.
+  `/api/report`, `/api/version`, `/ws`, `/docs/`, SPA. No CORS middleware.
 - Handlers return `http.Handler` and take `httphandler.HandlerDeps` (`Service` =
   handler-declared `ReadService`, `Errors` = central `*ErrorMapper`, `Clock`, `Timeout` =
   `app.timeout`, `Build`). They parse, call `Service.Data`/`Keys`/`Health`, map errors,
@@ -264,6 +267,47 @@ One version for binary, UI and docs: ldflags (`Version`, `Commit`, `BuildDate`,
 the frontend and Swagger UI get `VITE_APP_VERSION` from the same source (make,
 goreleaser, Dockerfile). No `version.json`. The frontend polls `/api/version`; a different version shows the update
 banner. `dev` on either side never reports an update.
+
+### Report
+
+`GET /api/report?from&to[&compare=last_year|previous|none][&granularity][&format=json|csv|pdf]`;
+`service.Report` reads the eight daily energy keys of the range and of the comparison
+period (one bounded, grouped query per period), `report.Build` computes, renderers only
+format.
+
+- Source is daily rows only, never monthly/yearly (cutover offsets). A day counts only with
+  a row for every series; missing days are reported, never 0 kWh.
+- Only common definitions: self-sufficiency = (consumption − import) / consumption,
+  self-consumption rate = (PV − export) / PV, both from summed energy, never averaged daily
+  ratios. Per day: charge from PV = min(charge, PV − export), the rest is grid charging
+  (lower bound, days > 0.2 kWh flagged); direct use = PV − export − charge from PV.
+  Consumption sources: grid = import, battery = discharge − grid charge (counted once, as
+  grid), solar = the rest; capped so they add up to the consumption (grid share =
+  1 − self-sufficiency, solar differs from direct use by the balance difference).
+- The net grid value is a debug value and never part of a report.
+- Battery ratio and balance difference only from 28 complete days. Discharged ÷ charged is
+  the plain quotient of two uncalibrated counters (real data: above 100 %), never called
+  an efficiency.
+- Comparison: energy in kWh and %, ratios in points. When either period has missing days
+  or they differ in length (March vs February, a leap year) only matched days are compared (same date a year earlier, or same position in the
+  previous period): `Figure.Compared`/`Base` cover those days, `Value` stays the total.
+- Months/years with days without data are marked (`n/m days`), never shown as complete.
+- Consumption is the inverter's own counter, not household + backup: the remainder
+  (~1 kWh/day on the device) is shown as "not assigned". Low-import days = import below
+  `report.LowImportBelow` (0.5 kWh; the inverter never imports exactly 0).
+- Days are local dates of the server TZ; `to` <= today; at most 3660 days. Finished days
+  only: a range ending today is reported up to yesterday (`today_excluded`), today alone
+  is a 400.
+- The PDF rounds like the Reports page (API two decimals, then one), so both always show
+  the same digits.
+- PDF: A4, pages summary / energy flows / patterns + comparison / table (continued on
+  more pages when needed) / "How this report is calculated" (data used, standard figures,
+  estimates and derived figures, rules); keep that page in sync with the code.
+- Standard figures (self-sufficiency, self-consumption rate, % change, points) are kept
+  apart from this app's estimates from daily totals (charge from PV, direct use,
+  consumption from solar, discharged ÷ charged), which are marked "≈" (CSV: `_est_kwh`).
+  The energy-balance residual is called "balance difference", never "losses". Print palette in `report/pdf/layout.go`, independent of the
+  app theme (Okabe-Ito based, readable in grayscale). Text English until i18n.
 
 ### Health endpoint (fail-closed)
 
@@ -372,8 +416,34 @@ solis.Register{
 - Live data only via WebSocket: components call `useSubscription(keys)`; the client
   ref-counts keys and re-subscribes on reconnect. History via REST.
 - Register metadata: `src/lib/config/data.ts` (single UI source of truth).
+- Reports (`src/pages/Reports.tsx`): [Period ▾] → [Compare with ▾] (both show their
+  dates), preview from `/api/report` JSON, PDF/CSV downloads fetched as blobs (server
+  errors shown in the page, never saved as a file). Exports live only here.
+- History (`src/pages/History.tsx`): period, series and range per period are remembered
+  per browser in `localStorage` (`solis.history.v1`, `useHistoryPrefs`), validated on
+  load (unknown ids/presets fall back to the defaults), defaults never stored; the reset
+  button restores them. Ranges are presets resolved against today
+  (`lib/utils/historyRange.ts`) or a fixed calendar range. Never server-side: without
+  auth it would be one setting for the whole LAN.
 - `useMobile()` = coarse pointer. The power-flow diagram uses the mobile variant only for
-  coarse pointer **and** width < 768 px (tablets get desktop).
+  coarse pointer **and** width < 768 px (tablets get desktop). The app shell (sidebar vs.
+  header + bottom nav) follows `useCompactLayout()` = coarse pointer **or** width < 768 px;
+  pages and titles come from `components/layout/nav.ts`.
+- Every page renders inside `components/layout/Page.tsx` (one padding, max width and title
+  style); card-like sections use `Card` or the shared `SURFACE` class, never their own.
+  Unselected buttons, toggles and dropdown triggers use the `control` / `control-hover`
+  tokens (dark: lighter than the card; `muted`/`secondary`/`input` are darker there and
+  vanish on cards).
+- Dashboard: flow diagram (at most ~600px tall) next to one energy table (row per series
+  from `ENERGY_ROWS`, column per period), a 14-day PV vs consumption trend below (daily
+  history via REST, today from the live counters; days without data stay empty; desktop
+  layout only). Phones (same rule as the flow diagram) swipe one `EnergyCard` per period
+  instead of the table.
+  Pages have no maximum width: content starts at the sidebar.
+- Numbers only via `lib/utils/format.ts` (fixed `en-US` locale like the PDF: "4,512.3";
+  power below 1 kW in whole watts), dates via date-fns in the PDF style ("1 – 18 Nov 2026",
+  "HH:mm:ss"); never the browser locale (`toLocaleString`, `toFixed` in components).
+  Icons only from lucide-react.
 - Power-flow (`src/components/dashboard/flow/`): `model.ts`, `FlowDesktop.tsx`,
   `FlowMobile.tsx` are the layout reference; lucide-react icons; colors only from CSS
   tokens in `src/index.css` (light + dark), never hex; edge animation via CSS keyframes

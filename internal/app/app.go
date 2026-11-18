@@ -237,13 +237,16 @@ func (a *App) buildHTTP(_ context.Context, root zerolog.Logger) error {
 	if err != nil {
 		return err
 	}
-	mux := router.SetupRoutes(router.Deps{
+	mux, err := router.SetupRoutes(router.Deps{
 		Handlers: httphandler.HandlerDeps{
 			Service: svc, Errors: httphandler.NewErrorMapper(httpLog),
 			Clock: a.clock, Timeout: a.cfg.App.Timeout, Build: a.info,
 		},
 		WebSocket: ws, Frontend: fe, Docs: apiDocs, Log: httpLog,
 	})
+	if err != nil {
+		return err
+	}
 	a.http = server.New(serverSettings(a.cfg.App), mux, httpLog)
 	a.sup.Watch("storage", a.storageProbe)
 	a.sup.Watch("eventbus", a.busProbe)

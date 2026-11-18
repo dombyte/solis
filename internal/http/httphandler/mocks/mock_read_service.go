@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/dombyte/solis/internal/health"
+	"github.com/dombyte/solis/internal/report"
 	"github.com/dombyte/solis/internal/service"
 	"github.com/dombyte/solis/internal/solis"
 	mock "github.com/stretchr/testify/mock"
@@ -201,6 +202,72 @@ func (_c *MockReadService_Keys_Call) Return(registers []solis.Register) *MockRea
 }
 
 func (_c *MockReadService_Keys_Call) RunAndReturn(run func() []solis.Register) *MockReadService_Keys_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Report provides a mock function for the type MockReadService
+func (_mock *MockReadService) Report(ctx context.Context, q service.ReportQuery) (report.Report, error) {
+	ret := _mock.Called(ctx, q)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Report")
+	}
+
+	var r0 report.Report
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, service.ReportQuery) (report.Report, error)); ok {
+		return returnFunc(ctx, q)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, service.ReportQuery) report.Report); ok {
+		r0 = returnFunc(ctx, q)
+	} else {
+		r0 = ret.Get(0).(report.Report)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, service.ReportQuery) error); ok {
+		r1 = returnFunc(ctx, q)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockReadService_Report_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Report'
+type MockReadService_Report_Call struct {
+	*mock.Call
+}
+
+// Report is a helper method to define mock.On call
+//   - ctx context.Context
+//   - q service.ReportQuery
+func (_e *MockReadService_Expecter) Report(ctx any, q any) *MockReadService_Report_Call {
+	return &MockReadService_Report_Call{Call: _e.mock.On("Report", ctx, q)}
+}
+
+func (_c *MockReadService_Report_Call) Run(run func(ctx context.Context, q service.ReportQuery)) *MockReadService_Report_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 service.ReportQuery
+		if args[1] != nil {
+			arg1 = args[1].(service.ReportQuery)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockReadService_Report_Call) Return(report1 report.Report, err error) *MockReadService_Report_Call {
+	_c.Call.Return(report1, err)
+	return _c
+}
+
+func (_c *MockReadService_Report_Call) RunAndReturn(run func(ctx context.Context, q service.ReportQuery) (report.Report, error)) *MockReadService_Report_Call {
 	_c.Call.Return(run)
 	return _c
 }

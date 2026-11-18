@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react"
-import { addDays, format } from "date-fns"
+import { format } from "date-fns"
 import { CalendarIcon, Check } from "lucide-react"
 import { type DateRange } from "react-day-picker"
 
@@ -11,6 +11,21 @@ import { Field, FieldLabel } from "./field"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
 import { useMobile } from "../../hooks/useMobile"
 import type { Period } from "../../types"
+import { formatRange } from "../../lib/utils/reportRange"
+
+/** The trigger text in the app's date style: "1 – 18 Nov 2026", "Jan – Nov 2026", "2021 – 2026". */
+function rangeLabel(from: Date, to: Date, period: Period): string {
+  if (period === 'yearly') {
+    const [a, b] = [from.getFullYear(), to.getFullYear()]
+    return a === b ? String(a) : `${a} – ${b}`
+  }
+  if (period === 'monthly') {
+    const [a, b] = [format(from, "MMM yyyy"), format(to, "MMM yyyy")]
+    if (a === b) return a
+    return from.getFullYear() === to.getFullYear() ? `${format(from, "MMM")} – ${b}` : `${a} – ${b}`
+  }
+  return formatRange({ from: format(from, "yyyy-MM-dd"), to: format(to, "yyyy-MM-dd") })
+}
 
 export function DatePickerWithRange({
   date,
@@ -57,11 +72,6 @@ export function DatePickerWithRange({
     }
   }
 
-  const displayDate = date || {
-    from: new Date(new Date().getFullYear(), 0, 20),
-    to: addDays(new Date(new Date().getFullYear(), 0, 20), 20),
-  }
-
   const isRangeValid = tempRange?.from && tempRange?.to
 
   return (
@@ -75,39 +85,24 @@ export function DatePickerWithRange({
             className="w-full justify-start text-left font-normal min-h-[44px] touch-target"
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {displayDate?.from ? (
-              displayDate.to ? (
-                <>
-                  {period === 'yearly' ? (
-                    `${displayDate.from.getFullYear()} - ${displayDate.to.getFullYear()}`
-                  ) : period === 'monthly' ? (
-                    `${format(displayDate.from, "yyyy-MM")} - ${format(displayDate.to, "yyyy-MM")}`
-                  ) : (
-                    <>
-                      {format(displayDate.from, "LLL dd, y")} - {" "}
-                      {format(displayDate.to, "LLL dd, y")}
-                    </>
-                  )}
-                </>
-              ) : (
-                period === 'yearly' ? (
-                  String(displayDate.from.getFullYear())
-                ) : period === 'monthly' ? (
-                  format(displayDate.from, "yyyy-MM")
-                ) : (
-                  format(displayDate.from, "LLL dd, y")
-                )
-              )
-            ) : (
-              <span>Pick a date</span>
-            )}
+            {date?.from && date.to ? rangeLabel(date.from, date.to, period) : <span>Pick a date</span>}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="center">
-          <div className="p-3 w-full max-w-[600px] min-w-[280px]">
+        {/* Touch devices show one month as wide as the date field (lined up with it, at
+            most the screen minus the 12px collision padding) instead of content width with
+            wide margins; the day grid stretches with it. Two months size to their content. */}
+        <PopoverContent
+          className={isMobile ? "w-[min(var(--radix-popover-trigger-width),calc(100vw-1.5rem))] p-0" : "w-auto p-0"}
+          // Start-aligned: centered under the narrow sidebar field it spilled over the
+          // app's navigation sidebar.
+          align="start"
+          collisionPadding={12}
+        >
+          <div className={isMobile ? "p-3 w-full" : "p-3 w-full max-w-[600px] min-w-[280px]"}>
             <Calendar
               mode="range"
-              defaultMonth={displayDate?.from}
+              defaultMonth={date?.from}
+              maxDate={new Date()}
               selected={tempRange}
               onSelect={handleSelect}
               numberOfMonths={numberOfMonths}

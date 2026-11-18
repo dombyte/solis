@@ -298,11 +298,11 @@ func (s *Supervisor) publish(now time.Time) {
 	snap := Snapshot{Status: StatusOK, Components: make(map[string]ComponentStatus), At: now}
 	for _, m := range s.managed {
 		cs := m.status()
-		snap.Components[m.name] = cs
 		failed := m.restartFailed(m.state())
 		if failed && cs.Reason == "" {
 			cs.Reason = fmt.Sprintf("restarted %d times, not yet proven healthy", m.failures)
 		}
+		snap.Components[m.name] = cs // after the reason: the map holds a copy
 		s.mergeStatus(&snap, m.name, cs, failed)
 	}
 	for _, w := range s.watched {

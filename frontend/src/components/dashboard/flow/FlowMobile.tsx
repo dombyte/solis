@@ -1,7 +1,7 @@
 import React from 'react';
 import { Sun, Factory, Home, ShieldCheck } from 'lucide-react';
 import type { FlowViewModel } from './model';
-import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus, buildFlowSummary } from './model';
+import { getBackupSubStatus, getGridSubStatus, getBatterySubStatus, buildFlowSummary, inverterStatusColor } from './model';
 import { ANIMATION_DURATION } from './FlowEdge';
 import { getBatteryIcon } from './batteryIcon';
 
@@ -99,7 +99,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
   ];
 
   // Inverter header
-  const statusColor = inverter.alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
+  const statusColor = inverterStatusColor(inverter.present, inverter.alert);
 
   return (
     <div 
@@ -107,7 +107,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
         opacity,
         transition: 'opacity 0.5s ease'
       }} 
-      className="w-full min-w-0"  // Responsive width like DataCard
+      className="w-full min-w-0"
     >
       <div>
         {/* Cards */}
@@ -117,7 +117,9 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
             className="rounded-xl px-3.5 py-2.5 text-center flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5"
             style={{ 
               background: 'var(--color-flow-inv-bg)',
-              border: '1.5px solid var(--color-border)'
+              border: '1.5px solid var(--color-border)',
+              // dim once: the container already dims a stale diagram
+              opacity: !inverter.present && !stale ? 0.4 : 1,
             }}
           >
             <span style={{ color: 'var(--color-flow-inv-title)', fontSize: 14, fontWeight: 700 }}>Inverter</span>

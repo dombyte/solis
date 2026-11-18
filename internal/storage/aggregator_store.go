@@ -31,6 +31,24 @@ func (s *Storage) HasDailyData(ctx context.Context) (bool, error) {
 func (s *Storage) SumDaily(ctx context.Context, keys []string, from, to string) (
 	map[string]float64, error,
 ) {
+	return sumDaily(ctx, s.db, keys, from, to)
+}
+
+// rowsQueryer runs a query on the database or inside a transaction.
+type rowsQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// queryer reads a single row on the database or inside a transaction.
+type queryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// sumDaily is the grouped daily sum shared by the aggregator, the cutover offsets and
+// the backfill transaction (see SumDaily).
+func sumDaily(ctx context.Context, q rowsQueryer, keys []string, from, to string) (
+	map[string]float64, error,
+) {
 	out := make(map[string]float64, len(keys))
 	if len(keys) == 0 {
 		return out, nil
@@ -41,7 +59,7 @@ func (s *Storage) SumDaily(ctx context.Context, keys []string, from, to string) 
 		args = append(args, k)
 	}
 	// #nosec G202 -- only "?" placeholders are concatenated; the keys are bound arguments
-	rows, err := s.db.QueryContext(ctx, `SELECT register_key, SUM(value) FROM daily_values
+	rows, err := q.QueryContext(ctx, `SELECT register_key, SUM(value) FROM daily_values
 		WHERE date >= ? AND date <= ? AND register_key IN (?`+
 		strings.Repeat(", ?", len(keys)-1)+`) GROUP BY register_key`, args...)
 	if err != nil {
@@ -60,20 +78,6 @@ func (s *Storage) SumDaily(ctx context.Context, keys []string, from, to string) 
 		return nil, fmt.Errorf("storage: sum daily: %w", err)
 	}
 	return out, nil
-}
-
-type queryer interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func sumDaily(ctx context.Context, q queryer, key, from, to string) (float64, error) {
-	var sum float64
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(value), 0) FROM daily_values
-		WHERE register_key = ? AND date >= ? AND date <= ?`, key, from, to).Scan(&sum)
-	if err != nil {
-		return 0, fmt.Errorf("storage: sum daily %s: %w", key, err)
-	}
-	return sum, nil
 }
 
 // WriteComputed applies one aggregator run in a single transaction: REPLACE upserts for
@@ -159,30 +163,35 @@ func checkAggregatorDomain(reg solis.Register, l period.Level) error {
 	return nil
 }
 
+// periodTable is the table and period column of a daily, monthly or yearly row.
+type periodTable struct{ table, column string }
+
+// periodTableOf returns the table of level l; false for Total (no period column).
+func periodTableOf(l period.Level) (periodTable, bool) {
+	switch l {
+	case period.Daily:
+		return periodTable{"daily_values", "date"}, true
+	case period.Monthly:
+		return periodTable{"monthly_values", "month"}, true
+	case period.Yearly:
+		return periodTable{"yearly_values", "year"}, true
+	default:
+		return periodTable{}, false
+	}
+}
+
 // upsertPeriod writes one row with REPLACE semantics (latest computation wins).
 func upsertPeriod(tx *txn, reg solis.Register, r PeriodRow, at time.Time) error {
 	raw := rawOf(reg, r.Value)
 	var err error
-	switch r.Level {
-	case period.Daily:
-		_, err = tx.ExecContext(tx.ctx,
-			`INSERT INTO daily_values (date, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, date) DO UPDATE
-			SET value = excluded.value, raw_value = excluded.raw_value`,
+	if t, ok := periodTableOf(r.Level); ok {
+		// #nosec G201 -- table and column come from periodTableOf, never from input
+		_, err = tx.ExecContext(tx.ctx, fmt.Sprintf(
+			`INSERT INTO %[1]s (%[2]s, register_key, value, raw_value)
+			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, %[2]s) DO UPDATE
+			SET value = excluded.value, raw_value = excluded.raw_value`, t.table, t.column),
 			r.Period, r.Key, r.Value, raw)
-	case period.Monthly:
-		_, err = tx.ExecContext(tx.ctx,
-			`INSERT INTO monthly_values (month, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, month) DO UPDATE
-			SET value = excluded.value, raw_value = excluded.raw_value`,
-			r.Period, r.Key, r.Value, raw)
-	case period.Yearly:
-		_, err = tx.ExecContext(tx.ctx,
-			`INSERT INTO yearly_values (year, register_key, value, raw_value)
-			VALUES (?, ?, ?, ?) ON CONFLICT(register_key, year) DO UPDATE
-			SET value = excluded.value, raw_value = excluded.raw_value`,
-			r.Period, r.Key, r.Value, raw)
-	default:
+	} else {
 		_, err = tx.ExecContext(tx.ctx,
 			`INSERT INTO total_values (register_key, value, raw_value, timestamp)
 			VALUES (?, ?, ?, ?) ON CONFLICT(register_key) DO UPDATE

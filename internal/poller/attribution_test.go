@@ -356,6 +356,23 @@ func TestAttribute_LateResetAfterForcedCloseIsExplained(t *testing.T) {
 	assert.Contains(t, got.Warn, "outside the rollover window", "explained only once")
 }
 
+// A day reached by a seen reset is no longer a forced day: a later reset-sized dip outside
+// the window (one glitch read of 0) gets the plain warning, not the "clock is off" cause.
+func TestAttribute_SeenResetClearsForcedDay(t *testing.T) {
+	loc := berlin(t)
+	d := seeded(t, "23:59", []string{"pv"}, time.Date(2026, 8, 5, 20, 0, 0, 0, loc), nil)
+	runSteps(t, d, loc, []step{
+		{"2026-08-05 22:00", "pv", 30, WriteCurrent, "2026-08-05", "", false},
+		{"2026-08-06 01:00", "pv", 30, WriteCurrent, "2026-08-06", "", false}, // forced
+		{"2026-08-06 22:00", "pv", 40, WriteCurrent, "2026-08-06", "", false},
+		{"2026-08-07 00:05", "pv", 0.1, WriteNewDay, "2026-08-07", "2026-08-06", false},
+		{"2026-08-07 12:00", "pv", 20, WriteCurrent, "2026-08-07", "", false},
+	})
+	got := d.Attribute("pv", 0, time.Date(2026, 8, 7, 12, 5, 0, 0, loc))
+	assert.Equal(t, Discard, got.Decision)
+	assert.Contains(t, got.Warn, "outside the rollover window")
+}
+
 // After an outage across midnight a counter can already be at or above yesterday's small
 // value. It must not be max-written into the closing day (and counted again on the
 // opening day), whatever order the keys of the poll are attributed in.

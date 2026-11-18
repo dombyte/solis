@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/dombyte/solis/internal/buildinfo"
 	"github.com/dombyte/solis/internal/health"
@@ -31,14 +32,19 @@ func router(t *testing.T) (*mocks.MockReadService, http.Handler) {
 	ws := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	})
-	return svc, SetupRoutes(Deps{
-		Handlers: httphandler.HandlerDeps{
-			Service: svc,
-			Errors:  httphandler.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
-			Build: buildinfo.Info{Version: "3.1.0", Commit: "<abc>"},
-		},
-		WebSocket: ws, Frontend: fe, Docs: docs, Log: zerolog.Nop(),
+	r, err := SetupRoutes(Deps{
+		Handlers: handlerDeps(svc), WebSocket: ws, Frontend: fe, Docs: docs, Log: zerolog.Nop(),
 	})
+	require.NoError(t, err)
+	return svc, r
+}
+
+func handlerDeps(svc httphandler.ReadService) httphandler.HandlerDeps {
+	return httphandler.HandlerDeps{
+		Service: svc,
+		Errors:  httphandler.NewErrorMapper(zerolog.Nop()), Clock: clocktest.New(time.Now()),
+		Build: buildinfo.Info{Version: "3.1.0", Commit: "<abc>"},
+	}
 }
 
 func get(h http.Handler, path string) *httptest.ResponseRecorder {
@@ -104,13 +110,19 @@ func TestRoutes_StaticDirsDoNotList(t *testing.T) {
 
 func TestRoutes_WithoutDistFolders(t *testing.T) {
 	svc := mocks.NewMockReadService(t)
-	r := SetupRoutes(Deps{
-		Handlers: httphandler.HandlerDeps{Service: svc},
+	r, err := SetupRoutes(Deps{
+		Handlers: handlerDeps(svc), WebSocket: http.NotFoundHandler(),
 		Frontend: fstest.MapFS{}, Log: zerolog.Nop(), // Docs nil: not built either
 	})
+	require.NoError(t, err)
 	assert.Equal(t, http.StatusNotFound, get(r, "/").Code)
 	assert.Equal(t, http.StatusNotFound, get(r, "/docs/").Code)
-	assert.Equal(t, http.StatusNotFound, get(r, "/ws").Code)
+}
+
+func TestSetupRoutes_RequiresDependencies(t *testing.T) {
+	_, err := SetupRoutes(Deps{Log: zerolog.Nop()})
+	require.ErrorIs(t, err, ErrMissingDependency)
+	assert.ErrorContains(t, err, "WebSocket")
 }
 
 // Backend roots match whole path segments only: /healthz is an SPA route, /api/x and

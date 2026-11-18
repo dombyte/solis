@@ -6,16 +6,17 @@ import { DesktopNav } from './components/layout/DesktopNav';
 import { MobileHeader } from './components/layout/MobileHeader';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { LoadingScreen } from './components/layout/LoadingScreen';
-import { useMobile } from './hooks/useMobile';
+import { useCompactLayout } from './hooks/useMobile';
 
 
 const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
 const History = lazy(() => import('./pages/History').then(m => ({ default: m.History })));
+const Reports = lazy(() => import('./pages/Reports').then(m => ({ default: m.Reports })));
 const Status = lazy(() => import('./pages/Status').then(m => ({ default: m.Status })));
 const Info = lazy(() => import('./pages/Info').then(m => ({ default: m.Info })));
 
 export function App() {
-  const isMobile = useMobile();
+  const isMobile = useCompactLayout();
 
   return (
         <BrowserRouter>
@@ -31,6 +32,7 @@ export function App() {
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/dashboard" element={<Dashboard />} />
                     <Route path="/history" element={<History />} />
+                    <Route path="/reports" element={<Reports />} />
                     <Route path="/status" element={<Status />} />
                     <Route path="/info" element={<Info />} />
                     <Route path="*" element={

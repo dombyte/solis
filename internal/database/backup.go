@@ -335,13 +335,7 @@ func WriteBackup(ctx context.Context, dbPath string, now time.Time, log zerolog.
 		return "", fmt.Errorf("stat database file: %w", err)
 	}
 
-	// Ensure the backups subdirectory (and its parent) exists
-	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
-	if err := os.MkdirAll(backupsDir, backupDirPerm); err != nil {
-		return "", fmt.Errorf("failed to create backups directory: %w", err)
-	}
-
-	// Generate backup filename
+	// createSQLiteBackup creates the backups directory (the destination's parent).
 	backupPath := GenerateBackupFilename(dbPath, now)
 
 	log.Info().Str("source", dbPath).Str("destination", backupPath).Msg("creating backup")
@@ -366,11 +360,7 @@ func WriteBackup(ctx context.Context, dbPath string, now time.Time, log zerolog.
 // ListBackups lists all backup files in the backups subdirectory of the database directory.
 // Returns both migration backups and online backups, sorted by timestamp (newest first).
 func ListBackups(dbPath string) ([]BackupInfo, error) {
-	dir := filepath.Dir(dbPath)
-	if dir == "" {
-		dir = "."
-	}
-	backupsDir := filepath.Join(dir, "backups")
+	backupsDir := filepath.Join(filepath.Dir(dbPath), "backups")
 
 	entries, err := os.ReadDir(backupsDir)
 	if err != nil {

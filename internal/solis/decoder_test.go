@@ -1,6 +1,7 @@
 package solis
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -88,18 +89,22 @@ func TestDecodeBlock_StatusAndSignedGrid(t *testing.T) {
 		"description": "Initializing / Generating",
 	}, values["solis_status"].StatusDecoded)
 	assert.InDelta(t, -2.0, values["grid_power"].DecodedValue, 1e-9)
-	assert.Nil(t, values["grid_fault_1"].StatusDecoded)
+	assert.Equal(t, []string{}, values["grid_fault_1"].StatusDecoded)
 }
 
 func TestDecodeStatus(t *testing.T) {
 	d, _ := newTestDecoder(t)
 	assert.Equal(t, []string{"No grid", "Grid undervoltage"}, d.DecodeStatus("grid_fault_1", 0b101))
 	assert.Equal(t, []string{"Unknown bit 15"}, d.DecodeStatus("grid_fault_1", 1<<15))
+	// No active bit is an empty list, which encodes as [] ("no faults"), not null.
+	noFaults, err := json.Marshal(d.DecodeStatus("grid_fault_1", 0))
+	require.NoError(t, err)
+	assert.JSONEq(t, `[]`, string(noFaults))
 	assert.Equal(t, []string{"Normal operation", "Unknown status bit 11"},
 		d.DecodeStatus("operating_status", 1|1<<11))
 	assert.Equal(t, []string{"Battery 2 internal fault"},
 		d.DecodeStatus("battery_fault_2_bms", 1<<7))
-	assert.Nil(t, d.DecodeStatus("device_fault_5", 0))
+	assert.Equal(t, []string{}, d.DecodeStatus("device_fault_5", 0))
 	assert.Equal(t, []string{"No bit map defined for register x"}, d.DecodeStatus("x", 1))
 	assert.Equal(t, map[string]string{
 		"name":        "Unknown Status (0x9999)",

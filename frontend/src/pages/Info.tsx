@@ -1,14 +1,30 @@
-import { LineAwesomeIcon } from '../components/ui/LineAwesomeIcon';
+import { CircleAlert, CircleCheck, ExternalLink, FolderGit2, LoaderCircle, RefreshCw, Rocket } from 'lucide-react';
 import { useRegisterStore } from '../lib/stores/useRegisterStore';
 import { useSubscription } from '../lib/hooks/useSubscription';
 import { POWER_FLOW_KEYS } from '../components/dashboard/flow/model';
 import { APP_VERSION, useVersionCheck } from '../lib/hooks/useVersionCheck';
-import { useMobile } from '../hooks/useMobile';
 import { useState, useEffect, useCallback } from 'react';
+import { format } from 'date-fns';
+import { Page } from '../components/layout/Page';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+
+/** One entry of the generated licenses.json. */
+interface License {
+  name: string;
+  version: string;
+  license: string;
+  repository?: string;
+}
+
+const CHECK_TONE = {
+  'update-available': 'text-warning',
+  'up-to-date': 'text-success',
+  checking: 'text-muted-foreground animate-pulse',
+  idle: 'text-muted-foreground',
+} as const;
 
 export function Info() {
-  const isMobile = useMobile();
-
   // WebSocket connection is initialized at app level. The store only stamps lastUpdated
   // when a subscribed value changes, so Info subscribes to the live power keys (they
   // change on nearly every poll) to keep "Last Updated" current on this page too.
@@ -24,8 +40,7 @@ export function Info() {
   const [lastCheckTime, setLastCheckTime] = useState<number | null>(null);
   const [checkStatus, setCheckStatus] = useState<'idle' | 'checking' | 'update-available' | 'up-to-date'>('idle');
 
-  // State for licenses log
-  const [licensesLog, setLicensesLog] = useState<string>('');
+  const [licenses, setLicenses] = useState<License[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,8 +72,7 @@ export function Info() {
         const response = await fetch(`${baseUrl}data/licenses.json`);
 
         if (response.status === 404) {
-          setLicensesLog('Licenses file not found. Run build first.');
-          setLoading(false);
+          setError('Licenses file not found. Run build first.');
           return;
         }
 
@@ -66,8 +80,9 @@ export function Info() {
           throw new Error(`Failed to load licenses: ${response.status} ${response.statusText}`);
         }
 
-        const text = await response.text();
-        setLicensesLog(text);
+        const body: unknown = await response.json();
+        if (!Array.isArray(body)) throw new Error('Unexpected licenses file');
+        setLicenses(body as License[]);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -79,151 +94,118 @@ export function Info() {
   }, []);
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 w-full overflow-x-hidden">
-      <div className="max-w-2xl mx-auto w-full">
-        {!isMobile ? <h1 className="text-2xl sm:text-3xl font-bold mb-6">About Solis Monitor</h1> : null}
+    <Page title="Info">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader><CardTitle>About</CardTitle></CardHeader>
+          <CardContent>
+            <p className="text-muted-foreground text-sm sm:text-base">
+              Solis Monitor is a web application for monitoring Solis solar inverters.
+              It provides real-time data visualization and historical tracking of your
+              solar energy production and consumption.
+            </p>
+          </CardContent>
+        </Card>
 
-        <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">About</h2>
-          <p className="text-muted-foreground text-sm sm:text-base">
-            Solis Monitor is a web application for monitoring Solis solar inverters.
-            It provides real-time data visualization and historical tracking of your
-            solar energy production and consumption.
-          </p>
-        </div>
-
-
-
-        <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Connection</h2>
-          <div className="flex items-start gap-2">
-            <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-success' : 'bg-destructive'} mt-1`} />
-            <div className="text-sm">
-              <span>Websockets</span>
-              {lastUpdated && (
-                <div className="mt-1.5">
-                  Last Updated: <span className="text-muted-foreground">{lastUpdated.toLocaleTimeString()}</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">Links</h2>
-          <div className="flex flex-col sm:flex-row gap-4">
-            <a
-              href="/docs"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 hover:text-foreground transition-colors text-foreground"
-            >
-              <LineAwesomeIcon icon="la-external-link-alt" size="sm" />
-              <span>API Docs</span>
-            </a>
-            <a
-              href="https://github.com/dombyte/solis"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 hover:text-foreground transition-colors text-foreground"
-            >
-              <LineAwesomeIcon icon="la-github" style="brand" size="sm" />
-              <span>GitHub</span>
-            </a>
-          </div>
-        </div>
-
-        <div className="glassy-card rounded-xl p-4 sm:p-6 mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold mb-1">Version</h2>
-              <p className="text-muted-foreground">
-                <code className="bg-muted px-2 py-1 rounded">{version}</code>
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  onClick={handleCheckForUpdate}
-                  disabled={checking}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 bg-muted hover:bg-accent text-sm rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${checking ? 'animate-pulse' : ''}`}
-                  title="Check for updates"
-                >
-                  <LineAwesomeIcon icon={checking ? 'la-spinner fa-spin' : 'la-sync-alt'} size="sm" />
-                  {checking ? 'Checking...' : 'Check Update'}
-                </button>
-                {hasUpdate && (
-                  <button
-                    onClick={handleTriggerUpdate}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-sm rounded-md transition-all duration-200"
-                    title="Apply update"
-                  >
-                    <LineAwesomeIcon icon="la-rocket" size="sm" />
-                    Apply Update
-                  </button>
+        <Card>
+          <CardHeader><CardTitle>Connection</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex items-start gap-2 text-sm">
+              <span className={`h-2 w-2 rounded-full ${isConnected ? 'bg-success' : 'bg-destructive'} mt-1.5`} />
+              <div>
+                <span>WebSocket {isConnected ? 'connected' : 'disconnected'}</span>
+                {lastUpdated && (
+                  <div className="mt-1.5">
+                    Last updated: <span className="text-muted-foreground">{format(lastUpdated, 'HH:mm:ss')}</span>
+                  </div>
                 )}
               </div>
-          </div>
-          {lastCheckTime && (
-            <div className={`mt-3 p-3 rounded-lg transition-all duration-300 ${
-              checkStatus === 'update-available' ? 'bg-warning/10 border border-warning/20' :
-              checkStatus === 'up-to-date' ? 'bg-success/10 border border-success/20' :
-              'bg-muted/50'
-            }`}>
-              <p className={`text-sm flex items-center gap-2 ${
-                checkStatus === 'update-available' ? 'text-warning' :
-                checkStatus === 'up-to-date' ? 'text-success' :
-                'text-muted-foreground'
-              } ${checkStatus === 'checking' ? 'animate-pulse' : ''}`}>
-                {checkStatus === 'checking' && (
-                  <>
-                    <LineAwesomeIcon icon="la-spinner fa-spin" size="sm" />
-                    <span>Checking for updates...</span>
-                  </>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Links</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row gap-4 text-sm sm:text-base">
+              <a href="/docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:underline">
+                <ExternalLink className="size-4" aria-hidden="true" />
+                <span>API Docs</span>
+              </a>
+              <a href="https://github.com/dombyte/solis" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 hover:underline">
+                <FolderGit2 className="size-4" aria-hidden="true" />
+                <span>GitHub</span>
+              </a>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader><CardTitle>Version</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <code className="bg-muted px-2 py-1 rounded w-fit">{version}</code>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={handleCheckForUpdate} disabled={checking}>
+                  {checking ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+                  {checking ? 'Checking...' : 'Check for update'}
+                </Button>
+                {hasUpdate && (
+                  <Button size="sm" onClick={handleTriggerUpdate}>
+                    <Rocket aria-hidden="true" />
+                    Apply update
+                  </Button>
                 )}
-                {checkStatus === 'update-available' && (
-                  <>
-                    <LineAwesomeIcon icon="la-exclamation-circle" size="sm" />
-                    <span>Update available! Click "Apply Update" to install.</span>
-                  </>
-                )}
-                {checkStatus === 'up-to-date' && (
-                  <>
-                    <LineAwesomeIcon icon="la-check-circle" size="sm" />
-                    <span>Up to date - Last checked: {new Date(lastCheckTime).toLocaleTimeString()}</span>
-                  </>
-                )}
-                {checkStatus === 'idle' && lastCheckTime && (
-                  <span>Last checked: {new Date(lastCheckTime).toLocaleTimeString()}</span>
-                )}
+              </div>
+            </div>
+            {lastCheckTime && (
+              <p className={`mt-3 text-sm flex items-center gap-2 ${CHECK_TONE[checkStatus]}`}>
+                {checkStatus === 'checking' && <><LoaderCircle className="size-4 animate-spin" aria-hidden="true" /><span>Checking for updates...</span></>}
+                {checkStatus === 'update-available' && <><CircleAlert className="size-4" aria-hidden="true" /><span>Update available: click "Apply update" to install.</span></>}
+                {checkStatus === 'up-to-date' && <><CircleCheck className="size-4" aria-hidden="true" /><span>Up to date · last checked {format(lastCheckTime, 'HH:mm:ss')}</span></>}
+                {checkStatus === 'idle' && <span>Last checked {format(lastCheckTime, 'HH:mm:ss')}</span>}
               </p>
-            </div>
-          )}
-        </div>
-
-        {/* Licenses Section - Log-style display */}
-        <div className="glassy-card rounded-xl p-4 sm:p-6 mt-6 mb-6 sm:mb-8 lg:mb-10">
-          <h2 className="text-lg font-semibold mb-4">Licenses</h2>
-          <p className="text-muted-foreground text-sm mb-4">
-            Third-party dependencies used in this application.
-          </p>
-
-          {error && (
-            <p className="text-destructive text-sm">{error}</p>
-          )}
-
-          {loading && (
-            <p className="text-muted-foreground text-sm">Loading licenses...</p>
-          )}
-
-          {!loading && !error && licensesLog && (
-            <div className="max-h-96 overflow-y-auto">
-              <pre className="font-mono text-xs text-muted-foreground whitespace-pre-wrap">
-                {licensesLog}
-              </pre>
-            </div>
-          )}
-        </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
-    </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Licenses</CardTitle>
+          <CardDescription>Third-party dependencies used in this application.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {error && <p className="text-destructive text-sm">{error}</p>}
+          {loading && <p className="text-muted-foreground text-sm">Loading licenses...</p>}
+          {licenses && (
+            <div className="max-h-96 overflow-auto rounded-md border border-border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-card text-left text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Package</th>
+                    <th className="px-3 py-2 font-medium">Version</th>
+                    <th className="px-3 py-2 font-medium">License</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {licenses.map(l => (
+                    <tr key={`${l.name}@${l.version}`} className="border-t border-border">
+                      <td className="px-3 py-1.5">
+                        {l.repository
+                          ? <a href={l.repository} target="_blank" rel="noopener noreferrer" className="hover:underline">{l.name}</a>
+                          : l.name}
+                      </td>
+                      <td className="px-3 py-1.5 text-muted-foreground tabular-nums">{l.version}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{l.license}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </Page>
   );
 }

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { InfoPopover } from '../ui/info-popover';
 import { useRegisterStore } from '../../lib/stores/useRegisterStore';
 import { SkeletonCard } from '../ui/skeleton';
-import { ValueDisplay } from './ValueDisplay';
+import { EnergyValue } from './EnergyValue';
 import type { GroupConfig } from '../../types';
 
 interface EnergyCardProps {
@@ -11,43 +11,48 @@ interface EnergyCardProps {
   className?: string;
 }
 
-// Energy card (Today / Month / Year / Total): always shows every dataId. On phones the
-// cards sit side by side in EnergyCarousel instead of being collapsed.
-export function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement | null {
+// Energy card of one period (Today / Month / Year / Total), used by the phone carousel:
+// label left, value right-aligned so the figures line up, one divider per row.
+export function EnergyCard({ group, className = '' }: EnergyCardProps): React.ReactElement {
   const registerMetadata = useRegisterStore(state => state.registerMetadata);
 
-  const validDataIds = group.dataIds.filter((dataId: string) => registerMetadata.get(dataId) !== undefined);
+  const registers = group.dataIds.flatMap(id => {
+    const reg = registerMetadata.get(id);
+    return reg ? [reg] : [];
+  });
 
-  if (validDataIds.length === 0) {
+  if (registers.length === 0) {
     return <SkeletonCard className={`w-full ${className}`} />;
   }
 
-  const gridClass = group.layout === 'grid' ? 'grid-cols-4-custom' : 'grid-cols-1';
-
   return (
-    <Card className={`w-full min-w-0 ${className}`}>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-base sm:text-lg">{group.title}</CardTitle>
-          {group.description && (
-            <InfoPopover label={group.title} iconClassName="h-4 w-4">
-              <p>{group.description}</p>
-            </InfoPopover>
-          )}
-        </div>
+    <Card className={`w-full min-w-0 flex flex-col ${className}`}>
+      <CardHeader className="flex-row items-center gap-2">
+        <CardTitle>{group.title}</CardTitle>
+        {group.description && (
+          <InfoPopover label={group.title}>
+            <p>{group.description}</p>
+          </InfoPopover>
+        )}
       </CardHeader>
-      <CardContent>
-        <div className={`grid gap-4 ${gridClass}`}>
-          {validDataIds.map((dataId: string) => (
-            <ValueDisplay
-              key={dataId}
-              dataId={dataId}
-              showLabel
-              showUnit
-              showTooltip
-            />
+      <CardContent className="flex-1">
+        <dl className="text-sm tabular-nums">
+          {registers.map(reg => (
+            <div key={reg.id} className="flex items-center justify-between gap-3 border-t border-border/70 py-2">
+              <dt className="flex min-w-0 items-center gap-1 text-muted-foreground">
+                <span className="truncate">{reg.name}</span>
+                {reg.description && (
+                  <InfoPopover label={reg.name} align="start">
+                    <p>{reg.description}</p>
+                  </InfoPopover>
+                )}
+              </dt>
+              <dd className="font-semibold">
+                <EnergyValue id={reg.id} showUnit />
+              </dd>
+            </div>
           ))}
-        </div>
+        </dl>
       </CardContent>
     </Card>
   );

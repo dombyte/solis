@@ -37,11 +37,13 @@ func TestExecute_WritesOnlyChangedRows(t *testing.T) {
 
 	require.NoError(t, e.agg.execute(bg, now.Add(iv)))
 	assert.Len(t, rec.writes, 1, "identical values: no transaction")
-	assert.EqualValues(t, 2, e.cache.merges.Load(), "the cache is still refreshed")
+	assert.EqualValues(t, 2, e.cache.merges.Load(), "the run completes")
+	assert.Zero(t, e.cache.last.Load(), "identical values: nothing merged, no cache event")
 
 	e.daily("pv_energy_daily", "2026-08-10", 4.3)
 	require.NoError(t, e.agg.execute(bg, now.Add(2*iv)))
 	require.Len(t, rec.writes, 2)
+	assert.EqualValues(t, 3, e.cache.last.Load(), "only the changed values are merged")
 	var keys []string
 	for _, r := range rec.writes[1].Rows {
 		keys = append(keys, r.Key)

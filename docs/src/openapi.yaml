@@ -319,6 +319,126 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/report:
+    get:
+      tags:
+        - Reports
+      summary: Energy report for a day range
+      description: |
+        Evaluates the daily energy rows of an inclusive day range (server time zone): totals
+        of the eight energy series, self-sufficiency and self-consumption, where the PV energy
+        went and where the consumption came from, battery and balance difference, day patterns, key
+        figures with changes against a comparison period, and the range grouped into buckets.
+
+        - Only days with a row for every series count; missing days are reported
+          (`days` vs `complete_days`) and never treated as 0 kWh.
+        - Ratios come from the summed energy of a period, never from averaged daily ratios.
+        - The battery charge from PV is min(charge, PV − export) per day; the rest must have
+          come from the grid (`battery_charge_from_grid_min`, a lower bound) and days where
+          that exceeds 0.2 kWh are listed in `grid_charging_days`. `pv_direct_use` is
+          PV − export − charge from PV, so the three parts of `pv_split` add up to the PV
+          yield.
+        - The net grid value (export − import) is not part of the report.
+        - `battery_ratio_pct`, `balance_difference` and `balance_difference_pct` need at least 28 complete days
+          (the battery level at the start and end is not stored).
+        - Comparison: energy changes in kWh and percent, ratio changes in percentage points.
+          When either period has missing days or the periods differ in length
+          (`matched: true`) the changes compare only
+          the days both periods have data for (the same date a year earlier, or the same
+          position in the previous period): each figure's `compared` and `base` then cover
+          those `matched_days`, while `value` stays the total of the whole period.
+
+        Energy is in kWh, shares in percent, values rounded to two decimals; `null` = no data.
+        `format=csv` downloads one row per bucket instead, `format=pdf` the A4 report
+        (summary, energy flows, patterns and comparison, table).
+      operationId: getReport
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: First day (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+          example: "2026-10-01"
+        - name: to
+          in: query
+          required: true
+          description: Last day (YYYY-MM-DD, inclusive, not after today, at most 3660 days after `from`). Today itself is still in progress and is left out (see `today_excluded`); a range of today alone is a 400.
+          schema:
+            type: string
+            format: date
+          example: "2026-10-31"
+        - name: compare
+          in: query
+          required: false
+          description: |
+            Comparison period: `last_year` (same dates one year earlier, 29 Feb → 28 Feb),
+            `previous` or `none`. `previous`: whole months → the same number of months before
+            (Oct → Sep, a year → the year before); a period to date starting on the 1st → the
+            same days of the period before (1–29 Oct → 1–29 Sep, 1 Jan–29 Oct → the same
+            dates a year earlier; a day past the month end becomes its last day); otherwise
+            the same number of days directly before.
+          schema:
+            type: string
+            enum: [last_year, previous, none]
+            default: last_year
+        - name: granularity
+          in: query
+          required: false
+          description: |
+            Bucket size; default automatic: up to 62 days by day, up to 731 days by month,
+            longer by year
+          schema:
+            type: string
+            enum: [day, month, year]
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [json, csv, pdf]
+            default: json
+      responses:
+        '200':
+          description: The report (JSON), or an attachment `solis-report-<from>_<to>.csv` / `.pdf`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+            text/csv:
+              schema:
+                type: string
+              example: |
+                period,from,to,partial,days,complete_days,pv_kwh,consumption_kwh,household_kwh,backup_kwh,grid_import_kwh,grid_export_kwh,battery_charge_kwh,battery_discharge_kwh,pv_direct_use_est_kwh,battery_charge_from_pv_est_kwh,self_sufficiency_pct,self_consumption_pct
+                2026-10-01,2026-10-01,2026-10-01,false,1,1,13.50,9.40,8.80,0.60,0.80,4.30,2.20,2.00,7.00,2.20,91.49,68.15
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Malformed or out-of-range `from`/`to`, or an unknown `compare`, `granularity` or `format`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Bad Request"
+                message: "invalid report parameters: to 2026-11-02 is after today 2026-10-29"
+                code: 400
+        '500':
+          description: Storage failure (details are logged, never returned)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: The storage reads exceeded `app.timeout`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /ws:
     get:
       tags:
@@ -801,6 +921,136 @@ components:
           items:
             type: string
           example: ["foo"]
+
+    # Report
+    ReportEnergy:
+      type: object
+      description: The eight energy series in kWh
+      properties:
+        pv: {type: number, example: 403.7}
+        consumption: {type: number, description: "The inverter's counter of all loads: household + backup + a small remainder it assigns to neither", example: 330.5}
+        household: {type: number, example: 314.7}
+        backup: {type: number, example: 15.8}
+        grid_import: {type: number, example: 78.7}
+        grid_export: {type: number, example: 132.8}
+        battery_charge: {type: number, example: 82.1}
+        battery_discharge: {type: number, example: 72.9}
+
+    ReportSplit:
+      type: object
+      description: |
+        A three-part split in kWh and percent. `pv_split`: solar = used directly,
+        battery = charged from PV, grid = exported (adds up to the PV yield).
+        `consumption_sources`: grid = imported, battery = discharged minus the
+        battery charge from the grid (that energy counts once, as grid), solar = the
+        rest (adds up to the consumption; grid_pct = 100 − self_sufficiency_pct).
+      properties:
+        solar: {type: number}
+        battery: {type: number}
+        grid: {type: number}
+        solar_pct: {type: number, nullable: true}
+        battery_pct: {type: number, nullable: true}
+        grid_pct: {type: number, nullable: true}
+
+    ReportSummary:
+      type: object
+      properties:
+        days: {type: integer, description: Calendar days of the period, example: 31}
+        complete_days: {type: integer, description: Days with a row for every series, example: 31}
+        total:
+          allOf: [{$ref: '#/components/schemas/ReportEnergy'}]
+          nullable: true
+        per_day:
+          allOf: [{$ref: '#/components/schemas/ReportEnergy'}]
+          nullable: true
+        self_sufficiency_pct: {type: number, nullable: true, description: "100 × (1 − import / consumption)", example: 76.19}
+        self_consumption_pct: {type: number, nullable: true, description: "100 × (PV − export) / PV", example: 67.1}
+        pv_direct_use: {type: number, nullable: true, description: "Estimate: Σ (PV − export − charge from PV) per day; also contains the PV-side balance difference (e.g. conversion losses)", example: 190.7}
+        battery_charge_from_pv: {type: number, nullable: true, description: "Estimate: Σ min(charge, PV − export) per day", example: 80.2}
+        battery_charge_from_grid_min: {type: number, nullable: true, description: "charge − charge from PV: grid charging that must have happened (lower bound)", example: 1.9}
+        pv_split:
+          allOf: [{$ref: '#/components/schemas/ReportSplit'}]
+          nullable: true
+        consumption_sources:
+          allOf: [{$ref: '#/components/schemas/ReportSplit'}]
+          nullable: true
+        battery_ratio_pct: {type: number, nullable: true, description: "100 × discharge / charge, the plain quotient of the two battery counters (≥ 28 complete days). Not an efficiency: the counters are not calibrated against each other and real devices report values above 100", example: 88.79}
+        balance_difference: {type: number, nullable: true, description: "(PV + import + discharge) − (consumption + export + charge) in kWh: energy the counters do not account for (conversion losses, standby use, counter inaccuracy); ≥ 28 complete days", example: 9.9}
+        balance_difference_pct: {type: number, nullable: true, description: Balance difference as percent of the energy in, example: 1.78}
+        grid_charging_days:
+          type: array
+          items: {type: string, format: date}
+          example: ["2026-10-28"]
+
+    ReportFigure:
+      type: object
+      description: |
+        A key figure. `kind` energy = kWh, ratio = percent.
+        `change` is compared − base (kWh, or percentage points for ratios); `change_pct`
+        is the relative change of energy figures. `compared` equals `value` unless the
+        comparison is matched.
+      properties:
+        id:
+          type: string
+          enum: [pv, consumption, self_sufficiency, self_consumption, grid_import, grid_export, battery_charge, battery_discharge]
+        kind: {type: string, enum: [energy, ratio]}
+        better: {type: string, enum: [higher, lower, neutral], description: Which change is an improvement}
+        value: {type: number, nullable: true, description: The period over all its complete days, example: 403.7}
+        compared: {type: number, nullable: true, description: "The period's value the change is computed from (matched days only when the comparison is matched)", example: 403.7}
+        base: {type: number, nullable: true, description: "The comparison period's value the change is computed from", example: 371.0}
+        change: {type: number, nullable: true, example: 32.7}
+        change_pct: {type: number, nullable: true, example: 8.81}
+
+    ReportDayValue:
+      type: object
+      nullable: true
+      properties:
+        date: {type: string, format: date}
+        value: {type: number}
+
+    ReportResponse:
+      type: object
+      properties:
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        granularity: {type: string, enum: [day, month, year]}
+        summary: {$ref: '#/components/schemas/ReportSummary'}
+        figures:
+          type: array
+          items: {$ref: '#/components/schemas/ReportFigure'}
+        comparison:
+          type: object
+          nullable: true
+          properties:
+            mode: {type: string, enum: [last_year, previous]}
+            from: {type: string, format: date}
+            to: {type: string, format: date}
+            summary: {$ref: '#/components/schemas/ReportSummary'}
+            matched: {type: boolean, description: Either period has missing days or they differ in length; the figures compare matched days only}
+            matched_days: {type: integer, description: Number of compared day pairs (0 unless matched)}
+        patterns:
+          type: object
+          properties:
+            best_pv: {$ref: '#/components/schemas/ReportDayValue'}
+            lowest_pv: {$ref: '#/components/schemas/ReportDayValue'}
+            max_consumption: {$ref: '#/components/schemas/ReportDayValue'}
+            max_import: {$ref: '#/components/schemas/ReportDayValue'}
+            weekday_consumption_per_day: {type: number, nullable: true}
+            weekend_consumption_per_day: {type: number, nullable: true}
+            weekday_days: {type: integer}
+            weekend_days: {type: integer}
+            low_import_days: {type: integer, description: Days with less than 0.5 kWh grid import (the inverter draws a little from the grid even on fully self-supplied days)}
+        today_excluded: {type: boolean, description: "The requested range ended today. Today's counters are still running, so the report ends yesterday (`to`)"}
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              key: {type: string, description: "YYYY-MM-DD, YYYY-MM or YYYY", example: "2026-10"}
+              from: {type: string, format: date}
+              to: {type: string, format: date}
+              partial: {type: boolean, description: The range cuts this month or year}
+              summary: {$ref: '#/components/schemas/ReportSummary'}
 
     # Error Responses
     Error:

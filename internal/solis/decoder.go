@@ -121,8 +121,9 @@ func (d *Decoder) DecodeStatus(key string, raw uint16) any {
 }
 
 // activeBits names every set bit of raw; bits without a name use the unknown format.
+// No set bit yields an empty list, never nil: it encodes as [] ("no faults"), not null.
 func activeBits(raw uint16, names []string, unknown string) []string {
-	var active []string
+	active := []string{}
 	for i := range bitsPerRegister {
 		if raw&(1<<i) == 0 {
 			continue
