@@ -8,7 +8,7 @@ before:
     # Frontend and API docs are built once here, with the release version the binaries
     # get, before the Go builds embed them (go:embed); archives and images ship only the
     # binary.
-    - make assets VERSION={{ .Version }}
+    - make assets VERSION={{ .Version }}-{{ .ShortCommit }}
 
 builds:
   - id: solis-multi-arch
@@ -36,7 +36,7 @@ builds:
     ldflags:
       - >-
         -s -w
-        -X main.Version={{ .Version }}
+        -X main.Version={{ .Version }}-{{ .ShortCommit }}
         -X main.Commit={{ .ShortCommit }}
         -X main.BuildDate={{ .CommitDate }}
         -X main.GoVersion={{ envOrDefault "GOVERSION" "unknown" }}

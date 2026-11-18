@@ -262,8 +262,10 @@ LastBeat() time.Time              // atomic, updated by the component's own loop
 
 ### Version
 
-One version for binary, UI and docs: ldflags (`Version`, `Commit`, `BuildDate`,
-`GoVersion`) → `buildinfo.Info` → `solis version`, startup log and `GET /api/version`;
+One version for binary, UI and docs, `<tag without v>-<short commit>` (`3.0.1-43a1283`;
+make and goreleaser alike, `dev` without git or tag): ldflags (`Version`, `Commit`,
+`BuildDate`, `GoVersion`) → `buildinfo.Info` → `solis version`, startup log and
+`GET /api/version`;
 the frontend and Swagger UI get `VITE_APP_VERSION` from the same source (make,
 goreleaser, Dockerfile). No `version.json`. The frontend polls `/api/version`; a different version shows the update
 banner. `dev` on either side never reports an update.

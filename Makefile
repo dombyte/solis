@@ -1,8 +1,10 @@
 BINARY_NAME := solis
 
-# Get version info
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
+# Get version info: <latest tag without "v">-<short commit> (same format as goreleaser),
+# "dev" outside a git checkout or without a tag.
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+TAG := $(patsubst v%,%,$(shell git describe --tags --abbrev=0 2>/dev/null))
+VERSION := $(if $(and $(TAG),$(filter-out unknown,$(COMMIT))),$(TAG)-$(COMMIT),dev)
 DATE := $(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 GOVERSION := $(shell go version | awk '{print $$3}')
 
@@ -11,7 +13,8 @@ LDFLAGS := -s -w
 BUILD_FLAGS := -ldflags "-X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildDate=$(DATE) -X main.GoVersion=$(GOVERSION) $(LDFLAGS)"
 
 # The web assets are built with the same version (VITE_APP_VERSION) as the binary; the
-# frontend compares it with GET /api/version. goreleaser passes VERSION=<release version>.
+# frontend compares it with GET /api/version. goreleaser passes
+# VERSION=<release version>-<short commit>.
 
 # Embeds whatever frontend/dist and docs/dist hold: run `make assets` first (or `make all`).
 .PHONY: build
