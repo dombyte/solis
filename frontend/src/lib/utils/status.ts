@@ -1,72 +1,62 @@
 import type { SolisStatusDecoded, RegisterMetadata, RegisterValue } from '../../types';
 
-// Check if a status should show an alert (non-standard status).
-// Used by the flow diagram's inverter node.
-export function isAlertStatus(register: RegisterMetadata | undefined, value: RegisterValue | undefined): boolean {
-  if (!register || !value) return false;
+/**
+ * How a status register reads:
+ * - ok: producing / no fault bit set
+ * - notice: a normal state that is not producing (waiting at night, standby, limited
+ *   operation): amber in the diagram, never a badge or a notification
+ * - fault: a fault code or fault bit: red, counted in the nav badge, banner and
+ *   notifications
+ * - unknown: no value
+ */
+export type StatusLevel = 'ok' | 'notice' | 'fault' | 'unknown';
 
-  const numericValue = typeof value.value === 'number' ? value.value : undefined;
+// solis_status codes below 0x1000 are operating states (internal/solis/status_tables.go);
+// anything else, including an unknown code, is a fault.
+const SOLIS_STATES = new Set([
+  'waiting', 'openrun', 'softrun', 'generating', 'standby', 'standbysynch', 'gridtoload', 'normal',
+]);
+const SOLIS_PRODUCING = new Set(['generating', 'normal']);
 
-  // Numeric values in status groups - never alert
-  if (numericValue !== undefined && register.format) {
-    return false;
-  }
+// operating_status bits that are normal states; any other set bit (fault/warning bits,
+// unknown bits) is a fault.
+const OPERATING_NORMAL = 'normal operation';
+const OPERATING_NOTICE = new Set([
+  'initializing', 'controlled turn-off', 'stand-by',
+  'limited operation (temp/freq)', 'limited operation (external)',
+]);
 
-  // If it has statusDecoded, check the specific status
-  if (value.statusDecoded !== undefined && value.statusDecoded !== null) {
-    if (Array.isArray(value.statusDecoded)) {
-      // For arrays, check if this is a status register that should alert on non-empty
-      if (register.id === 'operating_status') {
-        // For operating status, check if any element is NOT "Normal operation"
-        const hasOnlyNormal = value.statusDecoded.every((s: string) => s.toLowerCase().trim() === 'normal operation');
-        return !hasOnlyNormal;
-      }
-      // For fault status registers, alert if array is not empty OR if it contains non-zero/fault items
-      // Check if all items are "0" or "No faults" or "Normal operation" - if so, don't alert
-      const hasRealFaults = value.statusDecoded.some((s: string) => {
-        const item = String(s).toLowerCase().trim();
-        return item !== '0' && item !== 'no faults' && item !== '' && item !== 'normal operation' && !item.includes('normal');
-      });
-      return hasRealFaults;
-    } else if (typeof value.statusDecoded === 'object') {
-      const statusObj = value.statusDecoded as SolisStatusDecoded;
-      const statusName = (statusObj.name?.toLowerCase() || '').trim();
+function norm(s: unknown): string {
+  return String(s).toLowerCase().trim();
+}
 
-      // Solis Status - alert if NOT "Generating"
-      if (register.id === 'solis_status') {
-        return statusName !== 'generating';
-      }
+function solisLevel(decoded: unknown): StatusLevel {
+  const name = norm((decoded as Partial<SolisStatusDecoded> | null)?.name ?? '');
+  if (name === '') return 'unknown';
+  if (SOLIS_PRODUCING.has(name)) return 'ok';
+  return SOLIS_STATES.has(name) ? 'notice' : 'fault';
+}
 
-      // Operating Status - alert if NOT "Normal operation"
-      if (register.id === 'operating_status') {
-        return statusName !== 'normal operation';
-      }
+function operatingLevel(bits: string[]): StatusLevel {
+  const set = bits.map(norm).filter(b => b !== OPERATING_NORMAL);
+  if (set.some(b => !OPERATING_NOTICE.has(b))) return 'fault';
+  return set.length > 0 ? 'notice' : 'ok';
+}
 
-      // Grid Fault Status - alert if it contains fault/error
-      if (register.id === 'grid_fault_1') {
-        return statusName !== '' && statusName !== '0' && statusName !== 'no faults';
-      }
+/** The level of a status register's decoded value (see StatusLevel). */
+function statusLevelOf(id: string, decoded: unknown): StatusLevel {
+  if (decoded === null || decoded === undefined) return 'unknown';
+  if (id === 'solis_status') return solisLevel(decoded);
+  if (!Array.isArray(decoded)) return 'unknown';
+  if (id === 'operating_status') return operatingLevel(decoded);
+  // Fault bitmasks: any set bit is a fault.
+  return decoded.length > 0 ? 'fault' : 'ok';
+}
 
-      // Any other status with alert keywords
-      const alertKeywords = ['fault', 'error', 'alarm', 'warning', 'fail', 'off', 'overvoltage', 'undervoltage'];
-      return alertKeywords.some(kw => statusName.includes(kw));
-    }
-  }
-
-  // For numeric values without decoded status (like fault registers showing 0)
-  if (numericValue !== undefined && !value.statusDecoded) {
-    // If the value is 0, it means no fault - don't alert
-    if (numericValue === 0) {
-      return false;
-    }
-    // If it's a fault register and the value is non-zero, alert
-    if (register.category === 'status' && numericValue !== 0) {
-      return true;
-    }
-  }
-
-  // Default: don't alert
-  return false;
+/** The level of a register's current value. */
+export function statusLevel(register: RegisterMetadata | undefined, value: RegisterValue | undefined): StatusLevel {
+  if (!register || !value) return 'unknown';
+  return statusLevelOf(register.id, value.statusDecoded);
 }
 
 /**

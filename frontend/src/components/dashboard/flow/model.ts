@@ -1,5 +1,5 @@
 import type { RegisterMetadata, RegisterValue } from '../../../types';
-import { isAlertStatus } from '../../../lib/utils/status';
+import { statusLevel, type StatusLevel } from '../../../lib/utils/status';
 import { formatPower } from '../../../lib/utils/format';
 
 // Flow register keys that are used for the power flow diagram
@@ -88,7 +88,7 @@ export interface FlowViewModel {
   inverter: {
     status: string;
     operatingStatus: string;
-    alert: boolean;
+    level: StatusLevel;    // worse of solis_status and operating_status
     present: boolean;      // The inverter status is known (live data)
   };
   allPresent: boolean;    // All nodes have data
@@ -228,12 +228,12 @@ export function buildFlowViewModel(
     grid_power: getValue('grid_power'),
   };
 
-  // Status values + alert detection (shared isAlertStatus rule).
+  // Status values + level (shared statusLevel rule): the worse of the two registers.
   const solis = getRegisterAndValue('solis_status');
   const operating = getRegisterAndValue('operating_status');
   const solisStatus = getStatusName(solis.value);
   const operatingStatus = getStatusName(operating.value);
-  const alert = isAlertStatus(solis.register, solis.value) || isAlertStatus(operating.register, operating.value);
+  const level = worseLevel(statusLevel(solis.register, solis.value), statusLevel(operating.register, operating.value));
 
   // Check if all nodes have data
   const allPresent = 
@@ -363,7 +363,7 @@ export function buildFlowViewModel(
     inverter: {
       status: solisStatus ?? 'No data',
       operatingStatus: operatingStatus ?? '–',
-      alert,
+      level,
       present: solisStatus !== undefined,
     },
     allPresent,
@@ -371,10 +371,20 @@ export function buildFlowViewModel(
   };
 }
 
-/** Color of the inverter status: gray without data, red on an alert, green otherwise. */
-export function inverterStatusColor(present: boolean, alert: boolean): string {
-  if (!present) return 'var(--color-muted-foreground)';
-  return alert ? 'var(--color-flow-status-error)' : 'var(--color-flow-status-ok)';
+const LEVEL_RANK: Record<StatusLevel, number> = { unknown: 0, ok: 1, notice: 2, fault: 3 };
+
+function worseLevel(a: StatusLevel, b: StatusLevel): StatusLevel {
+  return LEVEL_RANK[a] >= LEVEL_RANK[b] ? a : b;
+}
+
+/**
+ * Color of the inverter status: gray without data, red on a fault, amber when not
+ * producing (waiting at night, standby), green otherwise.
+ */
+export function inverterStatusColor(present: boolean, level: StatusLevel): string {
+  if (!present || level === 'unknown') return 'var(--color-muted-foreground)';
+  if (level === 'fault') return 'var(--color-flow-status-error)';
+  return level === 'notice' ? 'var(--color-flow-status-warning)' : 'var(--color-flow-status-ok)';
 }
 
 /**

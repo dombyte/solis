@@ -157,7 +157,7 @@ export function FlowDesktop({ viewModel }: FlowDesktopProps): React.ReactElement
         height={INV.h}
         status={inverter.status}
         operatingStatus={inverter.operatingStatus}
-        alert={inverter.alert}
+        level={inverter.level}
         present={inverter.present}
         dim={!inverter.present && !stale}
       />

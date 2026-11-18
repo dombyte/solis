@@ -1,6 +1,7 @@
 import React from 'react';
 import { Zap } from 'lucide-react';
 import { inverterStatusColor } from './model';
+import type { StatusLevel } from '../../../lib/utils/status';
 
 /**
  * Inverter hub of the desktop flow diagram: box + icon badge, title, a status pill for
@@ -14,7 +15,7 @@ interface InverterStatusProps {
   height: number;
   status: string;
   operatingStatus: string;
-  alert: boolean;
+  level: StatusLevel;
   /** The status is known; without it the pill is neutral gray, never "ok" green. */
   present: boolean;
   /** Dim the node (its data is missing and the diagram as a whole is not dimmed). */
@@ -41,12 +42,13 @@ export function InverterStatus({
   height,
   status,
   operatingStatus,
-  alert,
+  level,
   present,
   dim,
 }: InverterStatusProps): React.ReactElement {
-  const statusColor = inverterStatusColor(present, alert);
-  const iconColor = present && !alert ? 'var(--color-primary)' : statusColor;
+  const statusColor = inverterStatusColor(present, level);
+  const fault = present && level === 'fault';
+  const iconColor = present && level === 'ok' ? 'var(--color-primary)' : statusColor;
 
   return (
     <g
@@ -61,8 +63,8 @@ export function InverterStatus({
         height={height}
         rx={BOX_RX}
         fill="var(--color-flow-inv-bg)"
-        stroke={present && alert ? statusColor : 'var(--color-border)'}
-        strokeWidth={present && alert ? 2.5 : 2}
+        stroke={fault ? statusColor : 'var(--color-border)'}
+        strokeWidth={fault ? 2.5 : 2}
       />
       <foreignObject x={x} y={y} width={width} height={height}>
         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center">

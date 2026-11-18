@@ -99,7 +99,7 @@ export function FlowMobile({ viewModel }: FlowMobileProps): React.ReactElement {
   ];
 
   // Inverter header
-  const statusColor = inverterStatusColor(inverter.present, inverter.alert);
+  const statusColor = inverterStatusColor(inverter.present, inverter.level);
 
   return (
     <div 
