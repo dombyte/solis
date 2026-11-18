@@ -3,6 +3,7 @@ import { parseISO, format } from 'date-fns';
 import { AlertTriangle, ArrowDown, ArrowRight, CheckCircle2, Clock, Download, FileText, Loader2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { CompareSelect } from '../components/reports/CompareSelect';
+import { GranularitySelect } from '../components/reports/GranularitySelect';
 import { KeyFigures } from '../components/reports/KeyFigures';
 import { PeriodPicker } from '../components/reports/PeriodPicker';
 import { ReportChart } from '../components/reports/ReportChart';
@@ -16,8 +17,6 @@ import {
 import { formatNumber } from '../lib/utils/reportFormat';
 import { cn } from '../lib/utils';
 import { SURFACE } from '../components/ui/surface';
-
-const GRANULARITY_LABEL: Record<Granularity, string> = { day: 'Per day', month: 'Per month', year: 'Per year' };
 
 export function Reports(): React.ReactElement {
   const today = useToday();
@@ -94,16 +93,12 @@ export function Reports(): React.ReactElement {
           <div className="flex flex-col gap-2">
             <label htmlFor="csv-granularity" className="text-sm font-semibold">CSV rows</label>
             <div className="flex flex-wrap gap-2">
-              <select
+              <GranularitySelect
                 id="csv-granularity"
                 value={csvGranularity}
-                onChange={e => setCsvGranularity(e.target.value as Granularity)}
-                className="flex-1 min-w-32 h-11 rounded-lg border border-border bg-control hover:bg-control-hover px-3 text-sm"
-              >
-                {(['day', 'month', 'year'] as Granularity[]).map(g => (
-                  <option key={g} value={g}>{GRANULARITY_LABEL[g]}</option>
-                ))}
-              </select>
+                onChange={setCsvGranularity}
+                className="flex-1 min-w-32"
+              />
               <Button type="button" variant="outline" className="flex-1 min-w-32 h-11 gap-2" disabled={!query || download.busy !== null} onClick={() => runDownload('csv')}>
                 {download.busy === 'csv' ? <Loader2 className="animate-spin" /> : <Download />}
                 Download CSV
