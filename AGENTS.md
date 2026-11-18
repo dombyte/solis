@@ -442,6 +442,25 @@ solis.Register{
   history via REST, today from the live counters; days without data stay empty; desktop
   layout only). Phones (same rule as the flow diagram) swipe one `EnergyCard` per period
   instead of the table.
+- Status levels (`lib/utils/status.ts`, `statusLevel`): `ok`, `notice` (a normal state
+  that is not producing: waiting at night, standby, limited operation; amber) and `fault`
+  (solis_status codes ≥ 0x1000, any fault bit, fault/warning bits of operating_status;
+  red). Only faults count for the Status nav badge, the dashboard banner and
+  notifications, so a normal night never alerts.
+- Fault notifications are opt-in per browser (Status page) and shown only while the app
+  is open but not in front; no Web Push (it needs a server-side push service, and a LAN
+  app over HTTP gets no Notification API at all). Faults present at connect are not
+  notified, and a reconnect never repeats one.
+- Status page: one list row per status register (data.ts order) with its current state
+  and one bar per day: the worst level of the day (green ok, orange notice, red fault,
+  gray no data) and the fault-free share ("100 %" only without any fault). A window of
+  30 or 90 days on desktop (per browser, `solis.status.range`), always 30 in the compact
+  layout; arrows page it back and forth, each window loaded with one request per register
+  (`before` gives the state at its start, the live value extends today). The row opens
+  the status log (fixed 24-hour strip of a day, issues at least 3 px wide; the change
+  list scrolls below it, grouped by day with durations; a week first, 30 days per "Load
+  older"); the row's "Log" button opens it too, with a mouse a bar opens it on that day,
+  on touch the bars are display only. The pager spans the card in the compact layout.
   Pages have no maximum width: content starts at the sidebar.
 - Numbers only via `lib/utils/format.ts` (fixed `en-US` locale like the PDF: "4,512.3";
   power below 1 kW in whole watts), dates via date-fns in the PDF style ("1 – 18 Nov 2026",

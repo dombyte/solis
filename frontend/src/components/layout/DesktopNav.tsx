@@ -5,6 +5,8 @@ import { ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { NAV_ITEMS, isNavActive } from './nav';
 import { Button } from '../ui/button';
 import { ThemeToggle } from './ThemeToggle';
+import { FaultBadge } from './FaultBadge';
+import { useStatusFaults } from '../../lib/hooks/useStatusFaults';
 
 // Per-browser convenience; storage can throw (private mode), then it is just not kept.
 const COLLAPSED_KEY = 'solis.sidebar.collapsed';
@@ -34,6 +36,7 @@ export function DesktopNav() {
   useEffect(() => saveCollapsed(isCollapsed), [isCollapsed]);
   const toggleCollapsed = useCallback(() => setIsCollapsed(c => !c), []);
 
+  const faultCount = useStatusFaults().faults.length;
 
   const isActive = (path: string) => isNavActive(location.pathname, path);
 
@@ -78,10 +81,16 @@ export function DesktopNav() {
                     aria-current={isActive(item.path) ? 'page' : undefined}
                     className="flex items-center justify-center w-full overflow-hidden"
                   >
-                    <item.icon className="size-5 shrink-0" aria-hidden="true" />
+                    <span className="relative shrink-0">
+                      <item.icon className="size-5" aria-hidden="true" />
+                      {isCollapsed && item.path === '/status' && (
+                        <FaultBadge count={faultCount} dot className="-top-1 -right-1" />
+                      )}
+                    </span>
                     {!isCollapsed && (
                       <span className="text-sm ml-2 whitespace-nowrap">{item.label}</span>
                     )}
+                    {!isCollapsed && item.path === '/status' && <FaultBadge count={faultCount} />}
                   </Link>
                 </Button>
               ))}

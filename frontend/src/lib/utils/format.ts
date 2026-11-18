@@ -38,3 +38,32 @@ export function formatPower(watts: number): string {
   const m = formatMeasurement(watts, 'W');
   return `${m.value} ${m.unit}`;
 }
+
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/** A span of time, coarse enough to read at a glance ("< 1 min", "12 min", "4 h 5 min", "2 d 3 h"). */
+export function formatDuration(ms: number): string {
+  if (ms < MINUTE) return '< 1 min';
+  if (ms < HOUR) return `${Math.floor(ms / MINUTE)} min`;
+  if (ms < DAY) {
+    const h = Math.floor(ms / HOUR);
+    const m = Math.floor((ms % HOUR) / MINUTE);
+    return m > 0 ? `${h} h ${m} min` : `${h} h`;
+  }
+  const d = Math.floor(ms / DAY);
+  const h = Math.floor((ms % DAY) / HOUR);
+  return h > 0 ? `${d} d ${h} h` : `${d} d`;
+}
+
+/** How long ago `then` was, relative to `now` ("just now", "12 s ago", "5 min ago", "3 h ago"); null after a day. */
+export function formatAgo(then: Date, now: Date): string | null {
+  const ms = Math.max(0, now.getTime() - then.getTime());
+  if (ms < 5 * SECOND) return 'just now';
+  if (ms < MINUTE) return `${Math.floor(ms / SECOND)} s ago`;
+  if (ms < HOUR) return `${Math.floor(ms / MINUTE)} min ago`;
+  if (ms < DAY) return `${Math.floor(ms / HOUR)} h ago`;
+  return null;
+}

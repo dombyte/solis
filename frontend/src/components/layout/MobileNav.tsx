@@ -1,9 +1,12 @@
 import { Link, useLocation } from 'react-router-dom';
 import { NAV_ITEMS, isNavActive } from './nav';
 import { Button } from '../ui/button';
+import { FaultBadge } from './FaultBadge';
+import { useStatusFaults } from '../../lib/hooks/useStatusFaults';
 
 export function MobileNav() {
   const location = useLocation();
+  const faultCount = useStatusFaults().faults.length;
 
   const isActive = (path: string) => isNavActive(location.pathname, path);
 
@@ -28,7 +31,10 @@ export function MobileNav() {
                   {active && (
                     <div className="absolute -top-2 left-2 right-2 h-1 bg-primary rounded-full" />
                   )}
-                  <item.icon className="size-7" aria-hidden="true" />
+                  <span className="relative">
+                    <item.icon className="size-7" aria-hidden="true" />
+                    {item.path === '/status' && <FaultBadge count={faultCount} dot className="-top-0.5 -right-0.5" />}
+                  </span>
                   <span className="text-[11px] font-medium leading-none">{item.label}</span>
                 </Link>
               </Button>

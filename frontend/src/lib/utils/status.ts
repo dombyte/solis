@@ -44,7 +44,7 @@ function operatingLevel(bits: string[]): StatusLevel {
 }
 
 /** The level of a status register's decoded value (see StatusLevel). */
-function statusLevelOf(id: string, decoded: unknown): StatusLevel {
+export function statusLevelOf(id: string, decoded: unknown): StatusLevel {
   if (decoded === null || decoded === undefined) return 'unknown';
   if (id === 'solis_status') return solisLevel(decoded);
   if (!Array.isArray(decoded)) return 'unknown';

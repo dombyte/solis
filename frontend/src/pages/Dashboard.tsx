@@ -11,6 +11,7 @@ import { useCompactLayout, useMobile } from '../hooks/useMobile';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { SkeletonCard } from '../components/ui/skeleton';
 import { Page } from '../components/layout/Page';
+import { FaultBanner } from '../components/dashboard/FaultBanner';
 
 // Dashboard shows every register, so it subscribes to the full key set.
 const ALL_KEYS = apiDataObjects.map(obj => obj.key);
@@ -35,6 +36,7 @@ export function Dashboard(): React.ReactElement {
 
   return (
     <Page title="Dashboard">
+        <FaultBanner />
         {/* Flow diagram and energy table side by side once the space this grid gets
             (container query, not the viewport: the desktop sidebar takes 256px) fits the
             table's four value columns next to the diagram (60rem); stacked below that. The

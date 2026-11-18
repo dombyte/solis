@@ -37,7 +37,7 @@ export type SolisStatusDecoded = {
   description: string;
 };
 
-export type FaultStatusDecoded = string[];
+type FaultStatusDecoded = string[];
 
 // WebSocket subscription protocol (v3): subscribe/unsubscribe/ping -> snapshot/update/error/pong.
 // One key's value on the wire, rounded to 2 decimals server-side.
