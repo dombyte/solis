@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 
 	"github.com/dombyte/solis/internal/util"
@@ -255,8 +256,7 @@ func LoadConfig(configPath string, rules ...Rule) (*AppConfig, error) {
 	}
 
 	var cfg AppConfig
-	if err := v.Unmarshal(&cfg, viper.DecodeHook(mapstructure.ComposeDecodeHookFunc(
-		durationHook, mapstructure.StringToSliceHookFunc(",")))); err != nil {
+	if err := v.Unmarshal(&cfg, viper.DecodeHook(durationHook)); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 	cfg.Warnings = append(warnings, removedKeyWarnings(v)...)
@@ -283,8 +283,10 @@ func readConfigFile(v *viper.Viper) ([]string, error) {
 // removedKeyWarnings lists removed settings that are still present in the file or set
 // through their SOLIS_* environment variable.
 func removedKeyWarnings(v *viper.Viper) []string {
+	removed := removedKeys()
 	var warnings []string
-	for key, why := range removedKeys() {
+	for _, key := range slices.Sorted(maps.Keys(removed)) { // stable log order
+		why := removed[key]
 		if v.InConfig(key) || envSet(key) {
 			warnings = append(warnings, fmt.Sprintf("ignoring removed setting %q: %s", key, why))
 		}
@@ -332,7 +334,8 @@ func durationHook(_ reflect.Type, to reflect.Type, data any) (any, error) {
 }
 
 func (a *AppSettings) validate(errs *ValidationErrors) {
-	if !oneOf(strings.ToUpper(a.Debug), "DEBUG", "INFO", "WARN", "ERROR", "FATAL") {
+	if !slices.Contains([]string{"DEBUG", "INFO", "WARN", "ERROR", "FATAL"},
+		strings.ToUpper(a.Debug)) {
 		errs.addf("app.debug", "invalid debug level: %q (must be DEBUG, INFO, WARN, ERROR, "+
 			"or FATAL)", a.Debug)
 	}
@@ -388,11 +391,11 @@ func (s *StorageSettings) validate(errs *ValidationErrors) {
 			errs.addf(p.field, "must be positive, got %s", p.d)
 		}
 	}
-	if !oneOf(s.Synchronous, "OFF", "NORMAL", "FULL", "EXTRA") {
+	if !slices.Contains([]string{"OFF", "NORMAL", "FULL", "EXTRA"}, s.Synchronous) {
 		errs.addf("storage.synchronous", "invalid mode %q (must be OFF, NORMAL, FULL, or "+
 			"EXTRA)", s.Synchronous)
 	}
-	if !oneOf(s.TempStore, "DEFAULT", "FILE", "MEMORY") {
+	if !slices.Contains([]string{"DEFAULT", "FILE", "MEMORY"}, s.TempStore) {
 		errs.addf("storage.temp_store", "invalid value %q (must be DEFAULT, FILE, or MEMORY)",
 			s.TempStore)
 	}
@@ -406,13 +409,4 @@ func (s *StorageSettings) validateBackups(errs *ValidationErrors) {
 	if s.BackupInterval < 0 {
 		errs.addf("storage.backup_interval", "must be >= 0, got %s", s.BackupInterval)
 	}
-}
-
-func oneOf(v string, allowed ...string) bool {
-	for _, a := range allowed {
-		if v == a {
-			return true
-		}
-	}
-	return false
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/dombyte/solis/internal/solis"
 )
@@ -153,10 +154,7 @@ func (s *Storage) Seed(ctx context.Context, days []string) (Seed, error) {
 		return Seed{}, err
 	}
 	s.mu.Lock()
-	closed := make(map[string]string, len(s.meta.closedDaily))
-	for k, v := range s.meta.closedDaily {
-		closed[k] = v
-	}
+	closed := maps.Clone(s.meta.closedDaily)
 	s.mu.Unlock()
 	return Seed{Daily: daily, Status: status, Closed: closed}, nil
 }

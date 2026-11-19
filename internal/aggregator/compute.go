@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/dombyte/solis/internal/aggregation"
@@ -265,9 +266,7 @@ func (a *Aggregator) collect(rs *runState, j aggregation.Job, current string,
 		rs.write.Freezes = append(rs.write.Freezes, storage.Freeze{Level: j.Level, Period: j.Key})
 	}
 	if j.Key == current {
-		for k, v := range vals {
-			rs.current[k] = v
-		}
+		maps.Copy(rs.current, vals)
 	}
 }
 

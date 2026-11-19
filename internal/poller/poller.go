@@ -7,6 +7,7 @@ package poller
 import (
 	"context"
 	"errors"
+	"maps"
 	"sync"
 	"time"
 
@@ -227,11 +228,7 @@ func (p *Poller) pollCycle(ctx context.Context, start time.Time) {
 // valid without the inverter (the stored day rows are the same values); live power and
 // status keys are removed, so subscribers see them as missing instead of frozen.
 func (p *Poller) dropLive(now time.Time) {
-	keep := make(map[string]*solis.Value, len(p.lastDaily))
-	for k, v := range p.lastDaily {
-		keep[k] = v
-	}
-	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, keep, now)
+	p.d.Cache.ReplaceDomain(eventbus.DomainPoller, maps.Clone(p.lastDaily), now)
 	p.d.Log.Warn().Int("failed_polls", p.failures).
 		Msg("live values dropped from the cache: no successful poll")
 }
@@ -295,9 +292,7 @@ func (p *Poller) seed(ctx context.Context, now time.Time) error {
 	for k, d := range missed { // days closed while the app was down (review ACQ-M1)
 		p.pendingCloses[k] = maxDay(p.pendingCloses[k], d)
 	}
-	for k, v := range s.Status {
-		p.lastStatus[k] = v
-	}
+	maps.Copy(p.lastStatus, s.Status)
 	p.seedLastDaily(s.Daily, now)
 	p.seeded = true
 	return nil
