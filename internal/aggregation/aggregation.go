@@ -4,6 +4,7 @@
 package aggregation
 
 import (
+	"maps"
 	"sort"
 
 	"github.com/dombyte/solis/internal/solis"
@@ -61,9 +62,7 @@ func LevelValues(edges []solis.Edge, pairs []solis.NetPair, sums, offsets Values
 // Fold adds a closed year's per-total-key sums to the baseline and returns the new one.
 func Fold(baseline, add Values) Values {
 	out := make(Values, len(baseline)+len(add))
-	for k, v := range baseline {
-		out[k] = v
-	}
+	maps.Copy(out, baseline)
 	for k, v := range add {
 		out[k] += v
 	}
@@ -82,12 +81,10 @@ func AddOffsets(values, offsets Values) Values {
 }
 
 // Merge combines value maps; later maps win on duplicate keys.
-func Merge(maps ...Values) Values {
+func Merge(vs ...Values) Values {
 	out := make(Values)
-	for _, m := range maps {
-		for k, v := range m {
-			out[k] = v
-		}
+	for _, m := range vs {
+		maps.Copy(out, m)
 	}
 	return out
 }

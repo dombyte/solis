@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -359,12 +361,7 @@ func unionKeys(clients map[*Client]*clientState) []string {
 			set[k] = struct{}{}
 		}
 	}
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(set))
 }
 
 // send encodes and queues msg; a full buffer disconnects the client.

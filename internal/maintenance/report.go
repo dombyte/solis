@@ -3,8 +3,9 @@ package maintenance
 import (
 	"fmt"
 	"io"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 
 	"github.com/dombyte/solis/internal/aggregation"
 )
@@ -97,10 +98,5 @@ func (r Report) Write(w io.Writer) error {
 }
 
 func sortedKeys(v aggregation.Values) []string {
-	keys := make([]string, 0, len(v))
-	for k := range v {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
+	return slices.Sorted(maps.Keys(v))
 }

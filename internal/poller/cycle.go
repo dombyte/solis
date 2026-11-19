@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/dombyte/solis/internal/eventbus"
@@ -29,9 +30,7 @@ func (p *Poller) readAll(ctx context.Context, r Reader, at time.Time) (
 		p.Beat() // a slow but working cycle must not look stale to the supervisor
 		p.d.Log.Debug().Int("block", i+1).Uint16("addr", b.Start).Uint16("count", b.Count).
 			Msg("block read")
-		for k, v := range p.d.Decoder.DecodeBlock(b, raw, at) {
-			values[k] = v
-		}
+		maps.Copy(values, p.d.Decoder.DecodeBlock(b, raw, at))
 		if p.d.Settings.BlockInterval > 0 && i < len(blocks)-1 {
 			if err := p.sleep(pctx, p.d.Settings.BlockInterval); err != nil {
 				return nil, err

@@ -17,6 +17,7 @@ type SchemaTooNewError struct {
 	Version int
 }
 
+// Error describes the version found and how to recover.
 func (e *SchemaTooNewError) Error() string {
 	return fmt.Sprintf("%v: schema version %d, this version supports up to %d; "+
 		"run the newer release or restore a backup", ErrSchemaTooNew, e.Version,

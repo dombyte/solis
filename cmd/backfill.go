@@ -29,6 +29,11 @@ func runBackfill(args []string, configPath string, stdout, stderr io.Writer) int
 		}
 		return 1
 	}
+	if fs.NArg() > 0 { // `backfill 3` would otherwise silently run with --years 0
+		_, _ = fmt.Fprintf(stderr, "backfill: unexpected arguments %q\n", fs.Args())
+		fs.Usage()
+		return 1
+	}
 	opts := maintenance.Options{Years: *years, Force: *force}
 	if err := backfill(opts, configPath, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "backfill: %v\n", err)

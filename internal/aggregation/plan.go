@@ -139,12 +139,8 @@ func boundedJob(p period.Period, w Watermarks, l period.Level, key string) (Job,
 	if err != nil {
 		return Job{}, err
 	}
-	to := last
-	if p.Day < to {
-		to = p.Day
-	}
 	return Job{
-		Level: l, Key: key, From: first, To: to,
+		Level: l, Key: key, From: first, To: min(last, p.Day),
 		Freeze: w.ClosedThrough != "" && last <= w.ClosedThrough,
 	}, nil
 }

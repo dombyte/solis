@@ -105,8 +105,12 @@ func rewriteStatusTimestamp(ctx context.Context, tx *sql.Tx, id int64, ts string
 	if err != nil {
 		return fmt.Errorf("rewrite error_data %d: %w", id, err)
 	}
-	if n, err := res.RowsAffected(); err != nil || n > 0 {
-		return err
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rewrite error_data %d: rows affected: %w", id, err)
+	}
+	if n > 0 {
+		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM error_data WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("drop duplicate error_data %d: %w", id, err)

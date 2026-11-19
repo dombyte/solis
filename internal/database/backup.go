@@ -372,11 +372,13 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 	}
 
 	// Only this database's backups: another database (or a renamed one) sharing the
-	// backups directory must never be rotated away by this one.
+	// backups directory must never be rotated away by this one, not even one whose name
+	// starts with this one's ("solis.db.old.<stamp>.backup").
 	prefix := filepath.Base(dbPath) + "."
 	backups := make([]BackupInfo, 0)
 	for _, entry := range entries {
-		if !strings.HasPrefix(entry.Name(), prefix) {
+		rest, ok := strings.CutPrefix(entry.Name(), prefix)
+		if !ok || !isOwnBackupRest(rest) {
 			continue
 		}
 		if info, ok := backupEntry(backupsDir, entry); ok {
@@ -390,6 +392,26 @@ func ListBackups(dbPath string) ([]BackupInfo, error) {
 	})
 
 	return backups, nil
+}
+
+// isOwnBackupRest reports whether rest, a file name after "<db>.", is "<stamp>.backup" or
+// a v2 name with its marker, "online.<stamp>.backup" or "v<N>.<stamp>.backup".
+func isOwnBackupRest(rest string) bool {
+	const plainParts, markedParts = 2, 3 // stamp, backup / marker, stamp, backup
+	parts := strings.Split(rest, ".")
+	switch len(parts) {
+	case plainParts:
+		return true
+	case markedParts:
+		marker := parts[0]
+		if marker == "online" {
+			return true
+		}
+		n, ok := strings.CutPrefix(marker, "v")
+		_, err := strconv.Atoi(n)
+		return ok && err == nil
+	}
+	return false
 }
 
 // backupEntry returns the backup info for entry, or false when it is not a backup file
