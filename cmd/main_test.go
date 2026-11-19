@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -108,6 +109,10 @@ func TestBackfill_FlagsAndConfig(t *testing.T) {
 	var out, errOut bytes.Buffer
 	assert.Equal(t, 1, runBackfill([]string{"--years", "x"}, defaultConfigPath, &out, &errOut))
 	assert.Equal(t, 0, runBackfill([]string{"-h"}, defaultConfigPath, &out, &errOut), "help is not an error")
+	errOut.Reset()
+	assert.Equal(t, 1, runBackfill([]string{"3"}, defaultConfigPath, &out, &errOut),
+		"a stray argument is not silently ignored")
+	assert.Contains(t, errOut.String(), `unexpected arguments ["3"]`)
 	assert.Contains(t, errOut.String(), "-years")
 	assert.Contains(t, errOut.String(), "-force")
 
@@ -143,12 +148,12 @@ func TestBackfill_Success(t *testing.T) {
 
 func TestRunServer_ConfigErrorAndLockedDatabase(t *testing.T) {
 	inConfigDir(t, "app:\n  port: 0\n")
-	require.Error(t, runServer(context.Background(), defaultConfigPath), "invalid config")
+	require.Error(t, runServer(context.Background(), defaultConfigPath, io.Discard), "invalid config")
 
 	dbPath := inConfigDir(t, "app:\n  serve_only: true\nstorage:\n  path: ./data/solis.db\n")
 	require.NoError(t, os.MkdirAll(filepath.Dir(dbPath), 0o750))
 	job, err := maintenance.AcquireExclusive(dbPath)
 	require.NoError(t, err)
 	defer func() { _ = job.Release() }()
-	assert.ErrorIs(t, runServer(context.Background(), defaultConfigPath), maintenance.ErrLocked)
+	assert.ErrorIs(t, runServer(context.Background(), defaultConfigPath, io.Discard), maintenance.ErrLocked)
 }

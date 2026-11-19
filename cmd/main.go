@@ -71,7 +71,9 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 // runCommand runs the subcommand in args[0] (the server when args is empty).
 func runCommand(args []string, configPath string, stdout, stderr io.Writer) int {
 	if len(args) == 0 || args[0] == "serve" {
-		return serve(stderr, func(ctx context.Context) error { return runServer(ctx, configPath) })
+		return serve(stderr, func(ctx context.Context) error {
+			return runServer(ctx, configPath, stderr)
+		})
 	}
 	switch args[0] {
 	case "backfill":
@@ -93,7 +95,8 @@ func runCommand(args []string, configPath string, stdout, stderr io.Writer) int 
 func printUsage(w io.Writer) {
 	_, _ = fmt.Fprint(w, `usage:
   solis [-config PATH]                     run the server
-  solis [-config PATH] backfill --years N  recompute monthly+yearly values (app must be stopped)
+  solis [-config PATH] backfill --years N [--force]
+                                           recompute monthly+yearly values (app must be stopped)
   solis version                            print the build information
 
   -config PATH  configuration file (default config.yaml)
