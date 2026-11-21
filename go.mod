@@ -12,7 +12,7 @@ require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/rs/zerolog v1.35.1
-	github.com/signintech/gopdf v0.38.4
+	github.com/signintech/gopdf v0.38.6
 	github.com/simonvetter/modbus v1.6.4
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
